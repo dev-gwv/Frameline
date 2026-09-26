@@ -35,10 +35,6 @@ export const POSITIONS: { value: WatermarkSettings['position']; label: string; a
   { value: 'br', label: 'Bottom right', arrow: '↘' },
 ]
 
-/** Settings the API doesn't store yet (kept on this device). */
-export interface LocalExtras { offset: number; logoUrl?: string; logoName?: string }
-export const DEFAULT_EXTRAS: LocalExtras = { offset: 3 }
-
 /**
  * useState persisted to localStorage. Writes can fail (quota, private mode):
  * `persisted` is false then and the value lives for this session only.

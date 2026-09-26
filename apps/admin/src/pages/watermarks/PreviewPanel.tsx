@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, LayoutGrid, Upload, X } from 'lucide-react'
 import type { WatermarkSettings } from '@frameline/shared'
 import { Button, Card, cn, Modal, Tip, useToast } from '@frameline/ui'
-import { isEditableTarget, type LocalExtras } from './lib'
-import { PhotoFrame, SAMPLES, type Sample } from './samples'
+import { isEditableTarget } from './lib'
+import { aspectOf, PhotoFrame, SAMPLES, type Sample } from './samples'
 import { WatermarkOverlay } from './WatermarkOverlay'
 
 /** Large preview: sample carousel with arrows, dots and ←/→ keys, "Try my photo" and a Gallery grid. */
-export function PreviewPanel({ wm, extras }: { wm: WatermarkSettings; extras: LocalExtras }) {
+export function PreviewPanel({ wm }: { wm: WatermarkSettings }) {
   const toast = useToast()
   const [mine, setMine] = useState<Sample[]>([])
   const [index, setIndex] = useState(0)
@@ -74,7 +74,7 @@ export function PreviewPanel({ wm, extras }: { wm: WatermarkSettings; extras: Lo
         </Tip>
         <div className="flex h-[300px] min-w-0 flex-1 items-center justify-center sm:h-[440px]">
           <PhotoFrame key={current.id} sample={current} fit={current.orientation === 'portrait' ? 'height' : 'width'} className="animate-[fl-fade-in_180ms_ease-out]">
-            <WatermarkOverlay wm={wm} extras={extras} />
+            <WatermarkOverlay wm={wm} ratio={aspectOf(current)} />
             {current.url && (
               <Tip label="Remove my photo">
                 <button type="button" aria-label="Remove my photo" onClick={() => removeMine(current.id)} className="absolute left-2 top-2 grid size-7 place-items-center rounded-full bg-black/55 text-white hover:bg-black/75">
@@ -107,7 +107,7 @@ export function PreviewPanel({ wm, extras }: { wm: WatermarkSettings; extras: Lo
             <button key={p.id} type="button" onClick={() => { setIndex(k); setGalleryOpen(false) }} className="flex flex-col items-center gap-1.5 rounded-card p-1.5 text-left hover:bg-sunk">
               <div className="flex h-[170px] w-full items-center justify-center">
                 <PhotoFrame sample={p} fit={p.orientation === 'portrait' ? 'height' : 'width'}>
-                  <WatermarkOverlay wm={wm} extras={extras} />
+                  <WatermarkOverlay wm={wm} ratio={aspectOf(p)} />
                 </PhotoFrame>
               </div>
               <span className="w-full truncate text-[11.5px] font-semibold text-ink-2">{p.name}</span>

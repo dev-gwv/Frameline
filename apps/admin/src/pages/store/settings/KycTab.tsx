@@ -59,7 +59,7 @@ export function KycTab({ data, set, errors }: TabProps) {
     if (f.size > MAX) { setDocError((e) => ({ ...e, [id]: `${f.name} is ${(f.size / 1048576).toFixed(1)} MB. The limit is 10 MB; scan at a lower resolution.` })); return }
     setDocError((e) => ({ ...e, [id]: undefined }))
     set('kyc', { docs: { ...k.docs, [id]: { file: f.name, status: 'review' } } })
-    toast.success('Document uploaded', `${f.name} is in review. We usually check within 1 working day.`)
+    toast.success('Document added', `Save changes to send ${f.name} for review. We usually check within 1 working day.`)
   }
   const address = [k.street, k.city, k.state, k.postal].filter(Boolean).join(', ')
 

@@ -1,15 +1,17 @@
 import type { ReactNode } from 'react'
 import { Copy, Mail } from 'lucide-react'
-import { fmt, type Order } from '@frameline/shared'
+import { fmt, STORE_COMMISSION, type Order, type PaymentMethod } from '@frameline/shared'
 import { Button, Chip, Divider, Drawer, useToast } from '@frameline/ui'
-import { buyerEmail, copyText, money, ORDER_STATUS, orderBreakdown } from '../wallet/lib'
+import { copyText, money, ORDER_STATUS, orderBreakdown } from '../wallet/lib'
+
+const METHOD: Record<PaymentMethod, string> = { upi: 'UPI', card: 'Card', netbanking: 'Net banking', international: 'International (paid to you directly)' }
 
 /** Right-side details for one photo order (used by Store and Orders & wallet). */
 export function OrderDrawer({ order, onClose, extraActions }: { order: Order | null; onClose: () => void; extraActions?: ReactNode }) {
   const toast = useToast()
   const o = order
   const b = o ? orderBreakdown(o) : null
-  const email = o ? buyerEmail(o.buyer) : ''
+  const email = o?.buyerEmail ?? ''
   const st = o ? ORDER_STATUS[o.status] : null
   return (
     <Drawer
@@ -18,7 +20,7 @@ export function OrderDrawer({ order, onClose, extraActions }: { order: Order | n
       description={o ? `${fmt.fullDateTime(o.at)} · ${o.eventName}` : undefined}
       footer={o && <>
         {extraActions}
-        <Button icon={<Copy size={14} />} onClick={async () => { (await copyText(email)) ? toast.success('Buyer email copied', email) : toast.error('Couldn’t copy', 'Select the email and copy it by hand.') }}>Copy buyer email</Button>
+        <Button icon={<Copy size={14} />} disabled={!email} onClick={async () => { (await copyText(email)) ? toast.success('Buyer email copied', email) : toast.error('Couldn’t copy', 'Select the email and copy it by hand.') }}>Copy buyer email</Button>
         <Button variant="primary" onClick={onClose}>Done</Button>
       </>}
     >
@@ -28,14 +30,14 @@ export function OrderDrawer({ order, onClose, extraActions }: { order: Order | n
             <div>
               <div className="eyebrow">Buyer</div>
               <div className="font-bold">{o.buyer}</div>
-              <div className="flex items-center gap-1.5 text-[12px] text-ink-2"><Mail size={12} /> <span className="select-all">{email}</span></div>
+              <div className="flex items-center gap-1.5 text-[12px] text-ink-2"><Mail size={12} /> {email ? <span className="select-all">{email}</span> : <span className="text-ink-3">No email on this order</span>}</div>
             </div>
             <Chip tone={st.tone} dot>{st.label}</Chip>
           </div>
           <div>
             <div className="eyebrow mb-1">Items</div>
             <div className="flex justify-between"><span>{o.items}</span><span className="font-mono tnum">{money(o.paid, o.currency)}</span></div>
-            <div className="text-[12px] text-ink-3">From {o.eventName}</div>
+            <div className="text-[12px] text-ink-3">From {o.eventName}{o.method ? ` · paid by ${METHOD[o.method]}` : ''}</div>
           </div>
           <Divider />
           <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 tnum">
@@ -46,7 +48,7 @@ export function OrderDrawer({ order, onClose, extraActions }: { order: Order | n
               </>
             ) : (
               <>
-                <dt className="text-ink-2">Platform commission (10%)</dt><dd className="text-right font-mono">− {money(b.commission, o.currency, true)}</dd>
+                <dt className="text-ink-2">Platform commission ({Math.round(STORE_COMMISSION * 100)}%)</dt><dd className="text-right font-mono">− {money(b.commission, o.currency, true)}</dd>
                 <dt className="pl-3 text-[12px] text-ink-3">incl. platform GST (18%)</dt><dd className="text-right font-mono text-[12px] text-ink-3">{money(b.platformGst, o.currency, true)}</dd>
                 <dt className="text-ink-2">Seller GST inside the price (18%)</dt><dd className="text-right font-mono">{money(b.sellerGst, o.currency, true)}</dd>
               </>

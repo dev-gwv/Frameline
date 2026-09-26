@@ -1,21 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { useToast } from '@frameline/ui'
-
-/** State mirrored to localStorage (used where the API has no endpoint yet). */
-export function useLocalState<T>(key: string, initial: T) {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const raw = localStorage.getItem(key)
-      return raw ? (JSON.parse(raw) as T) : initial
-    } catch {
-      return initial
-    }
-  })
-  useEffect(() => {
-    try { localStorage.setItem(key, JSON.stringify(value)) } catch { /* storage unavailable */ }
-  }, [key, value])
-  return [value, setValue] as const
-}
 
 export async function copyText(text: string) {
   try {

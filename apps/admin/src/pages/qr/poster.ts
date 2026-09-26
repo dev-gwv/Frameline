@@ -3,12 +3,10 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 export const shortUrl = (slug: string) => `frameline.in/q/${slug}`
 
 /** A4 (595×842 pt) printable poster with the QR code in the middle. */
-export function buildPoster({ qrSvg, studio, name, eventName, slug, color, logo }: {
-  qrSvg: string; studio: string; name: string; eventName: string; slug: string; color: string; logo?: string
+/** `qrSvg` is the rendered QRCode (real encoded URL, logo included). */
+export function buildPoster({ qrSvg, studio, name, eventName, slug, color }: {
+  qrSvg: string; studio: string; name: string; eventName: string; slug: string; color: string
 }) {
-  const logoEl = logo
-    ? `<rect x="267.5" y="382" width="60" height="60" rx="10" fill="#FFFFFF"/><image x="273.5" y="388" width="48" height="48" href="${esc(logo)}" preserveAspectRatio="xMidYMid meet"/>`
-    : ''
   // Strip the root element's size so the nested viewport controls it.
   const inner = qrSvg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '')
   const vb = /viewBox="([^"]+)"/.exec(qrSvg)?.[1] ?? '0 0 140 140'
@@ -21,7 +19,6 @@ export function buildPoster({ qrSvg, studio, name, eventName, slug, color, logo 
   <text x="297.5" y="214" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="17" fill="#5E5548">Scan with your phone camera. Take a selfie to see the ones you're in.</text>
   <rect x="147.5" y="262" width="300" height="300" rx="16" fill="#FFFFFF" stroke="#EAE2D3"/>
   <svg x="167.5" y="282" width="260" height="260" viewBox="${vb}">${inner}</svg>
-  ${logoEl}
   <text x="297.5" y="620" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="15" fill="#958B7B">Now showing</text>
   <text x="297.5" y="652" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-size="26" font-weight="600" fill="#1B1712">${esc(eventName)}</text>
   <text x="297.5" y="720" text-anchor="middle" font-family="JetBrains Mono, Consolas, monospace" font-size="16" fill="#1B1712">${esc(shortUrl(slug))}</text>

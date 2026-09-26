@@ -43,10 +43,10 @@ export const useEnquiries = () => { const api = useApi(); return useQuery({ quer
  */
 export function useAction<TVars, TData = unknown>(
   fn: (vars: TVars) => Promise<TData>,
-  opts: { success?: string | ((data: TData, vars: TVars) => string); error?: string } & Omit<UseMutationOptions<TData, Error, TVars>, 'mutationFn'> = {},
+  opts: { success?: string | ((data: TData, vars: TVars) => string); error?: string; /** Set false when the screen shows the error inline instead. */ errorToast?: boolean } & Omit<UseMutationOptions<TData, Error, TVars>, 'mutationFn'> = {},
 ) {
   const toast = useToast()
-  const { success, error, onSuccess, onError, ...rest } = opts
+  const { success, error, errorToast = true, onSuccess, onError, ...rest } = opts
   return useMutation<TData, Error, TVars>({
     mutationFn: fn,
     onSuccess: (data, vars, ctx, m) => {
@@ -54,7 +54,7 @@ export function useAction<TVars, TData = unknown>(
       onSuccess?.(data, vars, ctx, m)
     },
     onError: (err, vars, ctx, m) => {
-      toast.error(error ?? 'That didn’t work', errorMessage(err))
+      if (errorToast) toast.error(error ?? 'That didn’t work', errorMessage(err))
       onError?.(err, vars, ctx, m)
     },
     ...rest,

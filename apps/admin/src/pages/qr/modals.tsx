@@ -5,6 +5,10 @@ import { Button, Field, Input, Modal, Select } from '@frameline/ui'
 
 export interface ScheduledSwitch { eventId: string; at: string }
 
+/** The QR's pending switch, if any ('' means cleared). */
+export const scheduleOf = (qr: SmartQR): ScheduledSwitch | undefined =>
+  qr.scheduledEventId && qr.scheduledAt ? { eventId: qr.scheduledEventId, at: qr.scheduledAt } : undefined
+
 /** "YYYY-MM-DDTHH:mm" in local time for <input type="datetime-local">. */
 export function toLocalInput(d: Date) {
   const p = (n: number) => String(n).padStart(2, '0')
@@ -46,13 +50,14 @@ export function NewQRModal({ open, onOpenChange, events, onCreate, busy }: {
   )
 }
 
-export function ScheduleModal({ qr, events, current, onOpenChange, onSave, onClear }: {
-  qr: SmartQR | null; events: PhotoEvent[]; current?: ScheduledSwitch
+export function ScheduleModal({ qr, events, busy, onOpenChange, onSave, onClear }: {
+  qr: SmartQR | null; events: PhotoEvent[]; busy?: boolean
   onOpenChange: (v: boolean) => void; onSave: (s: ScheduledSwitch) => void; onClear: () => void
 }) {
   const [eventId, setEventId] = useState('')
   const [at, setAt] = useState('')
   const [error, setError] = useState<string>()
+  const current = qr ? scheduleOf(qr) : undefined
   useEffect(() => {
     if (!qr) return
     const options = selectable(events).filter((e) => e.id !== qr.eventId)
@@ -60,7 +65,8 @@ export function ScheduleModal({ qr, events, current, onOpenChange, onSave, onCle
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1); tomorrow.setHours(9, 0, 0, 0)
     setAt(current ? toLocalInput(new Date(current.at)) : toLocalInput(tomorrow))
     setError(undefined)
-  }, [qr, current, events])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qr?.id, events])
 
   const save = () => {
     const when = new Date(at)
@@ -73,9 +79,9 @@ export function ScheduleModal({ qr, events, current, onOpenChange, onSave, onCle
   return (
     <Modal open={!!qr} onOpenChange={onOpenChange} title="Schedule switch" description={qr ? `“${qr.name}” will start opening the next event at the time you pick.` : undefined} width={460}
       footer={<>
-        {current && <Button variant="danger" className="mr-auto" onClick={onClear}>Cancel schedule</Button>}
+        {current && <Button variant="danger" className="mr-auto" disabled={busy} onClick={onClear}>Cancel schedule</Button>}
         <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
-        <Button variant="primary" icon={<CalendarClock size={14} />} onClick={save}>Schedule</Button>
+        <Button variant="primary" loading={busy} icon={<CalendarClock size={14} />} onClick={save}>Schedule</Button>
       </>}>
       <div className="flex flex-col gap-3.5 px-5 py-4 sm:px-6">
         <Field label="Next event" htmlFor="qr-next">

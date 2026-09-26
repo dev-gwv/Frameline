@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { ChevronDown, Copy, ExternalLink, MessageCircle, PlayCircle, Search, X } from 'lucide-react'
 import { Button, Card, cn, Input, Modal, PageHeader, useToast } from '@frameline/ui'
 import { useStudio } from '../../lib/queries'
-import { copyText } from '../wallet/lib'
-import { searchArticles, TOPICS } from './articles'
+import { articleForTopic, searchArticles, TOPICS } from './articles'
 import { TicketForm } from './TicketForm'
 import { Tickets } from './Tickets'
 
@@ -11,8 +11,13 @@ const WHATSAPP = '+91 6351 081 819'
 
 export default function Support() {
   const studio = useStudio()
-  const [query, setQuery] = useState('')
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const [params] = useSearchParams()
+  // ?topic=google-drive-import (or an article id) opens that answer straight away.
+  const linked = articleForTopic(params.get('topic'))
+  const [query, setQuery] = useState(linked?.tags[0] ?? '')
+  const [expanded, setExpanded] = useState<string | null>(linked?.id ?? null)
+  const linkedRef = useRef<HTMLLIElement>(null)
+  useEffect(() => { if (linked) linkedRef.current?.scrollIntoView({ block: 'center' }) }, [linked])
   const [waOpen, setWaOpen] = useState(false)
   const [openTicket, setOpenTicket] = useState<string | null>(null)
   const results = searchArticles(query)
@@ -49,7 +54,7 @@ export default function Support() {
               {results.map((a) => {
                 const open = expanded === a.id
                 return (
-                  <li key={a.id} className="border-t border-line">
+                  <li key={a.id} ref={a.id === linked?.id ? linkedRef : undefined} className="border-t border-line">
                     <button type="button" aria-expanded={open} onClick={() => setExpanded(open ? null : a.id)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-sunk">
                       {a.video ? <PlayCircle size={15} className="shrink-0 text-accent-text" /> : <span className="size-[15px] shrink-0" />}
                       <span className="flex-1 text-[13px] font-bold">{a.title}</span>
@@ -81,6 +86,10 @@ export default function Support() {
       <WhatsAppModal open={waOpen} onOpenChange={setWaOpen} />
     </div>
   )
+}
+
+async function copyText(text: string) {
+  try { await navigator.clipboard.writeText(text); return true } catch { return false }
 }
 
 function WhatsAppModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {

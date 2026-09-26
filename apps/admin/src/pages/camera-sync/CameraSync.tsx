@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Camera as CameraIcon, Plus, Trash2 } from 'lucide-react'
-import type { Camera } from '@frameline/shared'
-import { Button, Card, CardHeader, Chip, EmptyState, PageHeader, Skeleton, useToast } from '@frameline/ui'
-import { useCameras, useEvents } from '../../lib/queries'
+import type { Camera, ID } from '@frameline/shared'
+import { Button, Card, CardHeader, Chip, cn, ConfirmDialog, EmptyState, PageHeader, Skeleton } from '@frameline/ui'
+import { useApi } from '../../lib/api'
+import { useAction, useCameras, useCameraUploads, useEvents } from '../../lib/queries'
 import { QueryError } from '../system'
 import { AddCameraModal } from './AddCameraModal'
 import { CamerasTable } from './CamerasTable'
 import { CredentialsCard } from './Credentials'
 import { SetupGuide } from './SetupGuide'
-import { agoShort, clock, MAX_CAMERAS, nextFile, resultFor, seedLog, type LogLine } from './utils'
+import { agoShort, clock, MAX_CAMERAS, uploadResult } from './utils'
 
 const STEPS = [
   ['Add a camera', 'Pick the event, the album, and whether photos need your review first'],
@@ -16,71 +17,63 @@ const STEPS = [
   ['Shoot', 'Photos appear in about 10 seconds; guests get a “new photos” alert'],
 ] as const
 
-/** How often a "receiving" camera delivers a simulated new file. */
-const TICK_MS = 4_000
+/** While a camera is receiving, its list and upload history refresh this often. */
+const LIVE_MS = 5_000
+
+const TONE_CLASS = { ok: 'text-ok', warn: 'text-warn', bad: 'text-bad', muted: 'text-ink-3' } as const
+const TONE_MARK = { ok: '✓', warn: '◷', bad: '✕', muted: '↓' } as const
 
 export default function CameraSync() {
+  const api = useApi()
   const cams = useCameras()
   const events = useEvents().data ?? []
-  const toast = useToast()
   const [selectedId, setSelectedId] = useState<string>()
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState<Camera | null>(null)
+  const [removing, setRemoving] = useState<Camera | null>(null)
+  const [clearing, setClearing] = useState(false)
+  const [resetting, setResetting] = useState<Camera | null>(null)
   const [guide, setGuide] = useState(false)
   const [now, setNow] = useState(() => Date.now())
-
-  // Simulated live feed (the real one comes from the FTP upload hook).
-  const [logs, setLogs] = useState<Record<string, LogLine[]>>({})
-  const [extra, setExtra] = useState<Record<string, number>>({})
-  const [last, setLast] = useState<Record<string, LogLine | undefined>>({})
-  const seeded = useRef(new Set<string>())
+  // FTP passwords are returned once (create / reset); keep them for this visit only.
+  const [passwords, setPasswords] = useState<Record<ID, string>>({})
 
   const list = cams.data ?? []
   const selected = list.find((c) => c.id === selectedId) ?? list[0]
+  const anyReceiving = list.some((c) => c.status === 'receiving')
+  const uploads = useCameraUploads(selected?.id, selected?.status === 'receiving' ? LIVE_MS : false)
 
-  // Seed a believable history once per camera.
+  // Keep "today" counts and statuses fresh while any camera is sending.
+  const { refetch } = cams
   useEffect(() => {
-    const fresh = list.filter((c) => !seeded.current.has(c.id))
-    if (!fresh.length) return
-    const t = Date.now()
-    fresh.forEach((c) => seeded.current.add(c.id))
-    setLogs((l) => ({ ...l, ...Object.fromEntries(fresh.map((c) => [c.id, seedLog(c, t)])) }))
-    setLast((l) => ({ ...l, ...Object.fromEntries(fresh.map((c) => [c.id, seedLog(c, t)[0]])) }))
-  }, [list])
+    if (!anyReceiving) return
+    const i = setInterval(() => { void refetch() }, LIVE_MS)
+    return () => clearInterval(i)
+  }, [anyReceiving, refetch])
 
   // Clock for "8 s ago" labels.
   useEffect(() => { const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i) }, [])
 
-  // New files arriving on receiving cameras.
-  const receiving = list.filter((c) => c.status === 'receiving')
-  const receivingKey = receiving.map((c) => c.id).join(',')
-  const lastRef = useRef(last)
-  lastRef.current = last
-  useEffect(() => {
-    if (!receiving.length) return
-    const i = setInterval(() => {
-      const t = Date.now()
-      const lines: Record<string, LogLine> = {}
-      for (const c of receiving) {
-        const prev = lastRef.current[c.id]
-        lines[c.id] = { id: `${c.id}-${t}`, at: t, file: nextFile(prev?.file ?? c.lastFile), sizeMb: 10.2 + Math.random() * 1.8, result: resultFor(c.mode) }
-      }
-      setLogs((l) => ({ ...l, ...Object.fromEntries(Object.entries(lines).map(([id, line]) => [id, [line, ...(l[id] ?? [])].slice(0, 60)])) }))
-      setLast((l) => ({ ...l, ...lines }))
-      setExtra((x) => ({ ...x, ...Object.fromEntries(Object.keys(lines).map((id) => [id, (x[id] ?? 0) + 1])) }))
-    }, TICK_MS)
-    return () => clearInterval(i)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receivingKey])
+  const reset = useAction((c: Camera) => api.resetCameraPassword(c.id), {
+    success: 'New password made — enter it on the camera',
+    onSuccess: (c) => { if (c.password) setPasswords((p) => ({ ...p, [c.id]: c.password! })) },
+  })
+  const remove = useAction((c: Camera) => api.deleteCamera(c.id), {
+    success: (_d, c) => `${c.label} removed. Photos it sent stay in the album.`,
+    onSuccess: (_d, c) => { if (selectedId === c.id) setSelectedId(undefined) },
+  })
+  const clear = useAction((c: Camera) => api.clearCameraUploads(c.id), { success: 'History cleared. Photos stay in the album.' })
 
-  const today = (c: Camera) => c.today + (extra[c.id] ?? 0)
-  const idleFor = (c: Camera) => (c.status === 'idle' && last[c.id] ? now - last[c.id]!.at : undefined)
+  const history = uploads.data ?? []
+  const latest = history[0]
+  const idleFor = (c: Camera) => (c.status === 'idle' && c.id === selected?.id && latest ? now - Date.parse(latest.at) : undefined)
 
-  const lastLine = useMemo(() => {
-    if (!selected) return ''
-    const l = last[selected.id]
-    if (!l) return selected.status === 'offline' ? 'No photos yet — turn the camera’s FTP on to connect.' : 'Waiting for the first photo.'
-    return `Last photo ${agoShort(now - l.at)} · ${l.file} · ${l.sizeMb.toFixed(1)} MB.`
-  }, [selected, last, now])
+  let lastLine = ''
+  if (selected) {
+    if (latest) lastLine = `Last file ${agoShort(now - Date.parse(latest.at))} · ${latest.filename} · ${(latest.sizeBytes / 1_000_000).toFixed(1)} MB.`
+    else if (selected.lastFile) lastLine = `Last file: ${selected.lastFile}.`
+    else lastLine = selected.status === 'offline' ? 'No photos yet — turn the camera’s FTP on to connect.' : 'Waiting for the first photo.'
+  }
 
   const header = (
     <PageHeader
@@ -89,8 +82,6 @@ export default function CameraSync() {
       actions={<Button variant="primary" icon={<Plus size={14} />} onClick={() => setAdding(true)}>Add camera</Button>}
     />
   )
-
-  const history = selected ? logs[selected.id] ?? [] : []
 
   return (
     <div className="pb-10">
@@ -116,43 +107,65 @@ export default function CameraSync() {
                   action={<Button variant="primary" icon={<Plus size={14} />} onClick={() => setAdding(true)}>Add camera</Button>} />
               </Card>
             ) : (
-              <CamerasTable cameras={list} events={events} selectedId={selected?.id} onSelect={setSelectedId} today={today} idleFor={idleFor} />
+              <CamerasTable cameras={list} events={events} selectedId={selected?.id} onSelect={setSelectedId} idleFor={idleFor} />
             )}
 
           {selected && (
             <Card>
               <CardHeader title={`Upload history · ${selected.label}`} action={
-                <Button variant="ghost" size="sm" icon={<Trash2 size={12} />} disabled={!history.length}
-                  onClick={() => { setLogs((l) => ({ ...l, [selected.id]: [] })); toast.success('History cleared', 'Photos stay in the album.') }}>
+                <Button variant="ghost" size="sm" icon={<Trash2 size={12} />} disabled={!history.length} loading={clear.isPending} onClick={() => setClearing(true)}>
                   Clear history
                 </Button>
               } />
-              {history.length ? (
-                <div className="max-h-64 overflow-y-auto scrollbar-thin" aria-live="polite">
-                  <div className="flex min-w-0 flex-col gap-[3px] font-mono text-[11.5px] text-ink-2">
-                    {history.map((l, i) => (
-                      <span key={l.id} className={i === 0 && now - l.at < 1500 ? 'animate-[fl-fade-in_400ms_ease-out] text-ink' : undefined}>
-                        {clock(l.at)}{'  '}{l.file}{'  '}{l.sizeMb.toFixed(1)} MB{'  '}
-                        <span className={l.result === 'published' ? 'text-ok' : l.result === 'stored' ? 'text-ink-2' : 'text-warn'}>
-                          {l.result === 'published' ? '✓' : l.result === 'stored' ? '↓' : '◷'} {l.result}
-                        </span>
-                      </span>
-                    ))}
+              {uploads.error ? <QueryError error={uploads.error} retry={() => uploads.refetch()} />
+                : uploads.isLoading ? <Skeleton className="h-24" />
+                : history.length ? (
+                  <div className="max-h-64 overflow-y-auto scrollbar-thin" aria-live="polite">
+                    <div className="flex min-w-0 flex-col gap-[3px] font-mono text-[11.5px] text-ink-2">
+                      {history.map((u, i) => {
+                        const r = uploadResult(u, selected.mode)
+                        const fresh = i === 0 && now - Date.parse(u.at) < LIVE_MS + 1000
+                        return (
+                          <span key={u.id} className={cn('break-words', fresh && 'animate-[fl-fade-in_400ms_ease-out] text-ink')}>
+                            {clock(u.at)}{'  '}{u.filename}{'  '}{(u.sizeBytes / 1_000_000).toFixed(1)} MB{'  '}
+                            <span className={TONE_CLASS[r.tone]}>{TONE_MARK[r.tone]} {r.label}</span>
+                          </span>
+                        )
+                      })}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <p className="text-[12.5px] text-ink-3">
-                  {selected.status === 'receiving' ? 'History cleared. New photos will show here as they arrive.' : 'Nothing yet. Files show here as the camera sends them.'}
-                </p>
-              )}
+                ) : (
+                  <p className="text-[12.5px] text-ink-3">
+                    {selected.status === 'receiving' ? 'New photos will show here as they arrive.' : 'Nothing yet. Files show here as the camera sends them.'}
+                  </p>
+                )}
+              {selected.status === 'receiving' && <p className="mt-2 text-[11px] text-ink-3">Refreshes every {LIVE_MS / 1000} seconds while the camera is sending.</p>}
             </Card>
           )}
         </div>
 
-        {selected && <CredentialsCard cam={selected} lastLine={lastLine} onGuide={() => setGuide(true)} />}
+        {selected && (
+          <CredentialsCard cam={selected} password={passwords[selected.id]} lastLine={lastLine} onGuide={() => setGuide(true)}
+            onReset={() => setResetting(selected)} resetting={reset.isPending}
+            onEdit={() => setEditing(selected)} onDelete={() => setRemoving(selected)} />
+        )}
       </div>
 
-      <AddCameraModal open={adding} onOpenChange={setAdding} full={list.length >= MAX_CAMERAS} onCreated={(c) => setSelectedId(c.id)} />
+      <AddCameraModal open={adding} onOpenChange={setAdding} full={list.length >= MAX_CAMERAS}
+        onCreated={(c) => { setSelectedId(c.id); if (c.password) setPasswords((p) => ({ ...p, [c.id]: c.password! })) }} />
+      <AddCameraModal open={!!editing} camera={editing} onOpenChange={(v) => { if (!v) setEditing(null) }} />
+      <ConfirmDialog open={!!removing} onOpenChange={(v) => { if (!v) setRemoving(null) }}
+        title={`Remove ${removing?.label ?? 'camera'}?`} confirmLabel="Remove camera" danger
+        body="Its FTP login stops working straight away and its upload history is deleted. Photos it already sent stay in the album."
+        onConfirm={() => { if (removing) remove.mutate(removing); setRemoving(null) }} />
+      <ConfirmDialog open={clearing} onOpenChange={setClearing}
+        title="Clear upload history?" confirmLabel="Clear history" danger
+        body="The list of files is deleted. Photos stay in the album."
+        onConfirm={() => { if (selected) clear.mutate(selected); setClearing(false) }} />
+      <ConfirmDialog open={!!resetting} onOpenChange={(v) => { if (!v) setResetting(null) }}
+        title={`Make a new password for ${resetting?.label ?? 'this camera'}?`} confirmLabel="Make new password"
+        body="The old password stops working, so the camera disconnects until you enter the new one in its FTP settings."
+        onConfirm={() => { if (resetting) reset.mutate(resetting); setResetting(null) }} />
       <SetupGuide open={guide} onOpenChange={setGuide} />
     </div>
   )

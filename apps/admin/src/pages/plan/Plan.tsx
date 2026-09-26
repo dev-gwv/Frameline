@@ -1,26 +1,27 @@
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { fmt, PACKS, PLANS, type Plan as PlanT } from '@frameline/shared'
-import { Button, Card, Chip, cn, Meter, PageHeader, Segmented, Skeleton, useToast } from '@frameline/ui'
+import { fmt, PACKS, PLANS, planPrice, type Plan as PlanT } from '@frameline/shared'
+import { Button, Card, Chip, cn, Meter, PageHeader, Segmented, Skeleton } from '@frameline/ui'
 import { QueryError } from '../system'
 import { td } from '../wallet/lib'
 import { PackModal, UpgradeModal } from './Checkout'
 import { AddCreditsModal, CapacityModal, MultiplierModal, RedeemModal } from './PlanModals'
 import { RenewalCard } from './RenewalCard'
-import { perThousand, priceFor, usePlanState, type Period } from './usePlanState'
+import { perThousand, usePlanState, yearlySavingPct, type Period } from './usePlanState'
+
+const SAVING = yearlySavingPct()
 
 const FAQS: [string, string][] = [
   ['How do photo limits work?', 'Your plan gives a yearly pool of photo slots shared by all events. One upload uses one slot (two for original quality). Each event also has its own limit you can raise with an event pack.'],
   ['When do credits reset?', 'Wallet credits never expire and don’t reset. Photo slots reset when your plan renews each year (or quarter).'],
   ['What happens after an event expires?', 'Guests see a “gallery expired” page, but nothing is deleted for 7 days. During that grace period you or your client can renew and everything comes back instantly. After 7 days photos are removed.'],
-  ['Can I upgrade in the middle of my plan?', 'Yes. You pay only the difference for the days left, and your renewal date stays the same.'],
-  ['Yearly or quarterly?', 'Quarterly costs 25% more per quarter than a quarter of the yearly price. Yearly works out cheapest if you shoot all year round.'],
+  ['Can I change plans in the middle of my plan?', 'Yes. The unused part of your current plan is credited against the new plan’s price, and a new period starts the day you switch.'],
+  ['Yearly or quarterly?', `A quarter costs ${fmt.rupees(planPrice(PLANS[0], 'quarterly'))} on Starter, so four quarters cost ${fmt.rupees(planPrice(PLANS[0], 'quarterly') * 4)} against ${fmt.rupees(planPrice(PLANS[0], 'yearly'))} for a year. Yearly saves ${SAVING}% if you shoot all year round.`],
   ['Do guest uploads count?', 'Yes. Each event’s guest-upload limit is reserved from your pool so guests never hit a wall mid-event. Lower the limit in event settings to free slots.'],
 ]
 
 export default function Plan() {
-  const toast = useToast()
-  const { usage, plan, isLoading, isError, error, refetch, setLocal } = usePlanState()
+  const { usage, plan, isLoading, isError, error, refetch } = usePlanState()
   const [period, setPeriod] = useState<Period>('yearly')
   const [modal, setModal] = useState<'capacity' | 'credits' | 'redeem' | 'multiplier' | null>(null)
   const [upgrade, setUpgrade] = useState<PlanT | null>(null)
@@ -32,14 +33,14 @@ export default function Plan() {
   return (
     <div className="pb-10">
       <PageHeader title="Plan & usage" subtitle="Capacity, credits and renewals in one place."
-        actions={<Segmented value={period} onChange={setPeriod} options={[{ value: 'yearly', label: <>Yearly <span className="text-ok">· save 50%</span></> }, { value: 'quarterly', label: 'Quarterly' }]} />} />
+        actions={<Segmented value={period} onChange={setPeriod} options={[{ value: 'yearly', label: <>Yearly {SAVING > 0 && <span className="text-ok">· save {SAVING}%</span>}</> }, { value: 'quarterly', label: 'Quarterly' }]} />} />
       <div className="flex flex-col gap-3 px-4 sm:px-7">
         {isLoading || !usage ? <Skeleton className="h-[110px]" /> : (
           <Card className="grid items-center gap-5 sm:grid-cols-2 xl:grid-cols-[1.2fr_1.3fr_1fr_1fr]">
             <div>
               <div className="eyebrow">Current plan</div>
               <div className="font-display text-[23px] font-semibold">{plan.name} · {usage.period}</div>
-              <div className="text-[12.5px] text-ink-2">Valid till {fmt.date(usage.validTill)} · {fmt.rupees(priceFor(plan, usage.period))} + GST</div>
+              <div className="text-[12.5px] text-ink-2">Valid till {fmt.date(usage.validTill)} · {fmt.rupees(planPrice(plan, usage.period))} + GST</div>
             </div>
             <div>
               <div className="flex justify-between text-[12px]"><span>Upload capacity</span><span className="font-mono tnum">{fmt.count(usage.photosUsed)} / {fmt.count(usage.photosLimit)}</span></div>
@@ -66,11 +67,11 @@ export default function Plan() {
               <div key={p.id} className={cn('flex flex-col gap-1.5 rounded-card border bg-surface p-4', popular ? 'border-accent bg-gradient-to-b from-accent-soft to-surface to-45% border-[1.5px]' : 'border-line')}>
                 {popular ? <Chip tone="accent" className="self-start">Most chosen</Chip> : p.id === plan.id ? <Chip className="self-start">Your plan</Chip> : <span className="h-[19px]" />}
                 <div className="font-display text-[19px] font-semibold">{p.name}</div>
-                <div><b className="font-mono text-[22px] tnum">{fmt.rupees(priceFor(p, period))}</b><span className="text-[12px] text-ink-3"> /{period === 'yearly' ? 'year' : 'quarter'} + GST</span></div>
+                <div><b className="font-mono text-[22px] tnum">{fmt.rupees(planPrice(p, period))}</b><span className="text-[12px] text-ink-3"> /{period === 'yearly' ? 'year' : 'quarter'} + GST</span></div>
                 <div className="text-[12px] text-ink-2">{fmt.count(p.photos / 1000)}k photos · {p.seats} seats · {fmt.rupees(perThousand(p))} per 1,000</div>
-                {period === 'quarterly' && <div className="text-[11.5px] text-ink-3">{fmt.rupees(priceFor(p, 'quarterly') * 4)} a year billed quarterly</div>}
+                {period === 'quarterly' && <div className="text-[11.5px] text-ink-3">{fmt.rupees(planPrice(p, 'quarterly') * 4)} a year billed quarterly</div>}
                 {current ? <Button disabled className="mt-1 justify-center">Current</Button>
-                  : lower ? <Button className="mt-1 justify-center" onClick={() => toast.toast({ kind: 'info', title: `Switch to ${p.name} at renewal`, body: `Downgrades take effect on ${usage ? fmt.date(usage.validTill) : 'your renewal date'} so you keep what you paid for. Contact support to schedule it.` })}>Downgrade</Button>
+                  : lower ? <Button className="mt-1 justify-center" disabled={!usage} onClick={() => setUpgrade(p)}>Downgrade</Button>
                   : <Button variant={popular ? 'primary' : 'secondary'} className="mt-1 justify-center" disabled={!usage} onClick={() => setUpgrade(p)}>{p.id === plan.id ? `Switch to ${period}` : 'Upgrade'}</Button>}
               </div>
             )
@@ -98,7 +99,7 @@ export default function Plan() {
                 </tbody>
               </table>
             </div>
-            <p className="px-4 py-2.5 text-[12px] text-ink-3">Paid from wallet credits when you have enough, otherwise by UPI or card.</p>
+            <p className="px-4 py-2.5 text-[12px] text-ink-3">Paid from wallet credits; if you’re short, we top up the difference by UPI or card first.</p>
           </Card>
           {usage ? <RenewalCard multiplier={usage.renewalMultiplier} credits={usage.walletCredits} /> : <Skeleton className="h-48" />}
         </div>
@@ -117,12 +118,11 @@ export default function Plan() {
       </div>
 
       {usage && <>
-        <CapacityModal open={modal === 'capacity'} onOpenChange={(v) => !v && close()} usage={usage} />
+        <CapacityModal open={modal === 'capacity'} onOpenChange={(v) => !v && close()} />
         <AddCreditsModal open={modal === 'credits'} onOpenChange={(v) => !v && close()} />
         <RedeemModal open={modal === 'redeem'} onOpenChange={(v) => !v && close()} />
-        <MultiplierModal open={modal === 'multiplier'} onOpenChange={(v) => !v && close()} value={usage.renewalMultiplier} onSave={(m) => setLocal((l) => ({ ...l, multiplier: m }))} />
-        <UpgradeModal target={upgrade} period={period} usage={usage} current={plan} onClose={() => setUpgrade(null)}
-          onDone={(planId, per, validTill) => setLocal((l) => ({ ...l, planId, period: per, validTill }))} />
+        <MultiplierModal open={modal === 'multiplier'} onOpenChange={(v) => !v && close()} value={usage.renewalMultiplier} />
+        <UpgradeModal target={upgrade} period={period} usage={usage} onClose={() => setUpgrade(null)} />
         <PackModal pack={pack} credits={usage.walletCredits} onClose={() => setPack(null)} />
       </>}
     </div>

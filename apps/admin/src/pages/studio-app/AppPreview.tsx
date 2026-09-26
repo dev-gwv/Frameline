@@ -1,12 +1,11 @@
 import { Lock } from 'lucide-react'
-import { toneCss, type PhotoEvent, type Studio } from '@frameline/shared'
+import { toneCss, type PhotoEvent, type Studio, type StudioAppConfig } from '@frameline/shared'
 import { Chip } from '@frameline/ui'
-import { QUESTIONS, SERVICES, type AppConfig } from './sample'
 
 /** Live phone preview of the studio profile inside the guest app. */
-export function AppPreview({ studio, events, config }: { studio: Studio; events: PhotoEvent[]; config: AppConfig }) {
+export function AppPreview({ studio, events, config }: { studio: Studio; events: PhotoEvent[]; config: StudioAppConfig }) {
   const byId = new Map(events.map((e) => [e.id, e]))
-  const featured = config.featured.map((id) => byId.get(id)).filter((e): e is PhotoEvent => !!e)
+  const featured = config.featuredEventIds.map((id) => byId.get(id)).filter((e): e is PhotoEvent => !!e)
   const listed = events
     .filter((e) => e.status !== 'draft' && e.status !== 'archived')
     .filter((e) => config.showPrivate || e.settings.access === 'link')
@@ -38,10 +37,10 @@ export function AppPreview({ studio, events, config }: { studio: Studio; events:
               </div>
             </>}
 
-            {config.showServices && <>
+            {config.showServices && studio.services.length > 0 && <>
               <div className="eyebrow mb-1 mt-3">Services</div>
-              {SERVICES.map((s) => (
-                <div key={s.name} className="flex justify-between gap-2 border-t border-line py-1.5 text-[11px]">
+              {studio.services.map((s) => (
+                <div key={s.id} className="flex justify-between gap-2 border-t border-line py-1.5 text-[11px]">
                   <b className="truncate">{s.name}</b><span className="shrink-0 font-mono text-ink-2">{s.price}</span>
                 </div>
               ))}
@@ -59,10 +58,10 @@ export function AppPreview({ studio, events, config }: { studio: Studio; events:
               )
             })}
 
-            {config.showQuestions && <>
+            {config.showFaq && studio.faq.length > 0 && <>
               <div className="eyebrow mb-1 mt-3">Questions</div>
-              {QUESTIONS.slice(0, 3).map((q) => (
-                <div key={q.q} className="border-t border-line py-1.5 text-[11px]">
+              {studio.faq.slice(0, 3).map((q) => (
+                <div key={q.id} className="border-t border-line py-1.5 text-[11px]">
                   <b className="block">{q.q}</b>
                   <span className="text-ink-2">{q.a}</span>
                 </div>

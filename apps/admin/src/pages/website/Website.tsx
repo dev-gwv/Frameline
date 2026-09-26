@@ -13,6 +13,7 @@ import { Inspector } from './Inspector'
 import { DomainModal, CHECKS, type DomainSetup } from './DomainModal'
 import { Enquiries } from './Enquiries'
 import { PreviewModal } from './PreviewModal'
+import { StudioContentEditor, type ContentKind } from './StudioContentEditor'
 import { SITE_HOST, useLocalState } from './helpers'
 
 type Tab = 'builder' | 'enquiries'
@@ -145,7 +146,11 @@ function Builder({ website, studio, events, domain, onSections, onTemplate, onHe
     return () => ro.disconnect()
   }, [])
 
-  const select = (id: string) => { setFocus(id); window.setTimeout(() => setFocus((f) => (f === id ? null : f)), 1600) }
+  const [contentKind, setContentKind] = useState<ContentKind>('services')
+  const select = (id: string) => {
+    setFocus(id); window.setTimeout(() => setFocus((f) => (f === id ? null : f)), 1600)
+    if (id === 'services' || id === 'testimonials' || id === 'faq') setContentKind(id)
+  }
 
   return (
     <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)] xl:grid-cols-[200px_minmax(0,1fr)_260px]">
@@ -180,6 +185,9 @@ function Builder({ website, studio, events, domain, onSections, onTemplate, onHe
       <div className="lg:col-span-2 xl:col-span-1">
         <Inspector website={website} studio={studio} domain={domain} onTemplate={onTemplate} onBrand={onBrand} onHeadline={onHeadline} onOpenDomain={onOpenDomain} />
       </div>
+
+      <StudioContentEditor className="lg:col-span-2 xl:col-start-2 xl:col-end-4" studio={studio} kind={contentKind}
+        onKindChange={(k) => { setContentKind(k); select(k) }} />
     </div>
   )
 }

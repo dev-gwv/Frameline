@@ -2,34 +2,46 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Bell, Copy, Inbox, Mail, MessageSquareText, Phone, Search, StickyNote } from 'lucide-react'
 import { DEMO_NOW, fmt, type Enquiry, type Studio } from '@frameline/shared'
+import { useQueryClient } from '@tanstack/react-query'
 import { Avatar, Button, Card, Chip, EmptyState, Input, Segmented, Skeleton, Textarea, Tip, useToast } from '@frameline/ui'
-import { useEnquiries } from '../../lib/queries'
+import { useApi } from '../../lib/api'
+import { useAction, useEnquiries } from '../../lib/queries'
 import { QueryError } from '../system'
-import { useCopy, useLocalState } from './helpers'
+import { useCopy } from './helpers'
 
 type Filter = 'all' | 'new' | 'replied'
 
-/** Enquiries inbox. Notes and "replied" status are kept in this browser until the API stores them. */
+/** Enquiries inbox. Status (new / replied) and private notes are saved with api.updateEnquiry. */
 export function Enquiries({ studio }: { studio: Studio }) {
   const q = useEnquiries()
   const toast = useToast()
   const copy = useCopy(toast)
-  const [notes, setNotes] = useLocalState<Record<string, string>>('frameline.enquiry-notes', {})
-  const [replied, setReplied] = useLocalState<Record<string, boolean>>('frameline.enquiry-replied', {})
+  const api = useApi()
+  const qc = useQueryClient()
+  // Optimistic: the card updates at once and rolls back if saving fails.
+  const update = useAction((v: { id: string; patch: Partial<Pick<Enquiry, 'status' | 'note'>>; toast?: string }) => api.updateEnquiry(v.id, v.patch), {
+    onMutate: (v) => {
+      const prev = qc.getQueryData<Enquiry[]>(['enquiries'])
+      qc.setQueryData<Enquiry[]>(['enquiries'], (l) => l?.map((e) => (e.id === v.id ? { ...e, ...v.patch } : e)))
+      return prev
+    },
+    onError: (_e, _v, prev) => { if (prev) qc.setQueryData(['enquiries'], prev) },
+    onSuccess: (_d, v) => { if (v.toast) toast.success(v.toast) },
+  })
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
 
   const list = useMemo(() => {
     const s = search.trim().toLowerCase()
     return (q.data ?? [])
-      .filter((e) => filter === 'all' || (filter === 'replied' ? replied[e.id] : !replied[e.id]))
+      .filter((e) => filter === 'all' || e.status === filter)
       .filter((e) => !s || [e.name, e.email, e.phone, e.message, e.source].some((v) => v.toLowerCase().includes(s)))
       .sort((a, b) => b.at.localeCompare(a.at))
-  }, [q.data, filter, search, replied])
+  }, [q.data, filter, search])
 
   if (q.isError) return <QueryError error={q.error} retry={() => q.refetch()} />
 
-  const newCount = (q.data ?? []).filter((e) => !replied[e.id]).length
+  const newCount = (q.data ?? []).filter((e) => e.status === 'new').length
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
@@ -52,9 +64,9 @@ export function Enquiries({ studio }: { studio: Studio }) {
           </Card>
         ) : (
           list.map((e) => (
-            <EnquiryCard key={e.id} e={e} note={notes[e.id] ?? e.note ?? ''} replied={!!replied[e.id]}
-              onNote={(v) => { setNotes((n) => ({ ...n, [e.id]: v })); toast.success('Note saved') }}
-              onReplied={(v) => setReplied((r) => ({ ...r, [e.id]: v }))}
+            <EnquiryCard key={e.id} e={e} note={e.note ?? ''} replied={e.status === 'replied'}
+              onNote={(v) => update.mutate({ id: e.id, patch: { note: v }, toast: v ? 'Note saved' : 'Note removed' })}
+              onReplied={(v, quiet) => { if (v !== (e.status === 'replied')) update.mutate({ id: e.id, patch: { status: v ? 'replied' : 'new' }, toast: quiet ? undefined : v ? 'Marked as replied' : 'Marked as new' }) }}
               copy={copy} />
           ))
         )}
@@ -79,7 +91,7 @@ export function Enquiries({ studio }: { studio: Studio }) {
 
 function EnquiryCard({ e, note, replied, onNote, onReplied, copy }: {
   e: Enquiry; note: string; replied: boolean
-  onNote: (v: string) => void; onReplied: (v: boolean) => void
+  onNote: (v: string) => void; onReplied: (v: boolean, quiet?: boolean) => void
   copy: (t: string, what?: string) => void
 }) {
   const [editing, setEditing] = useState(false)
@@ -115,8 +127,8 @@ function EnquiryCard({ e, note, replied, onNote, onReplied, copy }: {
           ) : null}
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => { window.open(`https://wa.me/${e.phone.replace(/\D/g, '')}`, '_blank', 'noopener'); onReplied(true) }}>Reply on WhatsApp</Button>
-            <Button size="sm" onClick={() => { location.href = `mailto:${e.email}?subject=${encodeURIComponent('Your enquiry')}`; onReplied(true) }}>Email</Button>
+            <Button size="sm" onClick={() => { window.open(`https://wa.me/${e.phone.replace(/\D/g, '')}`, '_blank', 'noopener'); onReplied(true, true) }}>Reply on WhatsApp</Button>
+            <Button size="sm" onClick={() => { location.href = `mailto:${e.email}?subject=${encodeURIComponent('Your enquiry')}`; onReplied(true, true) }}>Email</Button>
             {!note && !editing && <Button size="sm" variant="ghost" icon={<StickyNote size={12} />} onClick={() => { setDraft(''); setEditing(true) }}>Add note</Button>}
             <Button size="sm" variant="ghost" className="ml-auto" onClick={() => onReplied(!replied)}>{replied ? 'Mark as new' : 'Mark as replied'}</Button>
           </div>

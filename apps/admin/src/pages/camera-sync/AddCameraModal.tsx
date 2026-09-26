@@ -9,12 +9,13 @@ import { copyText, credentialsText, MODE_HELP, MODE_LABEL } from './utils'
 
 const MODES: Camera['mode'][] = ['live-2k', 'review-first', 'originals']
 
-export function AddCameraModal({ open, onOpenChange, onCreated, full }: {
-  open: boolean; onOpenChange: (v: boolean) => void; onCreated: (c: Camera) => void; full: boolean
+/** Adds a camera, or edits one when `camera` is given (name, destination and mode). */
+export function AddCameraModal({ open, onOpenChange, onCreated, full, camera }: {
+  open: boolean; onOpenChange: (v: boolean) => void; onCreated?: (c: Camera) => void; full?: boolean; camera?: Camera | null
 }) {
   const api = useApi()
   const toast = useToast()
-  const events = useEvents().data?.filter((e) => e.status !== 'archived') ?? []
+  const events = useEvents().data?.filter((e) => e.status !== 'archived' || e.id === camera?.eventId) ?? []
   const [label, setLabel] = useState('')
   const [eventId, setEventId] = useState('')
   const [albumId, setAlbumId] = useState('')
@@ -24,14 +25,21 @@ export function AddCameraModal({ open, onOpenChange, onCreated, full }: {
   const albums = (useAlbums(eventId || undefined).data ?? []).filter((a) => a.kind === 'album')
 
   useEffect(() => {
-    if (open) { setLabel(''); setMode('live-2k'); setTouched(false); setCreated(null); setEventId(''); setAlbumId('') }
-  }, [open])
+    if (!open) return
+    setTouched(false); setCreated(null)
+    setLabel(camera?.label ?? ''); setMode(camera?.mode ?? 'live-2k'); setEventId(camera?.eventId ?? ''); setAlbumId(camera?.albumId ?? '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, camera?.id])
   useEffect(() => { if (!eventId && events[0]) setEventId(events[0].id) }, [events, eventId])
   useEffect(() => { if (albums.length && !albums.some((a) => a.id === albumId)) setAlbumId(albums[0].id) }, [albums, albumId])
 
   const create = useAction((v: Pick<Camera, 'label' | 'eventId' | 'albumId' | 'mode'>) => api.createCamera(v), {
     success: 'Camera added',
-    onSuccess: (c) => { setCreated(c); onCreated(c) },
+    onSuccess: (c) => { setCreated(c); onCreated?.(c) },
+  })
+  const update = useAction((v: Pick<Camera, 'label' | 'eventId' | 'albumId' | 'mode'>) => api.updateCamera(camera!.id, v), {
+    success: 'Camera updated',
+    onSuccess: () => onOpenChange(false),
   })
 
   const labelError = touched && !label.trim() ? 'Give the camera a name, e.g. “Canon R6 · Aarav”.' : undefined
@@ -39,38 +47,40 @@ export function AddCameraModal({ open, onOpenChange, onCreated, full }: {
   const submit = () => {
     setTouched(true)
     if (!label.trim() || !eventId || !albumId) return
-    create.mutate({ label: label.trim(), eventId, albumId, mode })
+    const v = { label: label.trim(), eventId, albumId, mode }
+    if (camera) update.mutate(v)
+    else create.mutate(v)
   }
 
   if (created) {
     return (
       <Modal open={open} onOpenChange={onOpenChange} title="Camera added" width={520}
-        description="Enter these on the camera. The password is shown here once; you can reveal it again from the camera’s row."
+        description="Enter these on the camera now. The password is shown only once — copy it before you close this."
         footer={<>
-          <Button icon={<Copy size={14} />} onClick={async () => { if (await copyText(credentialsText(created))) toast.success('All details copied') }}>Copy all</Button>
+          <Button icon={<Copy size={14} />} onClick={async () => { if (await copyText(credentialsText(created, created.password))) toast.success('All details copied'); else toast.error('Couldn’t copy', 'Copy each field with its copy button instead.') }}>Copy all</Button>
           <Button variant="primary" onClick={() => onOpenChange(false)}>Done</Button>
         </>}>
         <div className="flex flex-col gap-3 px-5 py-4 sm:px-6">
           <div className="flex items-center gap-2 rounded-control bg-ok-soft px-3 py-2 text-[12.5px] font-bold text-ok">
             <CheckCircle2 size={15} /> {created.label} is ready. It shows “Receiving” once the camera connects.
           </div>
-          <CredentialFields cam={created} />
+          <CredentialFields cam={created} password={created.password} />
         </div>
       </Modal>
     )
   }
 
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Add a camera" width={520}
-      description="Each camera gets its own login and sends to one album."
+    <Modal open={open} onOpenChange={onOpenChange} title={camera ? `Edit ${camera.label}` : 'Add a camera'} width={520}
+      description={camera ? 'The FTP login stays the same; new photos go to the album you pick.' : 'Each camera gets its own login and sends to one album.'}
       footer={<>
         <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-        <Button variant="primary" onClick={submit} loading={create.isPending} disabled={full}>Add camera</Button>
+        <Button variant="primary" onClick={submit} loading={create.isPending || update.isPending} disabled={!camera && full}>{camera ? 'Save changes' : 'Add camera'}</Button>
       </>}>
       <form className="flex flex-col gap-3.5 px-5 py-4 sm:px-6" onSubmit={(e) => { e.preventDefault(); submit() }}>
-        {full && <div className="rounded-control bg-warn-soft px-3 py-2 text-[12.5px] font-bold text-warn">You have 10 cameras, the most a studio can connect. Remove one to add another.</div>}
+        {!camera && full && <div className="rounded-control bg-warn-soft px-3 py-2 text-[12.5px] font-bold text-warn">You have 10 cameras, the most a studio can connect. Remove one to add another.</div>}
         <Field label="Camera name" htmlFor="cam-label" hint="Shown in upload history and on photos’ info." error={labelError}>
-          <Input id="cam-label" autoFocus value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Canon R6 · Aarav" maxLength={40} />
+          <Input id="cam-label" autoFocus={!camera} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Canon R6 · Aarav" maxLength={40} />
         </Field>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Sends to event" htmlFor="cam-event">

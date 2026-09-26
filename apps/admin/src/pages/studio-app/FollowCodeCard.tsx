@@ -1,9 +1,8 @@
 import { useRef, useState } from 'react'
 import { Copy, Download, Link2, QrCode } from 'lucide-react'
-import { fmt, hash, type Studio } from '@frameline/shared'
+import { fmt, type Studio } from '@frameline/shared'
 import { Button, DarkCard, Modal, QRCode } from '@frameline/ui'
 import { downloadBlob, svgMarkup, useCopy } from './util'
-import { FOLLOWERS } from './sample'
 
 export const followLink = (code: string) => `https://frameline.in/follow/${code}`
 
@@ -22,7 +21,7 @@ export function FollowCodeCard({ studio }: { studio: Studio }) {
     <DarkCard>
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[10.5px] uppercase tracking-[.09em] text-side-ink-2">Follow code</span>
-        <span className="text-[11.5px] text-side-ink-2"><b className="font-mono text-side-ink">{fmt.count(FOLLOWERS)}</b> followers</span>
+        <span className="text-[11.5px] text-side-ink-2"><b className="font-mono text-side-ink">{fmt.count(studio.followers)}</b> {studio.followers === 1 ? 'follower' : 'followers'}</span>
       </div>
       <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
         <b className="font-mono text-[24px] tracking-[.12em] text-side-gold">{studio.followCode}</b>
@@ -41,7 +40,7 @@ export function FollowCodeCard({ studio }: { studio: Studio }) {
         </>}>
         <div className="flex flex-col items-center gap-3 px-6 py-5">
           <div ref={qrRef} className="rounded-card border border-line bg-white p-4">
-            <QRCode seed={hash(studio.followCode)} size={220} rounded />
+            <QRCode value={link} logo={studio.logoUrl || undefined} size={220} rounded />
           </div>
           <div className="text-center">
             <div className="font-mono text-[18px] font-bold tracking-[.12em]">{studio.followCode}</div>

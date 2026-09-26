@@ -1,43 +1,36 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, MessageCircle, Store as StoreIcon } from 'lucide-react'
-import { fmt } from '@frameline/shared'
-import { Button, Card, CardHeader, DarkCard, EmptyState, Field, Input, Modal, Skeleton, useToast } from '@frameline/ui'
+import { MessageCircle, Store as StoreIcon } from 'lucide-react'
+import { fmt, STORE_COMMISSION, type Price } from '@frameline/shared'
+import { Button, Card, CardHeader, DarkCard, EmptyState, Field, Input, Modal, Skeleton } from '@frameline/ui'
 import { useApi } from '../../lib/api'
 import { useAction, useEvents, usePrices } from '../../lib/queries'
-import { useLocalState } from '../wallet/lib'
+import { QueryError } from '../system'
 
-type Price = { id: string; label: string; detail: string; price: number }
-export const PRICES_KEY = 'frameline.prices'
-
-/** Prices from the API with local overrides. The API has no updatePrices yet, so edits live in localStorage. */
-export function useEffectivePrices() {
-  const q = usePrices()
-  const [overrides, setOverrides] = useLocalState<Record<string, number>>(PRICES_KEY, {})
-  const prices = useMemo(() => q.data?.map((p) => ({ ...p, price: overrides[p.id] ?? p.price })), [q.data, overrides])
-  return { ...q, prices, setOverrides }
-}
-
+/** Default store prices, saved with api.updatePrices (every selling event uses them). */
 export function PricesCard() {
-  const { prices, isLoading, setOverrides } = useEffectivePrices()
+  const prices = usePrices()
   const [open, setOpen] = useState(false)
   return (
     <Card>
-      <CardHeader title="Default prices" action={<Button size="sm" variant="ghost" onClick={() => setOpen(true)} disabled={!prices}>Edit</Button>} />
-      {isLoading || !prices ? <Skeleton className="h-40" /> : prices.map((p) => (
-        <div key={p.id} className="flex items-center justify-between gap-3 border-t border-line py-2">
-          <div><div className="text-[13px] font-bold">{p.label}</div><div className="text-[11.5px] text-ink-3">{p.detail}</div></div>
-          <span className="font-mono font-bold tnum">{fmt.rupees(p.price)}</span>
-        </div>
-      ))}
+      <CardHeader title="Default prices" action={<Button size="sm" variant="ghost" onClick={() => setOpen(true)} disabled={!prices.data}>Edit</Button>} />
+      {prices.isError ? <QueryError error={prices.error} retry={() => prices.refetch()} />
+        : prices.isLoading || !prices.data ? <Skeleton className="h-40" />
+        : !prices.data.length ? <p className="py-3 text-[13px] text-ink-3">No prices set yet.</p>
+        : prices.data.map((p) => (
+          <div key={p.id} className="flex items-center justify-between gap-3 border-t border-line py-2">
+            <div><div className="text-[13px] font-bold">{p.label}</div><div className="text-[11.5px] text-ink-3">{p.detail}</div></div>
+            <span className="font-mono font-bold tnum">{fmt.rupees(p.price)}</span>
+          </div>
+        ))}
       <p className="mt-1 text-[11.5px] text-ink-3">Every event that sells uses these. Guests see prices incl. GST.</p>
-      {prices && <EditPricesModal open={open} onOpenChange={setOpen} prices={prices} onSave={(map) => setOverrides(map)} />}
+      {prices.data && <EditPricesModal open={open} onOpenChange={setOpen} prices={prices.data} />}
     </Card>
   )
 }
 
-function EditPricesModal({ open, onOpenChange, prices, onSave }: { open: boolean; onOpenChange: (v: boolean) => void; prices: Price[]; onSave: (m: Record<string, number>) => void }) {
-  const toast = useToast()
+function EditPricesModal({ open, onOpenChange, prices }: { open: boolean; onOpenChange: (v: boolean) => void; prices: Price[] }) {
+  const api = useApi()
   const [draft, setDraft] = useState<Record<string, string>>({})
   const value = (p: Price) => draft[p.id] ?? String(p.price)
   const errors = Object.fromEntries(prices.map((p) => {
@@ -45,42 +38,37 @@ function EditPricesModal({ open, onOpenChange, prices, onSave }: { open: boolean
     return [p.id, !value(p) || !Number.isFinite(n) ? 'Enter a price in rupees' : n < 10 ? 'Minimum price is ₹10' : n > 100000 ? 'Maximum is ₹1,00,000' : '']
   }))
   const invalid = Object.values(errors).some(Boolean)
-  const save = () => {
-    onSave(Object.fromEntries(prices.map((p) => [p.id, Math.round(Number(value(p)))])))
-    toast.success('Prices saved', 'New orders use these prices.')
-    setDraft({}); onOpenChange(false)
-  }
+  const save = useAction((next: Price[]) => api.updatePrices(next), {
+    success: 'Prices saved · new orders use them',
+    onSuccess: () => { setDraft({}); onOpenChange(false) },
+  })
+  const keep = Math.round((1 - STORE_COMMISSION) * 100)
   return (
-    <Modal open={open} onOpenChange={(v) => { if (!v) setDraft({}); onOpenChange(v) }} title="Edit default prices" description="What guests pay, including GST. You receive the price minus 10% commission." width={480}
-      footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" disabled={invalid} onClick={save}>Save prices</Button></>}>
+    <Modal open={open} onOpenChange={(v) => { if (!v) setDraft({}); onOpenChange(v) }} title="Edit default prices" description={`What guests pay, including GST. You receive ${keep}% (Frameline keeps ${Math.round(STORE_COMMISSION * 100)}% commission).`} width={480}
+      footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" disabled={invalid} loading={save.isPending} onClick={() => save.mutate(prices.map((p) => ({ ...p, price: Math.round(Number(value(p))) })))}>Save prices</Button></>}>
       <div className="flex flex-col gap-3 px-6 py-4">
         {prices.map((p) => (
-          <Field key={p.id} label={p.label} hint={`${p.detail} · you receive ${fmt.rupees(Math.round((Number(value(p)) || 0) * 0.9))}`} error={errors[p.id]} htmlFor={`price-${p.id}`}>
+          <Field key={p.id} label={p.label} hint={`${p.detail} · you receive ${fmt.rupees(Math.round((Number(value(p)) || 0) * (1 - STORE_COMMISSION)))}`} error={errors[p.id]} htmlFor={`price-${p.id}`}>
             <Input id={`price-${p.id}`} inputMode="numeric" icon={<span className="font-mono text-[13px]">₹</span>} value={value(p)}
               onChange={(e) => setDraft((d) => ({ ...d, [p.id]: e.target.value.replace(/[^\d]/g, '') }))} className="font-mono" />
           </Field>
         ))}
-        <p className="text-[11.5px] text-ink-3">Saved in this browser for now; prices sync to all devices once the store API supports editing.</p>
       </div>
     </Modal>
   )
 }
 
-export function CartsCard({ count }: { count: number }) {
-  const toast = useToast()
-  const [sent, setSent] = useLocalState<string | null>('frameline.carts.remindedAt', null)
-  const left = sent ? 0 : count
+/**
+ * Abandoned carts. The API doesn't track unpaid carts yet, so this card only explains the feature
+ * (no invented counts, no fake reminders).
+ */
+export function CartsCard() {
   return (
     <DarkCard>
-      <div className="font-bold">{left ? `${left} carts to recover` : 'All carts reminded'}</div>
-      <div className="mb-2.5 mt-1 text-[12px] text-side-ink-2">
-        {left ? 'Guests who added photos but didn’t pay. Send a reminder on WhatsApp.' : `Reminders sent ${fmt.ago(sent!)}. New abandoned carts show up here.`}
+      <div className="flex items-center gap-2 font-bold"><MessageCircle size={14} /> Carts to recover</div>
+      <div className="mt-1 text-[12px] text-side-ink-2">
+        Coming soon: guests who add photos to their cart but don’t pay will be listed here, with a one-tap WhatsApp reminder that links back to their cart.
       </div>
-      {left ? (
-        <Button size="sm" variant="primary" icon={<MessageCircle size={13} />} onClick={() => { setSent(new Date().toISOString()); toast.success(`Reminders sent to ${count} guests`, 'They get a WhatsApp message with a link back to their cart.') }}>Send reminders</Button>
-      ) : (
-        <Button size="sm" variant="side" icon={<Check size={13} />} onClick={() => setSent(null)}>Undo</Button>
-      )}
     </DarkCard>
   )
 }

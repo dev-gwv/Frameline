@@ -1,42 +1,32 @@
 import { useMemo } from 'react'
-import { DEMO_NOW, type LedgerEntry } from '@frameline/shared'
-import { useLedger } from '../../lib/queries'
-import { round2, useLocalState } from './lib'
+import { DEMO_NOW, type LedgerEntry, type Purchase } from '@frameline/shared'
+import { useLedger, useStoreSettings } from '../../lib/queries'
+import { round2 } from './lib'
 
-export interface LocalPayout { id: string; at: string; amount: number }
-export const PAYOUTS_KEY = 'frameline.payouts'
-export const PAYOUT_DEST = 'HDFC ••4471'
-
-/**
- * Ledger from the API plus payouts requested in this browser (the mock API has no withdraw call yet).
- * Newest first, with a running balance.
- */
+/** Ledger from the API (newest first). `balance` is the payout balance on the newest line. */
 export function useWallet() {
   const q = useLedger()
-  const [payouts, setPayouts] = useLocalState<LocalPayout[]>(PAYOUTS_KEY, [])
-  const ledger = useMemo<LedgerEntry[] | undefined>(() => {
-    if (!q.data) return undefined
-    const base = [...q.data].sort((a, b) => b.at.localeCompare(a.at))
-    let bal = base[0]?.balance ?? 0
-    const local = [...payouts].sort((a, b) => a.at.localeCompare(b.at)).map((p) => {
-      bal = round2(bal - p.amount)
-      return { id: p.id, at: p.at, description: `Payout to ${PAYOUT_DEST} · requested`, type: 'payout' as const, amount: -p.amount, balance: bal }
-    })
-    return [...local.reverse(), ...base]
-  }, [q.data, payouts])
+  const store = useStoreSettings()
+  const ledger = useMemo<LedgerEntry[] | undefined>(() => q.data && [...q.data].sort((a, b) => b.at.localeCompare(a.at)), [q.data])
   const balance = ledger?.[0]?.balance ?? 0
 
-  const now = new Date(DEMO_NOW)
-  const thisMonth = (iso: string) => { const d = new Date(iso); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() }
+  const now = Math.max(Date.now(), DEMO_NOW)
+  const today = new Date(now)
+  const thisMonth = (iso: string) => { const d = new Date(iso); return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear() }
   const earned = ledger?.filter((l) => (l.type === 'sale' || l.type === 'renewal-markup') && thisMonth(l.at)).reduce((s, l) => s + l.amount, 0) ?? 0
   // Sales are held for 3 days in case of refunds.
-  const held = ledger?.filter((l) => l.type === 'sale' && DEMO_NOW - new Date(l.at).getTime() < 3 * 86_400_000) ?? []
+  const held = ledger?.filter((l) => l.type === 'sale' && now - new Date(l.at).getTime() < 3 * 86_400_000) ?? []
   const pending = held.reduce((s, l) => s + l.amount, 0)
-  const releaseDays = held.length ? Math.max(1, Math.ceil((Math.min(...held.map((l) => new Date(l.at).getTime())) + 3 * 86_400_000 - DEMO_NOW) / 86_400_000)) : 0
+  const releaseDays = held.length ? Math.max(1, Math.ceil((Math.min(...held.map((l) => new Date(l.at).getTime())) + 3 * 86_400_000 - now) / 86_400_000)) : 0
 
-  const withdraw = (amount: number) => setPayouts((l) => [...l, { id: `lp_${Date.now()}`, at: new Date().toISOString(), amount: round2(amount) }])
-  return { ...q, ledger, balance, earned: round2(earned), pending: round2(pending), releaseDays, withdraw }
+  const payout = store.data?.payout
+  const destination = payout?.accountLast4 ? `${payout.bank || 'Bank'} ••${payout.accountLast4}` : 'No bank account yet'
+  return { ...q, ledger, balance, earned: round2(earned), pending: round2(pending), releaseDays, payout, destination }
 }
+
+/** GST on a Frameline purchase: 18% on card/UPI payments; none on coupons, and none on credits (GST was charged when the credits were bought). */
+export const purchaseGst = (p: Purchase) => (p.method === 'card' || p.method === 'upi' ? round2(p.amount * 0.18) : 0)
+export const PURCHASE_METHOD: Record<Purchase['method'], string> = { card: 'Card', upi: 'UPI', credits: 'Wallet credits', coupon: 'Coupon' }
 
 export const LEDGER_TYPES: Record<LedgerEntry['type'], { label: string; tone: 'ok' | 'neutral' | 'warn' | 'accent' }> = {
   sale: { label: 'Sale', tone: 'ok' },

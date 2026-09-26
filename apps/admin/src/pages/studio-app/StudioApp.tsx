@@ -1,27 +1,30 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Check, HelpCircle, Lock, Tag } from 'lucide-react'
-import { Button, Card, CardHeader, PageHeader, SettingRow, Skeleton, Toggle, useToast } from '@frameline/ui'
-import { useEvents, useStudio } from '../../lib/queries'
+import type { Studio, StudioAppConfig } from '@frameline/shared'
+import { Button, Card, CardHeader, PageHeader, SettingRow, Skeleton, Toggle } from '@frameline/ui'
+import { useApi } from '../../lib/api'
+import { useAction, useEvents, useStudio } from '../../lib/queries'
 import { QueryError } from '../system'
-import { useLocalState } from './util'
-import { DEFAULT_CONFIG, QUESTIONS, type AppConfig } from './sample'
 import { FollowCodeCard } from './FollowCodeCard'
 import { FeaturedGalleries } from './FeaturedGalleries'
 import { AppPreview } from './AppPreview'
 
-const STORAGE_KEY = 'frameline.studioApp.v1'
+const EMPTY: StudioAppConfig = { featuredEventIds: [], showServices: true, showFaq: true, showPrivate: false }
 
 export default function StudioApp() {
+  const api = useApi()
   const studio = useStudio()
   const events = useEvents()
-  const toast = useToast()
-  // No API for app features yet: the saved config lives in localStorage; edits stay in a draft until Save.
-  const [saved, setSaved] = useLocalState<AppConfig>(STORAGE_KEY, DEFAULT_CONFIG)
-  const [draft, setDraft] = useState<AppConfig>(saved)
-  const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
-  const patch = (p: Partial<AppConfig>) => setDraft((d) => ({ ...d, ...p }))
+  // studio.app is saved with api.updateStudio; edits stay in a draft until Save so the preview can be tried out.
+  const saved = studio.data?.app ?? EMPTY
+  const [draft, setDraft] = useState<StudioAppConfig>(saved)
+  const savedJson = JSON.stringify(saved)
+  useEffect(() => { setDraft(JSON.parse(savedJson) as StudioAppConfig) }, [savedJson])
+  const dirty = JSON.stringify(draft) !== savedJson
+  const patch = (p: Partial<StudioAppConfig>) => setDraft((d) => ({ ...d, ...p }))
 
-  const save = () => { setSaved(draft); toast.success('Saved', 'Your studio profile in the app is updated.') }
+  const save = useAction((app: StudioAppConfig) => api.updateStudio({ app } as Partial<Studio>), { success: 'Studio app updated' })
 
   const header = (
     <PageHeader
@@ -30,7 +33,7 @@ export default function StudioApp() {
       actions={<>
         {dirty && <span className="text-[12px] font-semibold text-warn">Unsaved changes</span>}
         {dirty && <Button variant="ghost" onClick={() => setDraft(saved)}>Discard</Button>}
-        <Button variant="primary" icon={<Check size={14} />} disabled={!dirty} onClick={save}>Save</Button>
+        <Button variant="primary" icon={<Check size={14} />} disabled={!dirty || !studio.data} loading={save.isPending} onClick={() => save.mutate(draft)}>Save</Button>
       </>}
     />
   )
@@ -52,16 +55,17 @@ export default function StudioApp() {
           <FollowCodeCard studio={studio.data} />
           <Card>
             <CardHeader title="Show in your app" />
-            <SettingRow icon={<Tag size={15} />} title="Services and prices" description="From your website"
+            <SettingRow icon={<Tag size={15} />} title="Services and prices" description={`${studio.data.services.length} from your website`}
               control={<Toggle label="Services and prices" checked={draft.showServices} onCheckedChange={(v) => patch({ showServices: v })} />} />
-            <SettingRow icon={<HelpCircle size={15} />} title="Questions and answers" description={`${QUESTIONS.length} answered`}
-              control={<Toggle label="Questions and answers" checked={draft.showQuestions} onCheckedChange={(v) => patch({ showQuestions: v })} />} />
+            <SettingRow icon={<HelpCircle size={15} />} title="Questions and answers" description={`${studio.data.faq.length} answered`}
+              control={<Toggle label="Questions and answers" checked={draft.showFaq} onCheckedChange={(v) => patch({ showFaq: v })} />} />
             <SettingRow icon={<Lock size={15} />} title="Private galleries in the list" description={`Cover and name only · ${privateCount} private`}
               control={<Toggle label="Private galleries in the list" checked={draft.showPrivate} onCheckedChange={(v) => patch({ showPrivate: v })} />} />
+            <p className="mt-2 text-[12px] text-ink-3">Edit services and questions on <Link to="/website" className="font-bold text-accent-text hover:underline">Website</Link> or in <Link to="/settings/profile" className="font-bold text-accent-text hover:underline">Studio profile</Link>.</p>
           </Card>
         </div>
         <div className="min-w-0">
-          <FeaturedGalleries events={events.data} featured={draft.featured} onChange={(featured) => patch({ featured })} />
+          <FeaturedGalleries events={events.data} featured={draft.featuredEventIds} onChange={(featuredEventIds) => patch({ featuredEventIds })} />
         </div>
         <div className="flex justify-center lg:col-span-2 xl:col-span-1 xl:justify-start">
           <AppPreview studio={studio.data} events={events.data} config={draft} />

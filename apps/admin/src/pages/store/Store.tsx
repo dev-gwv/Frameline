@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Download, Plus, Settings, ShoppingBag } from 'lucide-react'
-import { fmt, hash, type Order } from '@frameline/shared'
+import { fmt, STORE_COMMISSION, type Order } from '@frameline/shared'
 import { Button, Card, CardHeader, Chip, EmptyState, PageHeader, Segmented, Skeleton, StatCard } from '@frameline/ui'
-import { useOrders } from '../../lib/queries'
+import { useLedger, useOrders } from '../../lib/queries'
 import { QueryError } from '../system'
 import { exportOrdersCsv, money, ORDER_STATUS, td, th } from '../wallet/lib'
 import { OrderDrawer } from './OrderDrawer'
@@ -13,16 +13,19 @@ import { CartsCard, PricesCard, SellFromEventModal } from './StoreCards'
 
 export default function Store() {
   const orders = useOrders()
+  const ledger = useLedger()
   const navigate = useNavigate()
   const [range, setRange] = useState<'30' | '90'>('30')
   const [sellOpen, setSellOpen] = useState(false)
   const [openOrder, setOpenOrder] = useState<Order | null>(null)
 
   const series = useMemo(() => (orders.data ? revenueSeries(orders.data) : []), [orders.data])
-  const month = useMemo(() => monthTotals(series), [series])
+  const month = useMemo(() => monthTotals(orders.data ?? [], ledger.data), [orders.data, ledger.data])
   const shown = range === '30' ? series.slice(-30) : series
   const pending = orders.data?.filter((o) => o.status === 'pending').length ?? 0
-  const carts = orders.data ? 3 + (hash(orders.data.map((o) => o.id).join()) % 6) : 0
+  const salesDays = shown.filter((p) => p.orders || p.usd).length
+  const shownOrders = shown.reduce((s, p) => s + p.orders, 0)
+  const shownUsd = shown.reduce((s, p) => s + p.usd, 0)
 
   return (
     <div className="pb-10">
@@ -43,7 +46,7 @@ export default function Store() {
                   <StatCard label={`Revenue · ${month.monthLabel}`} value={fmt.rupees(month.revenue)} sub="before commission" />
                   <StatCard label={`USD sales · ${month.monthLabel}`} value={`$${month.usd}`} sub="paid to you directly" />
                   <StatCard label="Orders · pending" value={<>{fmt.count(month.orders)} <span className="text-ink-3">·</span> {pending}</>} sub="this month · awaiting payment" />
-                  <StatCard label="Carts to recover" value={carts} sub="added but not paid" />
+                  <StatCard label={`You earned · ${month.monthLabel}`} value={ledger.isLoading ? '…' : fmt.rupees(Math.round(month.earned))} sub="sales + renewal markup − refunds" />
                 </>}
               </div>
 
@@ -53,8 +56,8 @@ export default function Store() {
                 } />
                 {orders.isLoading ? <Skeleton className="h-[180px]" /> : <RevenueChart points={shown} />}
                 <div className="mt-1 flex flex-wrap justify-between gap-2 text-[12px] text-ink-3">
-                  <span>Total <b className="font-mono text-ink tnum">{fmt.rupees(shown.reduce((s, p) => s + p.revenue, 0))}</b> · {fmt.count(shown.reduce((s, p) => s + p.orders, 0))} orders</span>
-                  <span>Hover a bar for the day’s total</span>
+                  <span>Total <b className="font-mono text-ink tnum">{fmt.rupees(shown.reduce((s, p) => s + p.revenue, 0))}</b> · {fmt.count(shownOrders)} {shownOrders === 1 ? 'order' : 'orders'}{shownUsd ? <> · <span className="font-mono tnum">${shownUsd}</span> international</> : null}</span>
+                  <span>{salesDays < 5 ? `Real orders only: sales on ${salesDays} of ${shown.length} days. The line is the 7-day average.` : 'Hover a bar for the day’s total · line is the 7-day average'}</span>
                 </div>
               </Card>
 
@@ -84,14 +87,14 @@ export default function Store() {
                     </table>
                   </div>
                 )}
-                <div className="px-4 py-2.5 text-[12px] text-ink-3">Your share is after GST and the 10% commission. <Link to="/wallet?tab=orders" className="font-bold text-accent-text hover:underline">All orders →</Link></div>
+                <div className="px-4 py-2.5 text-[12px] text-ink-3">Your share is after GST and the {Math.round(STORE_COMMISSION * 100)}% commission. <Link to="/wallet?tab=orders" className="font-bold text-accent-text hover:underline">All orders →</Link></div>
               </Card>
             </>
           )}
         </div>
         <div className="flex flex-col gap-3">
           <PricesCard />
-          {orders.data && <CartsCard count={carts} />}
+          <CartsCard />
         </div>
       </div>
       <SellFromEventModal open={sellOpen} onOpenChange={setSellOpen} />

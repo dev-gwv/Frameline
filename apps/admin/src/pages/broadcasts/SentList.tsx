@@ -1,12 +1,13 @@
-import { Copy, Megaphone, MoreHorizontal, Trash2 } from 'lucide-react'
+import { Ban, Copy, Megaphone, MoreHorizontal, Trash2 } from 'lucide-react'
 import { fmt, type Broadcast, type PhotoEvent } from '@frameline/shared'
 import { Card, Chip, EmptyState, Menu, Skeleton } from '@frameline/ui'
 
-export function SentList({ items, events, loading, onDuplicate, onDelete }: {
+export function SentList({ items, events, loading, onDuplicate, onCancel, onDelete }: {
   items?: Broadcast[]
   events: PhotoEvent[]
   loading?: boolean
   onDuplicate: (b: Broadcast) => void
+  onCancel: (b: Broadcast) => void
   onDelete: (b: Broadcast) => void
 }) {
   const audience = (a: Broadcast['audience']) => (a === 'all' ? 'All followers' : events.find((e) => e.id === a)?.name ?? 'One event')
@@ -35,11 +36,17 @@ export function SentList({ items, events, loading, onDuplicate, onDelete }: {
               {items.map((b) => (
                 <tr key={b.id} className="border-b border-line last:border-0">
                   <td className="px-4 py-2.5">
-                    <div className="font-bold">{b.title}</div>
-                    <div className="text-[11.5px] text-ink-3">{audience(b.audience)}</div>
+                    <div className="flex items-center gap-2">
+                      {b.imageUrl && <img src={b.imageUrl} alt="" className="h-8 w-11 shrink-0 rounded border border-line object-cover" />}
+                      <div className="min-w-0">
+                        <div className="font-bold">{b.title}</div>
+                        <div className="text-[11.5px] text-ink-3">{audience(b.audience)}</div>
+                      </div>
+                    </div>
                   </td>
                   <td className="whitespace-nowrap px-2 py-2.5 text-[12px] text-ink-2">
-                    {b.scheduledAt && !b.sentAt ? <Chip tone="accent">Scheduled · {fmt.dateTime(b.scheduledAt)}</Chip> : b.sentAt ? fmt.dateTime(b.sentAt) : '—'}
+                    {b.cancelledAt ? <Chip tone="warn">Cancelled</Chip>
+                      : b.scheduledAt && !b.sentAt ? <Chip tone="accent">Scheduled · {fmt.dateTime(b.scheduledAt)}</Chip> : b.sentAt ? fmt.dateTime(b.sentAt) : '—'}
                   </td>
                   <td className="px-2 py-2.5 text-right font-mono tnum">{b.openRate !== undefined ? `${Math.round(b.openRate * 100)}%` : <span className="text-ink-3">—</span>}</td>
                   <td className="px-2 py-2.5 text-right">
@@ -47,7 +54,8 @@ export function SentList({ items, events, loading, onDuplicate, onDelete }: {
                       trigger={<button type="button" className="rounded p-1 text-ink-2 hover:bg-sunk hover:text-ink" aria-label={`More for ${b.title}`}><MoreHorizontal size={15} /></button>}
                       items={[
                         { label: 'Duplicate into composer', icon: <Copy size={14} />, onSelect: () => onDuplicate(b) },
-                        { label: b.sentAt ? 'Delete from list' : 'Cancel and delete', icon: <Trash2 size={14} />, danger: true, onSelect: () => onDelete(b) },
+                        ...(!b.sentAt && b.scheduledAt && !b.cancelledAt ? [{ label: 'Cancel sending', icon: <Ban size={14} />, onSelect: () => onCancel(b) }] : []),
+                        { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onSelect: () => onDelete(b) },
                       ]}
                     />
                   </td>

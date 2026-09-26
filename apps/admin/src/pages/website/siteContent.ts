@@ -1,26 +1,5 @@
 import type { Website } from '@frameline/shared'
 
-/*
- * Website content the API doesn't model yet (services, testimonials, FAQ).
- * Shown in the preview so every section renders something real. See "Needs from lead".
- */
-export const SERVICES = [
-  { name: 'Wedding coverage', price: 'From ₹1,50,000', detail: '2 photographers, all functions, edited gallery in 3 weeks' },
-  { name: 'Pre-wedding shoot', price: 'From ₹35,000', detail: 'Half day, 2 locations, 60 edited photos' },
-  { name: 'Events & corporate', price: 'From ₹25,000 / day', detail: 'Live gallery with face search for every guest' },
-]
-
-export const TESTIMONIALS = [
-  { quote: 'Our guests found their photos the same night. Nobody had to ask twice.', name: 'Riya & Kabir', event: 'Udaipur, 2026', tone: 0 },
-  { quote: 'Calm, invisible, and the album made my parents cry (the good kind).', name: 'Aditi Kapoor', event: 'Delhi, 2026', tone: 6 },
-]
-
-export const FAQ = [
-  { q: 'How long until we get our photos?', a: 'A preview gallery goes live within 48 hours. The full edited set follows in about 3 weeks.' },
-  { q: 'Do you travel for weddings?', a: 'Yes, anywhere in India and abroad. Travel and stay are billed at cost.' },
-  { q: 'Can guests download their own photos?', a: 'Yes. Guests take a selfie and see only the photos they are in.' },
-]
-
 export interface TemplateInfo {
   id: Website['template']
   label: string

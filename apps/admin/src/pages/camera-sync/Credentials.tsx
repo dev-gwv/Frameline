@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { BookOpen, Copy, Eye, EyeOff } from 'lucide-react'
+import { BookOpen, Copy, Eye, EyeOff, KeyRound, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import type { Camera } from '@frameline/shared'
-import { Button, Card, CardHeader, Tip, useToast } from '@frameline/ui'
-import { cameraPassword, copyText, credentialsText, FTP_HOST, FTP_PORT } from './utils'
+import { Button, Card, CardHeader, Menu, Tip, useToast } from '@frameline/ui'
+import { copyText, credentialsText, FTP_HOST, FTP_PORT } from './utils'
 
 export function CredRow({ label, value, secret, copyValue }: { label: string; value: string; secret?: boolean; copyValue?: string }) {
   const toast = useToast()
@@ -34,28 +34,56 @@ export function CredRow({ label, value, secret, copyValue }: { label: string; va
   )
 }
 
-export function CredentialFields({ cam }: { cam: Camera }) {
+/**
+ * Server, port, username and — only when we have it — the password. The API returns the password
+ * once (createCamera / resetCameraPassword); after that it can only be replaced.
+ */
+export function CredentialFields({ cam, password, onReset, resetting }: { cam: Camera; password?: string; onReset?: () => void; resetting?: boolean }) {
   return (
     <div className="flex flex-col gap-2.5">
       <CredRow label="Server" value={FTP_HOST} />
       <CredRow label="Port" value={FTP_PORT} copyValue="21" />
       <CredRow label="Username" value={cam.ftpUser} />
-      <CredRow label="Password" value={cameraPassword(cam.id)} secret />
+      {password ? (
+        <CredRow label="Password" value={password} secret />
+      ) : (
+        <div className="flex flex-col gap-1">
+          <span className="text-[12px] font-bold text-ink-2">Password</span>
+          <div className="flex flex-wrap items-center gap-2 rounded-control border border-dashed border-line-2 px-3 py-2 text-[12px] text-ink-2">
+            <span className="min-w-0 flex-1">Shown only once, when the camera was added. Forgot it? Make a new one.</span>
+            {onReset && <Button size="sm" icon={<KeyRound size={12} />} loading={resetting} onClick={onReset}>New password</Button>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-export function CredentialsCard({ cam, lastLine, onGuide }: { cam: Camera; lastLine: string; onGuide: () => void }) {
+export function CredentialsCard({ cam, password, lastLine, onGuide, onReset, resetting, onEdit, onDelete }: {
+  cam: Camera; password?: string; lastLine: string; onGuide: () => void
+  onReset: () => void; resetting?: boolean; onEdit: () => void; onDelete: () => void
+}) {
   const toast = useToast()
   return (
     <Card className="self-start">
       <CardHeader title={cam.label} action={
-        <Button size="sm" icon={<Copy size={12} />} onClick={async () => {
-          if (await copyText(credentialsText(cam))) toast.success('All details copied', 'Paste them into your camera’s FTP settings.')
-          else toast.error('Couldn’t copy', 'Copy each field with its copy button instead.')
-        }}>Copy all</Button>
+        <div className="flex items-center gap-1">
+          <Button size="sm" icon={<Copy size={12} />} onClick={async () => {
+            if (await copyText(credentialsText(cam, password))) toast.success('All details copied', password ? 'Paste them into your camera’s FTP settings.' : 'The password isn’t included — make a new one if you need it.')
+            else toast.error('Couldn’t copy', 'Copy each field with its copy button instead.')
+          }}>Copy all</Button>
+          <Menu
+            trigger={<button type="button" aria-label={`More for ${cam.label}`} className="grid size-8 place-items-center rounded-md text-ink-2 hover:bg-sunk hover:text-ink"><MoreHorizontal size={16} /></button>}
+            items={[
+              { label: 'Edit camera', icon: <Pencil size={14} />, onSelect: onEdit },
+              { label: 'New password', icon: <KeyRound size={14} />, onSelect: onReset },
+              'separator',
+              { label: 'Remove camera', icon: <Trash2 size={14} />, danger: true, onSelect: onDelete },
+            ]}
+          />
+        </div>
       } />
-      <CredentialFields cam={cam} />
+      <CredentialFields cam={cam} password={password} onReset={onReset} resetting={resetting} />
       <div className="mt-3 rounded-control bg-sunk p-3 text-[12px] text-ink-2">
         {lastLine} Set the camera to send JPEG only.{' '}
         <button type="button" onClick={onGuide} className="inline-flex items-center gap-1 font-bold text-accent-text underline underline-offset-2">
@@ -63,7 +91,7 @@ export function CredentialsCard({ cam, lastLine, onGuide }: { cam: Camera; lastL
         </button>
       </div>
       <p className="mt-2 text-[11.5px] text-ink-3">
-        Sending to the wrong album? Photos can be moved later from the <Link className="font-bold text-accent-text" to={`/events/${cam.eventId}`}>event</Link>.
+        Sending to the wrong album? Change it with Edit camera; photos already sent can be moved from the <Link className="font-bold text-accent-text" to={`/events/${cam.eventId}`}>event</Link>.
       </p>
     </Card>
   )

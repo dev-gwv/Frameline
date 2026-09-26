@@ -1,10 +1,10 @@
 import { useRef, useState, type ChangeEvent } from 'react'
 import { CalendarClock, Circle, Copy, Download, ImagePlus, MoreHorizontal, Palette, Pencil, Square, Trash2, X } from 'lucide-react'
-import { fmt, hash, type PhotoEvent, type SmartQR } from '@frameline/shared'
+import { fmt, type PhotoEvent, type SmartQR } from '@frameline/shared'
 import { Button, Chip, cn, Field, Input, Menu, QRCode, Select, Tip, useToast } from '@frameline/ui'
-import { downloadBlob, svgMarkup, useCopy } from './util'
+import { downloadBlob, imageDataUrl, svgMarkup, useCopy } from './util'
 import { buildPoster, shortUrl } from './poster'
-import type { ScheduledSwitch } from './modals'
+import { scheduleOf } from './modals'
 
 export const TARGETS: { value: SmartQR['target']; label: string }[] = [
   { value: 'web', label: 'Web gallery' },
@@ -12,21 +12,17 @@ export const TARGETS: { value: SmartQR['target']; label: string }[] = [
   { value: 'app', label: 'App only' },
 ]
 
-export interface QRStyle { rounded: boolean; logo?: string }
-
 const INK = '#1B1712'
 
-export function QRCard({ qr, events, studioName, brandColor, style, schedule, onUpdate, onStyle, onSchedule, onClearSchedule }: {
+export function QRCard({ qr, events, studioName, brandColor, onUpdate, onSchedule, onClearSchedule, onDelete }: {
   qr: SmartQR
   events: PhotoEvent[]
   studioName: string
   brandColor: string
-  style: QRStyle
-  schedule?: ScheduledSwitch
   onUpdate: (patch: Partial<SmartQR>) => void
-  onStyle: (s: QRStyle) => void
   onSchedule: () => void
   onClearSchedule: () => void
+  onDelete: () => void
 }) {
   const copy = useCopy()
   const toast = useToast()
@@ -35,8 +31,13 @@ export function QRCard({ qr, events, studioName, brandColor, style, schedule, on
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(qr.name)
   const event = events.find((e) => e.id === qr.eventId)
+  const schedule = scheduleOf(qr)
   const next = schedule && events.find((e) => e.id === schedule.eventId)
-
+  const url = `https://${shortUrl(qr.slug)}`
+  const logo = qr.logoUrl || undefined
+  // The encoder draws either square modules or round dots; 'rounded' and 'dots' both render as dots.
+  const rounded = (qr.dotStyle ?? 'square') !== 'square'
+  
   const commitName = () => {
     setEditing(false)
     const v = name.trim()
@@ -47,7 +48,7 @@ export function QRCard({ qr, events, studioName, brandColor, style, schedule, on
   const downloadPoster = () => {
     const svg = svgMarkup(qrRef.current)
     if (!svg) return
-    downloadBlob(buildPoster({ qrSvg: svg, studio: studioName, name: qr.name, eventName: event?.name ?? 'Your event', slug: qr.slug, color: qr.color, logo: style.logo }), `${qr.slug}-poster-a4.svg`, 'image/svg+xml')
+    downloadBlob(buildPoster({ qrSvg: svg, studio: studioName, name: qr.name, eventName: event?.name ?? 'Your event', slug: qr.slug, color: qr.color }), `${qr.slug}-poster-a4.svg`, 'image/svg+xml')
     toast.success('Poster downloaded', 'A4 SVG, ready to print.')
   }
   const downloadQR = () => {
@@ -60,10 +61,9 @@ export function QRCard({ qr, events, studioName, brandColor, style, schedule, on
     e.target.value = ''
     if (!f) return
     if (!/^image\/(png|jpeg|svg\+xml|webp)$/.test(f.type)) return toast.error('That file isn’t an image', 'Use a PNG, JPG, SVG or WebP logo.')
-    if (f.size > 300_000) return toast.error('Logo is too large', 'Use an image under 300 KB; a small square logo works best.')
-    const reader = new FileReader()
-    reader.onload = () => { onStyle({ ...style, logo: String(reader.result) }); toast.success('Logo added') }
-    reader.readAsDataURL(f)
+    imageDataUrl(f, 4000, { keepAlpha: true })
+      .then((logoUrl) => onUpdate({ logoUrl }))
+      .catch((err: Error) => toast.error('Couldn’t use that logo', err.message))
   }
 
   return (
@@ -82,25 +82,22 @@ export function QRCard({ qr, events, studioName, brandColor, style, schedule, on
           trigger={<button type="button" className="rounded p-1 text-ink-2 hover:bg-sunk hover:text-ink" aria-label={`More for ${qr.name}`}><MoreHorizontal size={16} /></button>}
           items={[
             { label: 'Rename', icon: <Pencil size={14} />, onSelect: () => { setName(qr.name); setEditing(true) } },
-            { label: 'Copy short link', icon: <Copy size={14} />, onSelect: () => copy(`https://${shortUrl(qr.slug)}`, 'Short link') },
+            { label: 'Copy short link', icon: <Copy size={14} />, onSelect: () => copy(url, 'Short link') },
             { label: 'Download QR only (SVG)', icon: <Download size={14} />, onSelect: downloadQR },
             'separator',
-            { label: style.rounded ? 'Square dots' : 'Rounded dots', icon: style.rounded ? <Square size={14} /> : <Circle size={14} />, onSelect: () => onStyle({ ...style, rounded: !style.rounded }) },
+            { label: rounded ? 'Square dots' : 'Round dots', icon: rounded ? <Square size={14} /> : <Circle size={14} />, onSelect: () => onUpdate({ dotStyle: rounded ? 'square' : 'dots' }) },
             { label: qr.color === INK ? 'Use brand colour' : 'Use black', icon: <Palette size={14} />, onSelect: () => onUpdate({ color: qr.color === INK ? brandColor : INK }) },
-            { label: style.logo ? 'Replace logo' : 'Add logo in the middle', icon: <ImagePlus size={14} />, onSelect: () => fileRef.current?.click() },
-            ...(style.logo ? [{ label: 'Remove logo', icon: <Trash2 size={14} />, danger: true, onSelect: () => onStyle({ ...style, logo: undefined }) }] : []),
+            { label: logo ? 'Replace logo' : 'Add logo in the middle', icon: <ImagePlus size={14} />, onSelect: () => fileRef.current?.click() },
+            ...(logo ? [{ label: 'Remove logo', icon: <X size={14} />, onSelect: () => onUpdate({ logoUrl: '' }) }] : []),
+            'separator',
+            { label: 'Delete QR', icon: <Trash2 size={14} />, danger: true, onSelect: onDelete },
           ]}
         />
         <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" className="hidden" onChange={onLogo} />
       </div>
 
       <div className="relative grid place-items-center rounded-[10px] border border-line bg-white p-3.5">
-        <div ref={qrRef}><QRCode seed={hash(qr.slug)} size={140} color={qr.color} rounded={style.rounded} /></div>
-        {style.logo && (
-          <span className="absolute left-1/2 top-1/2 grid size-9 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-md bg-white p-1">
-            <img src={style.logo} alt="" className="max-h-full max-w-full object-contain" />
-          </span>
-        )}
+        <div ref={qrRef}><QRCode value={url} size={140} color={qr.color} rounded={rounded} logo={logo} /></div>
       </div>
 
       <Field label="Currently opens" htmlFor={`opens-${qr.id}`}>
@@ -127,7 +124,7 @@ export function QRCard({ qr, events, studioName, brandColor, style, schedule, on
       </Field>
 
       <div className="flex items-center justify-between gap-2 text-[12px] text-ink-2">
-        <button type="button" onClick={() => copy(`https://${shortUrl(qr.slug)}`, 'Short link')} className="flex min-w-0 items-center gap-1.5 rounded px-1 font-mono hover:bg-sunk hover:text-ink" aria-label="Copy short link">
+        <button type="button" onClick={() => copy(url, 'Short link')} className="flex min-w-0 items-center gap-1.5 rounded px-1 font-mono hover:bg-sunk hover:text-ink" aria-label="Copy short link">
           <span className="truncate">{shortUrl(qr.slug)}</span><Copy size={12} className="shrink-0" />
         </button>
         <span className="shrink-0"><b className="font-mono text-ink">{fmt.count(qr.scans)}</b> scans</span>

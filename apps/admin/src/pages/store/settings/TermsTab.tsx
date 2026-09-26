@@ -1,6 +1,7 @@
 import { RotateCcw } from 'lucide-react'
 import { Button, Card, Field, Textarea } from '@frameline/ui'
-import { DEFAULT_TERMS, type Errors } from './model'
+import { DEFAULT_STORE_TERMS as DEFAULT_TERMS } from '@frameline/shared'
+import type { Errors } from './model'
 
 export function TermsTab({ terms, setTerms, errors }: { terms: string; setTerms: (v: string) => void; errors: Errors }) {
   return (

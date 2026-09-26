@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Button, cn, PageHeader, TabBar, useToast } from '@frameline/ui'
-import { readLocal, writeLocal } from '../wallet/lib'
-import { DEFAULT_STORE_SETTINGS, STORE_SETTINGS_KEY, validate, type StoreSettingsData, type TabId, type TabProps } from './settings/model'
+import type { StoreSettingsPatch } from '@frameline/shared'
+import { Button, cn, PageHeader, Skeleton, TabBar, useToast } from '@frameline/ui'
+import { useApi } from '../../lib/api'
+import { useAction, useStoreSettings } from '../../lib/queries'
+import { QueryError } from '../system'
+import { apiFieldErrors, fromApi, toPatch, validate, type Errors, type StoreSettingsData, type TabId, type TabProps } from './settings/model'
 import { KycTab } from './settings/KycTab'
 import { PayoutsTab } from './settings/PayoutsTab'
 import { WatermarkTab } from './settings/WatermarkTab'
@@ -16,37 +19,53 @@ const TABS: { value: TabId; label: string }[] = [
   { value: 'international', label: 'International selling' },
   { value: 'terms', label: 'Terms' },
 ]
+/** Which form tab each patch section belongs to (only changed sections are validated and sent). */
+const SECTION_TAB: Record<keyof StoreSettingsPatch, TabId> = { kyc: 'kyc', payout: 'payouts', saleWatermark: 'watermark', international: 'international', terms: 'terms' }
 
-const load = (): StoreSettingsData => {
-  const s = readLocal<StoreSettingsData>(STORE_SETTINGS_KEY, DEFAULT_STORE_SETTINGS)
-  // Merge nested sections so older saved shapes still work.
-  return {
-    kyc: { ...DEFAULT_STORE_SETTINGS.kyc, ...s.kyc, docs: { ...DEFAULT_STORE_SETTINGS.kyc.docs, ...s.kyc?.docs } },
-    payout: { ...DEFAULT_STORE_SETTINGS.payout, ...s.payout },
-    watermark: { ...DEFAULT_STORE_SETTINGS.watermark, ...s.watermark },
-    intl: { ...DEFAULT_STORE_SETTINGS.intl, ...s.intl },
-    terms: s.terms ?? DEFAULT_STORE_SETTINGS.terms,
-  }
-}
-
-/**
- * Store settings. The mock API has no store-settings endpoint yet, so this page keeps its data
- * in localStorage (key frameline.storeSettings) and simulates KYC review and bank verification.
- */
+/** Store settings: KYC, payout account, sale watermark, international selling and terms (api.getStoreSettings / updateStoreSettings). */
 export default function StoreSettings() {
-  const toast = useToast()
+  const q = useStoreSettings()
   const [params, setParams] = useSearchParams()
   const tab = (TABS.some((t) => t.value === params.get('tab')) ? params.get('tab') : 'kyc') as TabId
   const setTab = (t: TabId) => setParams((p) => { p.set('tab', t); return p }, { replace: true })
+  const saved = useMemo(() => (q.data ? fromApi(q.data) : null), [q.data])
 
-  const [saved, setSaved] = useState<StoreSettingsData>(load)
+  if (q.isError) return <div className="p-6"><QueryError error={q.error} retry={() => q.refetch()} /></div>
+  if (!saved) return (
+    <div className="flex flex-col gap-4 px-4 py-6 sm:px-7">
+      <Skeleton className="h-10 w-64" /><Skeleton className="h-9" /><Skeleton className="h-[360px]" />
+    </div>
+  )
+  return <StoreSettingsForm saved={saved} tab={tab} setTab={setTab} />
+}
+
+function StoreSettingsForm({ saved, tab, setTab }: { saved: StoreSettingsData; tab: TabId; setTab: (t: TabId) => void }) {
+  const api = useApi()
+  const toast = useToast()
   const [draft, setDraft] = useState<StoreSettingsData>(saved)
   const [showErrors, setShowErrors] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [serverErrors, setServerErrors] = useState<Errors>({})
 
-  const dirty = useMemo(() => JSON.stringify(saved) !== JSON.stringify(draft), [saved, draft])
-  const errors = useMemo(() => (showErrors ? validate(draft) : {}), [draft, showErrors])
+  const patch = useMemo(() => toPatch(saved, draft), [saved, draft])
+  const dirty = Object.keys(patch).length > 0
+  const changedTabs = new Set((Object.keys(patch) as (keyof StoreSettingsPatch)[]).map((s) => SECTION_TAB[s]))
+  const localErrors = useMemo(() => {
+    const all = validate(draft)
+    return Object.fromEntries(Object.entries(all).filter(([k]) => changedTabs.has(k.split('.')[0] as TabId)))
+  }, [draft, patch]) // eslint-disable-line react-hooks/exhaustive-deps
+  const errors: Errors = { ...(showErrors ? localErrors : {}), ...serverErrors }
   const errorTabs = new Set(Object.keys(errors).map((k) => k.split('.')[0]))
+
+  // Live updates (e.g. the bank account finishing verification) refresh `saved`: pick up server-side
+  // changes in sections the user isn't editing.
+  useEffect(() => {
+    setDraft((d) => {
+      const next = { ...d }
+      if (!patch.payout) next.payout = saved.payout
+      if (!patch.kyc) next.kyc = saved.kyc
+      return next
+    })
+  }, [saved]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!dirty) return
@@ -55,33 +74,31 @@ export default function StoreSettings() {
     return () => window.removeEventListener('beforeunload', onUnload)
   }, [dirty])
 
-  const set: TabProps['set'] = (k, patch) => setDraft((d) => ({ ...d, [k]: { ...d[k], ...patch } }))
+  const set: TabProps['set'] = (k, p) => {
+    setDraft((d) => ({ ...d, [k]: { ...d[k], ...p } }))
+    setServerErrors((e) => Object.fromEntries(Object.entries(e).filter(([key]) => !key.startsWith(k === 'intl' ? 'international' : k === 'payout' ? 'payouts' : k))))
+  }
 
-  const save = async () => {
-    const errs = validate(draft)
-    if (Object.keys(errs).length) {
+  const save = useAction(() => api.updateStoreSettings(patch), {
+    success: (s) => (patch.payout && !s.payout.verified ? 'Saved · we’re sending ₹1 to verify your bank account' : 'Saved'),
+    onSuccess: (s) => { setDraft(fromApi(s)); setShowErrors(false); setServerErrors({}) },
+    onError: (err) => {
+      const fe = apiFieldErrors(err)
+      setServerErrors(fe)
+      const first = Object.keys(fe)[0]
+      if (first) setTab(first.split('.')[0] as TabId)
+    },
+  })
+
+  const submit = () => {
+    if (Object.keys(localErrors).length) {
       setShowErrors(true)
-      const first = Object.keys(errs)[0].split('.')[0] as TabId
-      setTab(first)
-      toast.error('Some details need fixing', `${Object.keys(errs).length} ${Object.keys(errs).length === 1 ? 'field has' : 'fields have'} a problem. They’re marked in red.`)
+      setTab(Object.keys(localErrors)[0].split('.')[0] as TabId)
+      const n = Object.keys(localErrors).length
+      toast.error('Some details need fixing', `${n} ${n === 1 ? 'field has' : 'fields have'} a problem. They’re marked in red.`)
       return
     }
-    setSaving(true)
-    await new Promise((r) => setTimeout(r, 350))
-    const needsVerify = draft.payout.status === 'unverified'
-    const next: StoreSettingsData = needsVerify ? { ...draft, payout: { ...draft.payout, status: 'verifying' } } : draft
-    writeLocal(STORE_SETTINGS_KEY, next)
-    setSaved(next); setDraft(next); setSaving(false); setShowErrors(false)
-    toast.success('Saved', needsVerify ? 'We’re sending ₹1 to your bank account to verify it.' : undefined)
-    if (needsVerify) {
-      setTimeout(() => {
-        const verified = { ...next, payout: { ...next.payout, status: 'verified' as const } }
-        writeLocal(STORE_SETTINGS_KEY, verified)
-        setSaved(verified)
-        setDraft((d) => (d.payout.status === 'verifying' ? { ...d, payout: { ...d.payout, status: 'verified' } } : d))
-        toast.success('Bank account verified', 'Payouts are on.')
-      }, 3000)
-    }
+    save.mutate(undefined)
   }
 
   const props: TabProps = { data: draft, set, errors }
@@ -90,7 +107,7 @@ export default function StoreSettings() {
       <PageHeader
         crumb={<Link to="/store" className="hover:text-ink">Store /</Link>}
         title="Store settings" subtitle="Needed once before your first payout."
-        actions={<Button loading={saving} disabled={!dirty} onClick={save}>Save</Button>}
+        actions={<Button loading={save.isPending} disabled={!dirty} onClick={submit}>Save</Button>}
       />
       <div className="flex flex-1 flex-col gap-4 px-4 pb-6 sm:px-7">
         <TabBar value={tab} onChange={setTab} tabs={TABS.map((t) => ({ ...t, label: <>{t.label}{errorTabs.has(t.value) && <span className="size-1.5 rounded-full bg-bad" aria-label="has errors" />}</> }))} />
@@ -98,15 +115,15 @@ export default function StoreSettings() {
         {tab === 'payouts' && <PayoutsTab {...props} />}
         {tab === 'watermark' && <WatermarkTab {...props} />}
         {tab === 'international' && <InternationalTab {...props} />}
-        {tab === 'terms' && <TermsTab terms={draft.terms} setTerms={(terms) => setDraft((d) => ({ ...d, terms }))} errors={errors} />}
+        {tab === 'terms' && <TermsTab terms={draft.terms} setTerms={(terms) => { setDraft((d) => ({ ...d, terms })); setServerErrors((e) => ({ ...e, 'terms.terms': undefined })) }} errors={errors} />}
       </div>
       <div className={cn('sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur sm:px-7', !dirty && 'text-ink-3')}>
         <span className="mr-auto flex items-center gap-2 text-[12.5px]">
           <span className={cn('size-2 rounded-full', dirty ? 'bg-warn' : 'bg-ok')} aria-hidden />
           {dirty ? 'Unsaved changes' : 'All changes saved'}
         </span>
-        {dirty && <Button variant="ghost" onClick={() => { setDraft(saved); setShowErrors(false) }}>Discard</Button>}
-        <Button variant="primary" loading={saving} disabled={!dirty} onClick={save}>Save changes</Button>
+        {dirty && <Button variant="ghost" onClick={() => { setDraft(saved); setShowErrors(false); setServerErrors({}) }}>Discard</Button>}
+        <Button variant="primary" loading={save.isPending} disabled={!dirty} onClick={submit}>Save changes</Button>
       </div>
     </div>
   )

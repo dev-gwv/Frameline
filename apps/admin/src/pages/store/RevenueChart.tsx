@@ -27,7 +27,7 @@ export function RevenueChart({ points }: { points: DayPoint[] }) {
   const H = 180, top = 10, bottom = 24, left = 44
   const plotH = H - top - bottom
   const { step, yMax } = useMemo(() => {
-    const max = Math.max(1, ...points.map((p) => p.revenue))
+    const max = Math.max(100, ...points.map((p) => p.revenue))
     const s = niceStep(max)
     return { step: s, yMax: s * 3 }
   }, [points])
@@ -37,6 +37,13 @@ export function RevenueChart({ points }: { points: DayPoint[] }) {
   const y = (v: number) => top + plotH - (v / yMax) * plotH
   const labelEvery = Math.ceil(points.length / Math.max(2, Math.floor(plotW / 70)))
   const h = hover !== null ? points[hover] : null
+  // 7-day average as a smooth line (quadratic midpoints), so sparse days still read as a trend.
+  const pts = points.map((p, i) => [left + i * slot + slot / 2, y(p.avg)] as const)
+  const trend = pts.length > 1 ? pts.reduce((d, [px, py], i) => {
+    if (i === 0) return `M${px},${py}`
+    const [qx, qy] = pts[i - 1]
+    return `${d} Q${qx},${qy} ${(qx + px) / 2},${(qy + py) / 2}`
+  }, '') + ` T${pts[pts.length - 1][0]},${pts[pts.length - 1][1]}` : ''
 
   return (
     <div ref={wrap} className="relative w-full min-w-0 overflow-hidden" onMouseLeave={() => setHover(null)}>
@@ -75,6 +82,7 @@ export function RevenueChart({ points }: { points: DayPoint[] }) {
             </g>
           )
         })}
+        {trend && points.some((p) => p.avg > 0) && <path d={trend} fill="none" stroke="var(--accent-text)" strokeWidth={1.5} strokeOpacity={0.7} strokeLinecap="round" pointerEvents="none" />}
       </svg>
       {h && hover !== null && (
         <div

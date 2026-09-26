@@ -1,56 +1,97 @@
+import { ApiError, type KycDocKind, type StoreSettings, type StoreSettingsPatch } from '@frameline/shared'
 import { GSTIN_RE, IFSC_RE, PAN_RE, PIN_RE } from '../../wallet/lib'
 
-export type DocId = 'pan' | 'id' | 'gst' | 'cheque'
+export type DocId = KycDocKind
 export type DocStatus = 'verified' | 'review' | 'needed'
 export interface DocState { file: string; status: DocStatus }
 
+/** Form shape for the store settings page (built from, and saved back to, the API's StoreSettings). */
 export interface StoreSettingsData {
   kyc: {
     legalName: string; pan: string; gst: 'yes' | 'no'; gstin: string
     docs: Record<DocId, DocState>
     street: string; city: string; state: string; postal: string
   }
-  payout: { holder: string; account: string; ifsc: string; bank: string; branch: string; status: 'verified' | 'verifying' | 'unverified' }
-  watermark: { template: 'forsale' | 'centre'; text: string; orientation: 'diagonal' | 'vertical' | 'horizontal'; size: number; opacity: number; color: string }
+  /** `account` is write-only: empty means "keep the saved account" (shown as last 4 digits). */
+  payout: { holder: string; account: string; accountLast4: string; ifsc: string; bank: string; branch: string; status: 'verified' | 'verifying' | 'unverified' }
+  watermark: StoreSettings['saleWatermark']
   intl: { enabled: boolean; plan: 'starter' | 'growth' | 'pro'; paymentLink: string; upiQrName: string; upiQrUrl: string; email: string; whatsapp: string }
   terms: string
 }
 
-export const STORE_SETTINGS_KEY = 'frameline.storeSettings'
+const DOC_IDS: DocId[] = ['pan', 'id', 'gst', 'cheque']
 
-export const DEFAULT_TERMS = `Photo-selling terms
-
-1. What you buy. Digital downloads are full-resolution JPG files for personal use: sharing with family and friends and posting on social media with credit to the studio. Commercial use (ads, resale, publications) needs written permission from the studio.
-
-2. Delivery. Downloads are available right after payment and stay in your account for 12 months. Prints ship within 5 working days of payment.
-
-3. Refunds. You can ask for a refund within 3 days of purchase if a download is broken or a print arrives damaged. Refunds go back to the original payment method within 7 working days.
-
-4. Watermarks. Preview photos carry a watermark. Purchased photos are delivered without it.
-
-5. Privacy. Your email and phone number are used only to deliver your order and send its receipt.
-
-6. Contact. Questions about an order go to the studio first; you can also reach Frameline support from your receipt.`
-
-export const DEFAULT_STORE_SETTINGS: StoreSettingsData = {
-  kyc: {
-    legalName: 'Northlight Studio LLP', pan: 'AAKFN4521Q', gst: 'yes', gstin: '27AAKFN4521Q1Z8',
-    docs: {
-      pan: { file: 'pan-card.pdf', status: 'verified' },
-      id: { file: 'aadhaar.jpg', status: 'verified' },
-      gst: { file: 'gst-cert.pdf', status: 'review' },
-      cheque: { file: '', status: 'needed' },
+export function fromApi(s: StoreSettings): StoreSettingsData {
+  const docs = Object.fromEntries(DOC_IDS.map((id) => {
+    const d = s.kyc.documents.find((x) => x.kind === id)
+    return [id, { file: d?.fileName ?? '', status: d?.status ?? 'needed' }]
+  })) as Record<DocId, DocState>
+  const i = s.international
+  return {
+    kyc: {
+      legalName: s.kyc.legalName, pan: s.kyc.pan, gst: s.kyc.gstRegistered ? 'yes' : 'no', gstin: s.kyc.gstin, docs,
+      street: s.kyc.address.street, city: s.kyc.address.city, state: s.kyc.address.state, postal: s.kyc.address.postal,
     },
-    street: '14 Hill Road, Bandra West', city: 'Mumbai', state: 'Maharashtra', postal: '400050',
-  },
-  payout: { holder: 'Northlight Studio LLP', account: '50100234474471', ifsc: 'HDFC0001234', bank: 'HDFC Bank', branch: 'Andheri West', status: 'verified' },
-  watermark: { template: 'forsale', text: 'FOR SALE · NORTHLIGHT', orientation: 'diagonal', size: 2, opacity: 35, color: '#FFFFFF' },
-  intl: { enabled: false, plan: 'starter', paymentLink: '', upiQrName: '', upiQrUrl: '', email: 'studio@northlight.in', whatsapp: '+91 98200 41177' },
-  terms: DEFAULT_TERMS,
+    // Saved but not yet verified = the (simulated) penny-drop check is running.
+    payout: { ...s.payout, account: '', status: s.payout.verified ? 'verified' : s.payout.accountLast4 ? 'verifying' : 'unverified' },
+    watermark: { ...s.saleWatermark },
+    intl: { enabled: i.enabled, plan: i.plan ?? 'starter', paymentLink: i.paymentLink ?? '', upiQrName: i.upiQrName ?? '', upiQrUrl: i.upiQrUrl ?? '', email: i.email ?? '', whatsapp: i.whatsapp ?? '' },
+    terms: s.terms,
+  }
+}
+
+/** Only the fields that changed, so untouched sections are never re-validated by the API. */
+export function toPatch(saved: StoreSettingsData, d: StoreSettingsData): StoreSettingsPatch {
+  const diff = <T extends object>(a: T, b: T, keys: (keyof T)[]) => {
+    const out: Partial<T> = {}
+    for (const k of keys) if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) out[k] = b[k]
+    return out
+  }
+  const patch: StoreSettingsPatch = {}
+  const k = d.kyc, sk = saved.kyc
+  const kyc: NonNullable<StoreSettingsPatch['kyc']> = diff(
+    { legalName: sk.legalName, pan: sk.pan, gstin: sk.gstin },
+    { legalName: k.legalName.trim(), pan: k.pan, gstin: k.gst === 'yes' ? k.gstin : '' }, ['legalName', 'pan', 'gstin'])
+  if (k.gst !== sk.gst) kyc.gstRegistered = k.gst === 'yes'
+  const address = diff({ street: sk.street, city: sk.city, state: sk.state, postal: sk.postal }, { street: k.street.trim(), city: k.city.trim(), state: k.state, postal: k.postal }, ['street', 'city', 'state', 'postal'])
+  if (Object.keys(address).length) kyc.address = address
+  if (JSON.stringify(k.docs) !== JSON.stringify(sk.docs)) kyc.documents = DOC_IDS.map((id) => ({ kind: id, fileName: k.docs[id].file, status: k.docs[id].status }))
+  if (Object.keys(kyc).length) patch.kyc = kyc
+
+  const p = d.payout, sp = saved.payout
+  const payout: NonNullable<StoreSettingsPatch['payout']> = diff(
+    { holder: sp.holder, ifsc: sp.ifsc, bank: sp.bank, branch: sp.branch },
+    { holder: p.holder.trim(), ifsc: p.ifsc, bank: p.bank.trim(), branch: p.branch.trim() }, ['holder', 'ifsc', 'bank', 'branch'])
+  if (p.account) payout.accountNumber = p.account
+  if (Object.keys(payout).length) patch.payout = payout
+
+  const wm = diff(saved.watermark, d.watermark, ['template', 'text', 'orientation', 'size', 'opacity', 'color'])
+  if (Object.keys(wm).length) patch.saleWatermark = wm
+  const intl = diff(saved.intl, { ...d.intl, paymentLink: d.intl.paymentLink.trim() }, ['enabled', 'plan', 'paymentLink', 'upiQrName', 'upiQrUrl', 'email', 'whatsapp'])
+  if (Object.keys(intl).length) patch.international = intl
+  if (d.terms !== saved.terms) patch.terms = d.terms
+  return patch
 }
 
 export type TabId = 'kyc' | 'payouts' | 'watermark' | 'international' | 'terms'
 export type Errors = Partial<Record<string, string>>
+
+/** Maps the API's 422 field paths (e.g. "kyc.address.city", "payout.accountNumber") to this form's "tab.field" keys. */
+export function apiFieldErrors(err: unknown): Errors {
+  if (!(err instanceof ApiError) || !err.fieldErrors.length) return {}
+  const out: Errors = {}
+  for (const f of err.fieldErrors) {
+    const [section, ...rest] = f.field.split('.')
+    const leaf = rest[rest.length - 1] ?? section
+    const key = section === 'kyc' ? `kyc.${leaf}`
+      : section === 'payout' ? `payouts.${leaf === 'accountNumber' ? 'account' : leaf}`
+      : section === 'saleWatermark' ? `watermark.${leaf}`
+      : section === 'international' ? `international.${leaf}`
+      : section === 'terms' ? 'terms.terms' : f.field
+    out[key] = f.message
+  }
+  return out
+}
 
 /** Field errors keyed "tab.field". */
 export function validate(d: StoreSettingsData): Errors {
@@ -66,7 +107,7 @@ export function validate(d: StoreSettingsData): Errors {
   if (!PIN_RE.test(k.postal)) e['kyc.postal'] = 'Postal code is 6 digits and can’t start with 0'
   const p = d.payout
   if (!p.holder.trim()) e['payouts.holder'] = 'Enter the name on the bank account'
-  if (!/^\d{9,18}$/.test(p.account)) e['payouts.account'] = 'Account number is 9 to 18 digits'
+  if (p.account ? !/^\d{9,18}$/.test(p.account) : !p.accountLast4) e['payouts.account'] = 'Account number is 9 to 18 digits'
   if (!IFSC_RE.test(p.ifsc)) e['payouts.ifsc'] = 'IFSC is 11 characters: 4 letters, a 0, then 6 letters or digits (e.g. HDFC0001234)'
   if (!p.bank.trim()) e['payouts.bank'] = 'Enter the bank name'
   const w = d.watermark

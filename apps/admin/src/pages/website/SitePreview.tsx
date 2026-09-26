@@ -1,7 +1,7 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
-import { Instagram, Globe, Lock, MapPin, Phone, Mail } from 'lucide-react'
+import { Instagram, Globe, Link2, Lock, MapPin, Phone, Mail } from 'lucide-react'
 import { tone, toneCss, type PhotoEvent, type Studio, type Website } from '@frameline/shared'
-import { FAQ, SERVICES, TESTIMONIALS, THEMES, type SiteTheme } from './siteContent'
+import { THEMES, type SiteTheme } from './siteContent'
 import { onColor } from './helpers'
 
 export type Device = 'desktop' | 'phone'
@@ -132,11 +132,13 @@ function Cta({ brand, label = 'Check a date', light }: { brand: string; label?: 
 function Cover(c: SectionCtx) {
   const { t, narrow, brand, font, website, galleries } = c
   const tones = galleries[0]?.coverTones ?? [tone(3), tone(0), tone(12)]
+  // The studio cover photo (Settings → Studio profile) leads; gallery colours fill the rest.
+  const hero = c.studio.coverUrl ? `center / cover no-repeat url("${c.studio.coverUrl}")` : toneCss(tones[0])
   const big = narrow ? 'text-[28px]' : 'text-[40px]'
   switch (website.template) {
     case 'editorial':
       return (
-        <section className="relative flex items-end p-6" style={{ minHeight: narrow ? 360 : 300, background: toneCss(tones[0]) }}>
+        <section className="relative flex items-end p-6" style={{ minHeight: narrow ? 360 : 300, background: hero }}>
           <span className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(0,0,0,.25), transparent 40%, rgba(0,0,0,.45))' }} aria-hidden />
           <div className="relative text-white">
             <Headline {...c} className={`${big} max-w-[16ch] font-semibold leading-[1.05]`} style={font(true)} />
@@ -152,7 +154,7 @@ function Cover(c: SectionCtx) {
             <Headline {...c} className={`${narrow ? 'text-[24px]' : 'text-[28px]'} font-semibold leading-tight`} style={font(false)} />
             <Cta brand={brand} />
           </div>
-          <div className="aspect-[4/5] rounded" style={{ background: toneCss(tones[0]) }} />
+          <div className="aspect-[4/5] rounded" style={{ background: hero }} />
         </section>
       )
     case 'bold':
@@ -183,7 +185,7 @@ function Cover(c: SectionCtx) {
             <Cta brand={brand} />
           </div>
           <div className="grid grid-cols-[2fr_1fr] gap-1.5" style={{ height: narrow ? 220 : 260 }}>
-            <div style={{ background: toneCss(tones[0]) }} />
+            <div style={{ background: hero }} />
             <div className="grid gap-1.5"><div style={{ background: toneCss(tones[1]) }} /><div style={{ background: toneCss(tones[2]) }} /></div>
           </div>
         </section>
@@ -247,51 +249,65 @@ function Galleries(c: SectionCtx) {
   )
 }
 
+/** Shown in the preview when a list is empty (visitors never see a blank section: it's hidden on the live site). */
+function EmptyNote({ c, children }: { c: SectionCtx; children: ReactNode }) {
+  return <p className="rounded-md px-3 py-4 text-center text-[12px] italic" style={{ color: c.t.muted, border: `1px dashed ${c.t.line}` }}>{children}</p>
+}
+
 function Services(c: SectionCtx) {
-  const { t, narrow } = c
+  const { t, narrow, studio } = c
+  if (!studio.services.length && !c.onHeadlineChange) return null // hidden on the live site until there is content
   return (
     <section className="px-6 py-8">
       <SectionTitle c={c}>Services</SectionTitle>
-      <div className={`grid gap-3 ${narrow ? '' : 'grid-cols-3'}`}>
-        {SERVICES.map((s) => (
-          <div key={s.name} className="rounded-md p-3" style={{ border: `1px solid ${t.line}` }}>
-            <b className="block">{s.name}</b>
-            <span className="text-[12px] font-bold" style={{ color: c.brand }}>{s.price}</span>
-            <p className="mt-1 text-[11.5px]" style={{ color: t.muted }}>{s.detail}</p>
-          </div>
-        ))}
-      </div>
+      {!studio.services.length ? <EmptyNote c={c}>Add your services below the preview.</EmptyNote> : (
+        <div className={`grid gap-3 ${narrow ? '' : 'grid-cols-3'}`}>
+          {studio.services.map((s) => (
+            <div key={s.id} className="rounded-md p-3" style={{ border: `1px solid ${t.line}` }}>
+              <b className="block">{s.name}</b>
+              <span className="text-[12px] font-bold" style={{ color: c.brand }}>{s.price}</span>
+              {s.description && <p className="mt-1 text-[11.5px]" style={{ color: t.muted }}>{s.description}</p>}
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   )
 }
 
 function Testimonials(c: SectionCtx) {
-  const { t, narrow, font } = c
+  const { t, narrow, font, studio } = c
+  if (!studio.testimonials.length && !c.onHeadlineChange) return null // hidden on the live site until there is content
   return (
     <section className="px-6 py-8" style={{ background: t.card }}>
       <SectionTitle c={c}>Kind words</SectionTitle>
-      <div className={`grid gap-4 ${narrow ? '' : 'grid-cols-2'}`}>
-        {TESTIMONIALS.map((q) => (
-          <figure key={q.name} className="flex gap-3">
-            <span className="size-10 shrink-0 rounded-full" style={{ background: toneCss(tone(q.tone)) }} aria-hidden />
-            <div>
-              <blockquote className="text-[14px] italic leading-snug" style={font(true)}>“{q.quote}”</blockquote>
-              <figcaption className="mt-1 text-[11px]" style={{ color: t.muted }}>{q.name} · {q.event}</figcaption>
-            </div>
-          </figure>
-        ))}
-      </div>
+      {!studio.testimonials.length ? <EmptyNote c={c}>Add what past clients said below the preview.</EmptyNote> : (
+        <div className={`grid gap-4 ${narrow ? '' : 'grid-cols-2'}`}>
+          {studio.testimonials.map((q, i) => (
+            <figure key={q.id} className="flex gap-3">
+              {q.photoUrl
+                ? <img src={q.photoUrl} alt="" className="size-10 shrink-0 rounded-full object-cover" />
+                : <span className="size-10 shrink-0 rounded-full" style={{ background: toneCss(tone(i * 6)) }} aria-hidden />}
+              <div>
+                <blockquote className="text-[14px] italic leading-snug" style={font(true)}>“{q.quote}”</blockquote>
+                <figcaption className="mt-1 text-[11px]" style={{ color: t.muted }}>{q.name}{q.detail ? ` · ${q.detail}` : ''}</figcaption>
+              </div>
+            </figure>
+          ))}
+        </div>
+      )}
     </section>
   )
 }
 
 function Questions(c: SectionCtx) {
-  const { t } = c
+  const { t, studio } = c
+  if (!studio.faq.length && !c.onHeadlineChange) return null // hidden on the live site until there is content
   return (
     <section className="px-6 py-8">
       <SectionTitle c={c}>Questions</SectionTitle>
-      {FAQ.map((f) => (
-        <details key={f.q} className="py-2" style={{ borderTop: `1px solid ${t.line}` }}>
+      {!studio.faq.length ? <EmptyNote c={c}>Add common questions below the preview.</EmptyNote> : studio.faq.map((f) => (
+        <details key={f.id} className="py-2" style={{ borderTop: `1px solid ${t.line}` }}>
           <summary className="cursor-pointer font-bold">{f.q}</summary>
           <p className="mt-1 text-[12px]" style={{ color: t.muted }}>{f.a}</p>
         </details>
@@ -339,10 +355,12 @@ function Location(c: SectionCtx) {
 
 function Social(c: SectionCtx) {
   const { t, studio } = c
+  const host = (u: string) => u.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')
   return (
     <section className="flex flex-wrap items-center justify-center gap-4 px-6 py-6 text-[12px]" style={{ color: t.muted }}>
       {studio.instagram && <span className="inline-flex items-center gap-1.5"><Instagram size={14} />{studio.instagram}</span>}
-      {studio.website && <span className="inline-flex items-center gap-1.5"><Globe size={14} />{studio.website.replace(/^https?:\/\//, '')}</span>}
+      {studio.socialLinks.map((l) => <span key={l.platform + l.url} className="inline-flex items-center gap-1.5"><Link2 size={14} />{host(l.url)}</span>)}
+      {studio.website && <span className="inline-flex items-center gap-1.5"><Globe size={14} />{host(studio.website)}</span>}
     </section>
   )
 }

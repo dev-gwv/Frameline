@@ -1,12 +1,15 @@
 import type { CSSProperties } from 'react'
 import type { WatermarkSettings } from '@frameline/shared'
-import { fontStack, LOGO_SIZE, TEXT_SIZE, type LocalExtras } from './lib'
+import { fontStack, LOGO_SIZE, TEXT_SIZE } from './lib'
 
-/** The simple watermark drawn on top of a PhotoFrame. Sizes are in cqw (share of photo width). */
-export function WatermarkOverlay({ wm, extras }: { wm: WatermarkSettings; extras: LocalExtras }) {
+/**
+ * The simple watermark drawn on top of a PhotoFrame. Sizes are in cqw (share of photo width);
+ * `edgeOffset` is a share of the short side, so portrait and landscape get the same margin.
+ */
+export function WatermarkOverlay({ wm, ratio = 1.5 }: { wm: WatermarkSettings; ratio?: number }) {
   const top = wm.position[0] === 't'
   const left = wm.position[1] === 'l'
-  const edge = `${extras.offset}cqw`
+  const edge = `${(wm.edgeOffset ?? 3) * Math.min(1, 1 / ratio)}cqw`
   const pos: CSSProperties = {
     position: 'absolute',
     [top ? 'top' : 'bottom']: edge,
@@ -19,10 +22,10 @@ export function WatermarkOverlay({ wm, extras }: { wm: WatermarkSettings; extras
     maxWidth: '70cqw',
   }
   if (wm.mode === 'logo') {
-    if (!extras.logoUrl) {
+    if (!wm.logoUrl) {
       return <div style={{ ...pos, fontSize: '2.6cqw', fontWeight: 700 }}>Your logo here</div>
     }
-    return <img src={extras.logoUrl} alt="" style={{ ...pos, width: `${LOGO_SIZE[wm.size]}cqw`, height: 'auto', filter: 'drop-shadow(0 1px 3px rgba(0,0,0,.45))' }} />
+    return <img src={wm.logoUrl} alt="" style={{ ...pos, width: `${LOGO_SIZE[wm.size]}cqw`, height: 'auto', filter: 'drop-shadow(0 1px 3px rgba(0,0,0,.45))' }} />
   }
   const size = TEXT_SIZE[wm.size]
   return (

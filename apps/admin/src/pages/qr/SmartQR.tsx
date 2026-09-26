@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Plus, QrCode } from 'lucide-react'
 import type { ID, SmartQR as SmartQRType } from '@frameline/shared'
-import { Button, EmptyState, PageHeader, Skeleton, useToast } from '@frameline/ui'
+import { Button, ConfirmDialog, EmptyState, PageHeader, Skeleton, useToast } from '@frameline/ui'
 import { useApi } from '../../lib/api'
 import { useAction, useEvents, useQRs, useStudio } from '../../lib/queries'
 import { QueryError } from '../system'
-import { useLocalState } from './util'
-import { QRCard, TARGETS, type QRStyle } from './QRCard'
-import { NewQRModal, ScheduleModal, type ScheduledSwitch } from './modals'
+import { QRCard, TARGETS } from './QRCard'
+import { NewQRModal, ScheduleModal, scheduleOf } from './modals'
 
 export default function SmartQR() {
   const api = useApi()
@@ -17,45 +16,53 @@ export default function SmartQR() {
   const studio = useStudio()
   const [creating, setCreating] = useState(false)
   const [scheduling, setScheduling] = useState<SmartQRType | null>(null)
-  // The API has no schedule or style fields yet, so these live in localStorage.
-  const [schedules, setSchedules] = useLocalState<Record<ID, ScheduledSwitch>>('frameline.qr.schedules.v1', {})
-  const [styles, setStyles] = useLocalState<Record<ID, QRStyle>>('frameline.qr.styles.v1', {})
-
+  const [deleting, setDeleting] = useState<SmartQRType | null>(null)
   const eventName = (id: ID) => events.data?.find((e) => e.id === id)?.name ?? 'that event'
 
   const update = useAction(({ id, patch }: { id: ID; patch: Partial<SmartQRType> }) => api.updateQR(id, patch), {
     success: (_d, { patch }) =>
       patch.eventId ? `Now opens ${eventName(patch.eventId)}`
         : patch.target ? `Opens in: ${TARGETS.find((t) => t.value === patch.target)?.label}`
-          : patch.name ? 'Renamed' : 'Saved',
+          : patch.name ? 'Renamed'
+            : patch.scheduledEventId === '' ? 'Scheduled switch cancelled'
+              : patch.dotStyle ? 'Style updated'
+                : patch.logoUrl !== undefined ? (patch.logoUrl ? 'Logo added' : 'Logo removed') : 'Saved',
   })
+  const schedule = useAction(({ id, eventId, at }: { id: ID; eventId: ID; at: string }) => api.updateQR(id, { scheduledEventId: eventId, scheduledAt: at }), {
+    success: (q, { eventId, at }) => `“${q.name}” opens ${eventName(eventId)} from ${new Date(at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`,
+    onSuccess: () => setScheduling(null),
+  })
+  const clearSchedule = useAction((id: ID) => api.updateQR(id, { scheduledEventId: '', scheduledAt: '' }), {
+    success: 'Scheduled switch cancelled',
+    onSuccess: () => setScheduling(null),
+  })
+  const remove = useAction((q: SmartQRType) => api.deleteQR(q.id), { success: (_d, q) => `“${q.name}” deleted` })
   const create = useAction(({ name, eventId }: { name: string; eventId: ID }) => api.createQR(name, eventId), {
     success: (q) => `“${q.name}” created`,
     onSuccess: () => setCreating(false),
   })
 
-  // Apply scheduled switches whose time has come (checked on load and every 30 s while open).
+  // Neither the mock nor the API switches a QR by itself yet, so while this page is open we apply
+  // switches whose time has come (on load and every 30 s) and then clear the schedule.
   const applying = useRef(new Set<ID>())
   useEffect(() => {
     const run = () => {
       const now = Date.now()
-      for (const [id, s] of Object.entries(schedules)) {
-        if (new Date(s.at).getTime() > now || applying.current.has(id)) continue
-        applying.current.add(id)
-        api.updateQR(id, { eventId: s.eventId })
+      for (const q of qrs.data ?? []) {
+        const s = scheduleOf(q)
+        if (!s || new Date(s.at).getTime() > now || applying.current.has(q.id)) continue
+        applying.current.add(q.id)
+        api.updateQR(q.id, { eventId: s.eventId, scheduledEventId: '', scheduledAt: '' })
           .then(() => toast.success(`Now opens ${eventName(s.eventId)}`, 'Your scheduled switch ran.'))
-          .catch(() => { /* QR was deleted; drop the schedule */ })
-          .finally(() => {
-            applying.current.delete(id)
-            setSchedules((all) => { const n = { ...all }; delete n[id]; return n })
-          })
+          .catch(() => { /* deleted meanwhile */ })
+          .finally(() => applying.current.delete(q.id))
       }
     }
     run()
     const t = setInterval(run, 30_000)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedules, api])
+  }, [qrs.data, api])
 
   const header = (
     <PageHeader title="Smart QR" subtitle="Print a QR once and point it at a different event whenever you like."
@@ -73,15 +80,13 @@ export default function SmartQR() {
   )
   else body = (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {qrs.data.map((q, i) => (
+      {qrs.data.map((q) => (
         <QRCard key={q.id} qr={q} events={events.data!}
           studioName={studio.data?.name ?? 'Your studio'} brandColor={studio.data?.brandColor ?? '#8C2F39'}
-          style={styles[q.id] ?? { rounded: i % 3 !== 2 }}
-          schedule={schedules[q.id]}
           onUpdate={(patch) => update.mutate({ id: q.id, patch })}
-          onStyle={(s) => setStyles((all) => ({ ...all, [q.id]: s }))}
           onSchedule={() => setScheduling(q)}
-          onClearSchedule={() => { setSchedules((all) => { const n = { ...all }; delete n[q.id]; return n }); toast.success('Scheduled switch cancelled') }}
+          onClearSchedule={() => clearSchedule.mutate(q.id)}
+          onDelete={() => setDeleting(q)}
         />
       ))}
     </div>
@@ -93,20 +98,15 @@ export default function SmartQR() {
       <div className="px-4 sm:px-7">{body}</div>
       <NewQRModal open={creating} onOpenChange={setCreating} events={events.data ?? []} busy={create.isPending}
         onCreate={(name, eventId) => create.mutate({ name, eventId })} />
-      <ScheduleModal qr={scheduling} events={events.data ?? []} current={scheduling ? schedules[scheduling.id] : undefined}
+      <ScheduleModal qr={scheduling} events={events.data ?? []} busy={schedule.isPending || clearSchedule.isPending}
         onOpenChange={(v) => { if (!v) setScheduling(null) }}
-        onSave={(s) => {
-          const q = scheduling!
-          setSchedules((all) => ({ ...all, [q.id]: s }))
-          setScheduling(null)
-          toast.success('Switch scheduled', `“${q.name}” opens ${eventName(s.eventId)} from ${new Date(s.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.`)
-        }}
-        onClear={() => {
-          const q = scheduling!
-          setSchedules((all) => { const n = { ...all }; delete n[q.id]; return n })
-          setScheduling(null)
-          toast.success('Scheduled switch cancelled')
-        }} />
+        onSave={(s) => schedule.mutate({ id: scheduling!.id, ...s })}
+        onClear={() => clearSchedule.mutate(scheduling!.id)} />
+      <ConfirmDialog open={!!deleting} onOpenChange={(v) => { if (!v) setDeleting(null) }}
+        title={`Delete “${deleting?.name ?? ''}”?`}
+        body="Printed copies of this QR will stop working. Scan counts are deleted too. This can’t be undone."
+        confirmLabel="Delete QR" danger
+        onConfirm={() => { if (deleting) remove.mutate(deleting); setDeleting(null) }} />
     </div>
   )
 }

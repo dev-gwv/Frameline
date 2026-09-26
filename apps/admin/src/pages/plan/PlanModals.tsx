@@ -1,23 +1,24 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { CreditCard, Smartphone, Wallet } from 'lucide-react'
-import { fmt, type Usage } from '@frameline/shared'
-import { Button, cn, Field, Input, Meter, Modal, useToast } from '@frameline/ui'
-import { useApi } from '../../lib/api'
-import { useAction } from '../../lib/queries'
-import { useLocalState } from '../wallet/lib'
-import { usePurchases } from '../wallet/purchases'
-import { BASE_RENEWAL, withGst } from './usePlanState'
+import { ApiError, BASE_RENEWAL, fmt } from '@frameline/shared'
+import { Button, cn, Field, Input, Meter, Modal, Skeleton } from '@frameline/ui'
+import { errorMessage, useApi } from '../../lib/api'
+import { useAction, useUsageBreakdown } from '../../lib/queries'
+import { QueryError } from '../system'
+import { td, th } from '../wallet/lib'
+import { withGst } from './usePlanState'
 
 type ModalProps = { open: boolean; onOpenChange: (v: boolean) => void }
 
 /* ---------------- Payment method picker ---------------- */
 export type PayWith = 'upi' | 'card' | 'credits'
-export function PayMethods({ value, onChange, credits, needed }: { value: PayWith; onChange: (v: PayWith) => void; credits?: number; needed?: number }) {
-  const opts: { value: PayWith; label: string; hint: string; icon: ReactNode; disabled?: boolean }[] = [
+export function PayMethods({ value, onChange, credits, needed, only }: { value: PayWith; onChange: (v: PayWith) => void; credits?: number; needed?: number; only?: PayWith[] }) {
+  let opts: { value: PayWith; label: string; hint: string; icon: ReactNode; disabled?: boolean }[] = [
     { value: 'upi', label: 'UPI', hint: 'GPay, PhonePe, Paytm', icon: <Smartphone size={15} /> },
     { value: 'card', label: 'Card', hint: 'Credit or debit', icon: <CreditCard size={15} /> },
   ]
   if (credits !== undefined && needed !== undefined) opts.push({ value: 'credits', label: 'Wallet credits', hint: credits >= needed ? `${fmt.rupees(credits)} available` : `Only ${fmt.rupees(credits)} available`, icon: <Wallet size={15} />, disabled: credits < needed })
+  if (only) opts = opts.filter((o) => only.includes(o.value))
   return (
     <div role="radiogroup" aria-label="Pay with" className={cn('grid gap-2', opts.length === 3 ? 'sm:grid-cols-3' : 'grid-cols-2')}>
       {opts.map((o) => (
@@ -31,26 +32,45 @@ export function PayMethods({ value, onChange, credits, needed }: { value: PayWit
   )
 }
 
-/* ---------------- Capacity explainer ---------------- */
-export function CapacityModal({ open, onOpenChange, usage }: ModalProps & { usage: Usage }) {
-  const free = Math.max(0, usage.photosLimit - usage.photosUsed - usage.guestReserved)
+/* ---------------- Capacity explainer (api.getUsageBreakdown) ---------------- */
+export function CapacityModal({ open, onOpenChange }: ModalProps) {
+  const q = useUsageBreakdown(open)
+  const b = q.data
+  const events = b?.events.filter((e) => e.counted || e.guestUploads).sort((x, y) => y.counted - x.counted) ?? []
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="How upload capacity is calculated" width={520}
+    <Modal open={open} onOpenChange={onOpenChange} title="How upload capacity is calculated" width={600}
       footer={<Button variant="primary" onClick={() => onOpenChange(false)}>Got it</Button>}>
       <div className="flex flex-col gap-3 px-6 py-4 text-[13px]">
-        <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 font-mono tnum">
-          <span className="font-sans text-ink-2">Plan capacity this year</span><span className="text-right">{fmt.count(usage.photosLimit)}</span>
-          <span className="font-sans text-ink-2">Slots used by your uploads</span><span className="text-right">− {fmt.count(usage.photosUsed)}</span>
-          <span className="font-sans text-ink-2">Reserved for guest uploads</span><span className="text-right">− {fmt.count(usage.guestReserved)}</span>
-          <span className="border-t border-line pt-1.5 font-sans font-bold">Free to upload</span><span className="border-t border-line pt-1.5 text-right font-bold">{fmt.count(free)}</span>
-        </div>
-        <Meter value={usage.photosUsed + usage.guestReserved} max={usage.photosLimit} height={8} />
-        <ul className="flex list-disc flex-col gap-1.5 pl-5 text-ink-2">
-          <li><b className="text-ink">One photo = one slot.</b> Original-quality uploads use 2 slots because they’re stored twice.</li>
-          <li><b className="text-ink">Guest uploads are reserved up front.</b> Each event’s guest-upload limit is set aside so guests never hit a wall mid-party.</li>
-          <li><b className="text-ink">Deleted photos free their slot</b> only if deleted within 7 days of upload. After that the slot stays used for the plan year, because the photo was already delivered.</li>
-          <li><b className="text-ink">Slots reset</b> when your plan renews on {fmt.date(usage.validTill)}. Event packs add capacity to one event only.</li>
-        </ul>
+        {q.isError ? <QueryError error={q.error} retry={() => q.refetch()} /> : !b ? <Skeleton className="h-72" /> : <>
+          <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 font-mono tnum">
+            <span className="font-sans text-ink-2">Plan capacity</span><span className="text-right">{fmt.count(b.limit)}</span>
+            <span className="font-sans text-ink-2">Used by your uploads</span><span className="text-right">− {fmt.count(b.used)}</span>
+            <span className="font-sans text-ink-2">Reserved for guest uploads</span><span className="text-right">− {fmt.count(b.guestReserved)}</span>
+            <span className="border-t border-line pt-1.5 font-sans font-bold">Free to upload</span><span className="border-t border-line pt-1.5 text-right font-bold">{fmt.count(b.available)}</span>
+          </div>
+          <Meter value={b.used + b.guestReserved} max={b.limit} height={8} />
+          <ul className="flex list-disc flex-col gap-1.5 pl-5 text-ink-2">
+            {b.rules.map((r) => <li key={r}>{r}</li>)}
+          </ul>
+          {!!events.length && (
+            <div className="-mx-6 overflow-x-auto border-t border-line">
+              <table className="w-full min-w-[480px] text-[12.5px] tnum">
+                <thead><tr><th className={th}>Event</th><th className={`${th} text-right`}>Web</th><th className={`${th} text-right`}>Originals</th><th className={`${th} text-right`}>Guest</th><th className={`${th} text-right`}>Counted</th></tr></thead>
+                <tbody>
+                  {events.map((e) => (
+                    <tr key={e.eventId}>
+                      <td className={td}>{e.name}</td>
+                      <td className={`${td} text-right font-mono`}>{fmt.count(e.webPhotos)}</td>
+                      <td className={`${td} text-right font-mono`}>{fmt.count(e.originals)}</td>
+                      <td className={`${td} text-right font-mono text-ink-3`}>{fmt.count(e.guestUploads)}</td>
+                      <td className={`${td} text-right font-mono font-bold`}>{fmt.count(e.counted)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>}
       </div>
     </Modal>
   )
@@ -60,7 +80,6 @@ export function CapacityModal({ open, onOpenChange, usage }: ModalProps & { usag
 const PRESETS = [500, 1000, 5000]
 export function AddCreditsModal({ open, onOpenChange }: ModalProps) {
   const api = useApi()
-  const { add } = usePurchases()
   const [amount, setAmount] = useState('1000')
   const [pay, setPay] = useState<PayWith>('upi')
   useEffect(() => { if (open) { setAmount('1000'); setPay('upi') } }, [open])
@@ -68,7 +87,7 @@ export function AddCreditsModal({ open, onOpenChange }: ModalProps) {
   const error = !amount ? 'Enter an amount' : n < 100 ? 'Minimum is ₹100' : n > 200000 ? 'Maximum is ₹2,00,000 at a time' : ''
   const buy = useAction((v: number) => api.addCredits(v), {
     success: (bal, v) => `${fmt.rupees(v)} credits added · balance ${fmt.rupees(bal)}`,
-    onSuccess: (_, v) => { add({ item: `Wallet credits · ${fmt.rupees(v)}`, kind: 'credits', amount: v, paidWith: pay === 'upi' ? 'UPI' : 'Card' }); onOpenChange(false) },
+    onSuccess: () => onOpenChange(false),
   })
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="Add wallet credits" description="1 credit = ₹1. Use credits for event packs, renewals and AI enhance." width={480}
@@ -93,30 +112,33 @@ export function AddCreditsModal({ open, onOpenChange }: ModalProps) {
   )
 }
 
-/* ---------------- Redeem code ---------------- */
-const CODES: Record<string, number> = { WELCOME500: 500 }
+/* ---------------- Redeem code (api.redeemCoupon) ---------------- */
+const COUPON_ERRORS: Record<string, string> = {
+  invalid_coupon: 'That code isn’t valid. Check for typos; codes are letters and numbers only.',
+  coupon_used: 'This code was already used on your account.',
+}
 export function RedeemModal({ open, onOpenChange }: ModalProps) {
   const api = useApi()
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
-  const [used, setUsed] = useLocalState<string[]>('frameline.redeemed', [])
   useEffect(() => { if (open) { setCode(''); setError('') } }, [open])
-  const redeem = useAction((v: number) => api.addCredits(v), {
-    success: (bal, v) => `Code applied · ${fmt.rupees(v)} credits added (balance ${fmt.rupees(bal)})`,
-    onSuccess: () => { setUsed((l) => [...l, code.trim().toUpperCase()]); onOpenChange(false) },
+  const redeem = useAction((c: string) => api.redeemCoupon(c), { errorToast: false,
+    success: (r) => `Code applied · ${fmt.rupees(r.credits)} credits added (balance ${fmt.rupees(r.walletCredits)})`,
+    onSuccess: () => onOpenChange(false),
+    // Known coupon problems are shown next to the field instead of a toast.
+    error: 'Code not applied',
+    onError: (err) => setError(err instanceof ApiError && COUPON_ERRORS[err.code] ? COUPON_ERRORS[err.code] : errorMessage(err)),
   })
   const submit = () => {
     const c = code.trim().toUpperCase()
     if (!c) return setError('Enter the code from your email or voucher.')
-    if (used.includes(c)) return setError(`${c} was already used on this account.`)
-    if (!(c in CODES)) return setError(`${c} isn’t a valid code. Check for typos; codes are letters and numbers only.`)
-    setError(''); redeem.mutate(CODES[c])
+    setError(''); redeem.mutate(c)
   }
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="Redeem a code" width={420}
       footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" loading={redeem.isPending} onClick={submit}>Redeem</Button></>}>
       <form className="px-6 py-4" onSubmit={(e) => { e.preventDefault(); submit() }}>
-        <Field label="Code" error={error} hint="Try WELCOME500" htmlFor="redeem-code">
+        <Field label="Code" error={error} hint="Codes add wallet credits. Each code works once per studio." htmlFor="redeem-code">
           <Input id="redeem-code" autoFocus className="font-mono uppercase" value={code} onChange={(e) => { setCode(e.target.value); setError('') }} placeholder="WELCOME500" />
         </Field>
       </form>
@@ -124,16 +146,20 @@ export function RedeemModal({ open, onOpenChange }: ModalProps) {
   )
 }
 
-/* ---------------- Renewal multiplier ---------------- */
-export function MultiplierModal({ open, onOpenChange, value, onSave }: ModalProps & { value: number; onSave: (v: number) => void }) {
-  const toast = useToast()
+/* ---------------- Renewal multiplier (api.setRenewalMultiplier) ---------------- */
+export function MultiplierModal({ open, onOpenChange, value }: ModalProps & { value: number }) {
+  const api = useApi()
   const [v, setV] = useState(String(value))
   useEffect(() => { if (open) setV(value.toFixed(1)) }, [open, value])
   const n = Number(v)
   const error = !v || !Number.isFinite(n) ? 'Enter a number like 2.0' : n < 1 ? 'Minimum is 1.0 (the base price, no markup)' : n > 10 ? 'Maximum is 10.0' : ''
+  const save = useAction((m: number) => api.setRenewalMultiplier(m), {
+    success: (u) => `Renewal price saved · clients now pay ${fmt.rupees(Math.round(BASE_RENEWAL * u.renewalMultiplier))}`,
+    onSuccess: () => onOpenChange(false),
+  })
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="Client renewal pricing" description="What clients pay when they renew an event with your renewal link." width={480}
-      footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" disabled={!!error} onClick={() => { onSave(Math.round(n * 10) / 10); toast.success('Renewal price saved', `Clients now pay ${n.toFixed(1)}× the base price.`); onOpenChange(false) }}>Save</Button></>}>
+      footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" disabled={!!error} loading={save.isPending} onClick={() => save.mutate(Math.round(n * 10) / 10)}>Save</Button></>}>
       <div className="flex flex-col gap-3 px-6 py-4 text-[13px]">
         <Field label="Multiplier" error={error} htmlFor="mult">
           <Input id="mult" inputMode="decimal" className="w-32 font-mono" value={v} onChange={(e) => setV(e.target.value.replace(/[^\d.]/g, ''))} suffix={<span className="font-mono text-ink-3">×</span>} />

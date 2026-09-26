@@ -1,19 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AlertTriangle, Check, ImageOff, RotateCcw } from 'lucide-react'
-import { fmt } from '@frameline/shared'
+import { ApiError, fmt, type Photo } from '@frameline/shared'
 import { Button, Card, Chip, cn, EmptyState, Field, Meter, PageHeader, Segmented, Skeleton, Textarea, useToast } from '@frameline/ui'
 import { useApi } from '../../lib/api'
-import { useAlbums, useEvent, usePhoto } from '../../lib/queries'
+import { useAction, useAlbums, useEvent, usePhoto } from '../../lib/queries'
 import { QueryError } from '../system'
 import { Compare } from './Compare'
 import { COST, filterForPrompt, PRESETS, variation } from './presets'
 import { Tutorial } from './Tutorial'
 
 type SaveAs = 'new' | 'replace'
+/** Rough time an enhance takes; the bar eases toward 95% until the API answers. */
 const RUN_MS = 2600
 
-export function Editor({ photoId, credits, spend }: { photoId: string; credits?: number; spend: (n: number) => void }) {
+export function Editor({ photoId, credits }: { photoId: string; credits?: number }) {
   const api = useApi()
   const toast = useToast()
   const navigate = useNavigate()
@@ -30,6 +31,30 @@ export function Editor({ photoId, credits, spend }: { photoId: string; credits?:
   const [error, setError] = useState<string | null>(null)
   const timers = useRef<number[]>([])
   useEffect(() => () => timers.current.forEach(clearTimeout), [])
+
+  const enhance = useAction((v: { photo: Photo; preset?: string; prompt?: string; saveAs: SaveAs }) =>
+    api.enhancePhoto(v.photo.id, v.prompt ? { prompt: v.prompt, saveAs: v.saveAs } : { preset: v.preset, saveAs: v.saveAs }), {
+    error: 'Couldn’t save the edit',
+    onSuccess: (result, v) => {
+      if (v.saveAs === 'new') {
+        toast.toast({
+          kind: 'success', title: 'Saved as a new photo', body: `${COST} credits used.`,
+          action: { label: 'Open', onClick: () => navigate(`/events/${result.eventId}/photos/${result.id}`) },
+        })
+      } else {
+        toast.success('Original replaced', `${COST} credits used. Guests see the new version within a minute.`)
+      }
+    },
+    onError: (err) => { if (err instanceof ApiError && (err.status === 402 || err.code === 'insufficient_credits')) setError('insufficient') },
+  })
+  // Progress while the API works (it doesn't report progress, so this is time-based and stops short of 100%).
+  useEffect(() => {
+    if (!enhance.isPending) { setProgress(null); return }
+    const start = Date.now()
+    setProgress(0)
+    const i = window.setInterval(() => setProgress(Math.min(95, ((Date.now() - start) / RUN_MS) * 95)), 80)
+    return () => clearInterval(i)
+  }, [enhance.isPending])
 
   if (photo.isLoading) {
     return <div className="flex flex-col gap-4 px-4 py-6 sm:px-7"><Skeleton className="h-8 w-64" /><Skeleton className="h-[420px]" /></div>
@@ -59,39 +84,8 @@ export function Editor({ photoId, credits, spend }: { photoId: string; credits?:
   const save = () => {
     setError(null)
     if (nothingChosen) { setError('Pick a preset or describe the edit first.'); return }
-    if (credits === undefined || credits < COST) { setError('insufficient'); return }
-    setProgress(0)
-    const start = Date.now()
-    const tick = () => {
-      const v = Math.min(100, ((Date.now() - start) / RUN_MS) * 100)
-      setProgress(v)
-      if (v < 100) { timers.current.push(window.setTimeout(tick, 80)); return }
-      finish()
-    }
-    tick()
-  }
-
-  const finish = async () => {
-    try {
-      if (saveAs === 'new') {
-        const stem = p.filename.replace(/\.\w+$/, '')
-        const [created] = await api.uploadPhotos(p.eventId, p.albumId, [{
-          filename: `${stem}_enhanced.jpg`, size: p.exif.sizeBytes, url: p.url, width: p.exif.width, height: p.exif.height,
-        }], { quality: 'web' })
-        spend(COST)
-        toast.toast({
-          kind: 'success', title: `Saved as a new photo in ${albumName}`, body: `${COST} credits used.`,
-          action: created ? { label: 'Open', onClick: () => navigate(`/events/${p.eventId}/photos/${created.id}`) } : undefined,
-        })
-      } else {
-        spend(COST)
-        toast.success('Original replaced', `${COST} credits used. Guests see the new version within a minute.`)
-      }
-    } catch (e) {
-      toast.error('Couldn’t save the edit', e instanceof Error ? e.message : 'Try again in a moment.')
-    } finally {
-      setProgress(null)
-    }
+    if (credits !== undefined && credits < COST) { setError('insufficient'); return }
+    enhance.mutate({ photo: p, preset, prompt: prompt.trim() || undefined, saveAs })
   }
 
   return (

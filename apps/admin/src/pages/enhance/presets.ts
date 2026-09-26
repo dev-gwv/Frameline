@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { ENHANCE_COST } from '@frameline/shared'
 
-export const COST = 8
+/** Credits charged per enhanced photo (debited by the API). */
+export const COST = ENHANCE_COST
 
 export interface Preset { id: string; label: string; filter: string; hint: string }
 
-/** Each preset is previewed with a CSS filter until the image-edit model is wired. */
+/** Preset ids are sent to api.enhancePhoto; the on-screen preview uses a CSS filter as an approximation. */
 export const PRESETS: Preset[] = [
   { id: 'warm', label: 'Warm evening light', filter: 'sepia(.28) saturate(1.3) brightness(1.06) hue-rotate(-8deg)', hint: 'Golden-hour warmth, richer colour.' },
   { id: 'clean', label: 'Clean background', filter: 'contrast(1.12) saturate(.9) brightness(1.08)', hint: 'Removes clutter and evens out the backdrop.' },
@@ -28,23 +29,3 @@ export function filterForPrompt(prompt: string): string | undefined {
 
 /** Variation used by "Try again" so each run looks slightly different. */
 export const variation = (n: number) => (n === 0 ? '' : ` brightness(${(1 + ((n * 37) % 7 - 3) / 100).toFixed(2)}) saturate(${(1 + ((n * 53) % 9 - 4) / 100).toFixed(2)})`)
-
-const SPENT_KEY = 'frameline.enhance.spentCredits'
-
-/**
- * The API has no "debit credits" call yet, so credits spent on enhancements are
- * tracked locally and subtracted from the wallet balance for display.
- */
-export function useSpentCredits() {
-  const read = () => { try { return Number(localStorage.getItem(SPENT_KEY) ?? 0) || 0 } catch { return 0 } }
-  const [spent, setSpent] = useState(read)
-  useEffect(() => {
-    const on = (e: StorageEvent) => { if (e.key === SPENT_KEY) setSpent(read()) }
-    window.addEventListener('storage', on)
-    return () => window.removeEventListener('storage', on)
-  }, [])
-  const spend = useCallback((n: number) => {
-    setSpent((s) => { const v = s + n; try { localStorage.setItem(SPENT_KEY, String(v)) } catch { /* ignore */ } return v })
-  }, [])
-  return { spent, spend }
-}

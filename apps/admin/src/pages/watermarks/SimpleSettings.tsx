@@ -2,7 +2,8 @@ import { useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, ImageIcon, Trash2, Type, Upload } from 'lucide-react'
 import type { WatermarkSettings } from '@frameline/shared'
 import { Button, Card, cn, Field, Input, Segmented, Select, StepBadge, Tip, Toggle } from '@frameline/ui'
-import { FONTS, fontStack, POSITIONS, readAsDataUrl, type LocalExtras } from './lib'
+import { imageDataUrl } from '../qr/util'
+import { FONTS, fontStack, POSITIONS } from './lib'
 
 const MAX_LOGO = 5 * 1024 * 1024
 
@@ -23,14 +24,13 @@ const APPLY_TO: { key: keyof WatermarkSettings['applyTo']; title: string; hint: 
 ]
 
 /** Left column of the simple mode: three numbered questions and "More options". */
-export function SimpleSettings({ wm, extras, onChange, onExtras }: {
+export function SimpleSettings({ wm, onChange }: {
   wm: WatermarkSettings
-  extras: LocalExtras
   onChange: (patch: Partial<WatermarkSettings>) => void
-  onExtras: (patch: Partial<LocalExtras>) => void
 }) {
   const [more, setMore] = useState(false)
   const [logoError, setLogoError] = useState<string>()
+  const [reading, setReading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function pickLogo(file: File) {
@@ -38,7 +38,9 @@ export function SimpleSettings({ wm, extras, onChange, onExtras }: {
     const okType = ['image/png', 'image/svg+xml'].includes(file.type) || /\.(png|svg)$/i.test(file.name)
     if (!okType) { setLogoError('Use a PNG or SVG file. A transparent PNG looks best.'); return }
     if (file.size > MAX_LOGO) { setLogoError(`That file is ${(file.size / 1048576).toFixed(1)} MB. Logos must be 5 MB or smaller.`); return }
-    try { onExtras({ logoUrl: await readAsDataUrl(file), logoName: file.name }) } catch (e) { setLogoError((e as Error).message) }
+    // Stored on the watermark as a small data URL (the API keeps up to 2 KB until logo uploads exist).
+    setReading(true)
+    try { onChange({ logoUrl: await imageDataUrl(file, 2000, { keepAlpha: true }) }) } catch (e) { setLogoError((e as Error).message) } finally { setReading(false) }
   }
 
   return (
@@ -74,19 +76,19 @@ export function SimpleSettings({ wm, extras, onChange, onExtras }: {
         ) : (
           <div className="flex flex-col gap-2">
             <input ref={fileRef} type="file" accept="image/png,image/svg+xml,.png,.svg" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickLogo(f); e.target.value = '' }} />
-            {extras.logoUrl ? (
+            {wm.logoUrl ? (
               <div className="flex items-center gap-3 rounded-control border border-line p-2">
                 <div className="grid h-12 w-20 shrink-0 place-items-center rounded-md bg-side p-1.5">
-                  <img src={extras.logoUrl} alt="Your logo" className="max-h-full max-w-full object-contain" />
+                  <img src={wm.logoUrl} alt="Your logo" className="max-h-full max-w-full object-contain" />
                 </div>
-                <div className="min-w-0 flex-1 truncate text-[12px] font-semibold">{extras.logoName ?? 'Logo'}</div>
-                <Button size="sm" onClick={() => fileRef.current?.click()}>Replace</Button>
-                <Tip label="Remove logo"><Button size="sm" variant="ghost" aria-label="Remove logo" onClick={() => onExtras({ logoUrl: undefined, logoName: undefined })}><Trash2 size={13} /></Button></Tip>
+                <div className="min-w-0 flex-1 truncate text-[12px] font-semibold">Your logo</div>
+                <Button size="sm" loading={reading} onClick={() => fileRef.current?.click()}>Replace</Button>
+                <Tip label="Remove logo"><Button size="sm" variant="ghost" aria-label="Remove logo" onClick={() => onChange({ logoUrl: '' })}><Trash2 size={13} /></Button></Tip>
               </div>
             ) : (
-              <button type="button" onClick={() => fileRef.current?.click()} className="flex flex-col items-center gap-1 rounded-control border border-dashed border-line-2 px-3 py-5 text-center hover:bg-sunk">
+              <button type="button" disabled={reading} onClick={() => fileRef.current?.click()} className="flex flex-col items-center gap-1 rounded-control border border-dashed border-line-2 px-3 py-5 text-center hover:bg-sunk">
                 <Upload size={18} className="text-ink-3" />
-                <span className="text-[12.5px] font-bold">Upload your logo</span>
+                <span className="text-[12.5px] font-bold">{reading ? 'Preparing your logo…' : 'Upload your logo'}</span>
                 <span className="text-[11.5px] text-ink-3">PNG or SVG, up to 5 MB. Transparent works best.</span>
               </button>
             )}
@@ -116,8 +118,8 @@ export function SimpleSettings({ wm, extras, onChange, onExtras }: {
           <Field label={<span className="flex justify-between"><span>Opacity</span><span className="font-mono text-ink-3">{wm.opacity}%</span></span>} htmlFor="wm-opacity">
             <input id="wm-opacity" type="range" min={20} max={100} step={5} value={wm.opacity} onChange={(e) => onChange({ opacity: Number(e.target.value) })} className="w-full accent-[var(--accent)]" />
           </Field>
-          <Field label={<span className="flex justify-between"><span>Distance from the edge</span><span className="font-mono text-ink-3">{extras.offset}% of width</span></span>} htmlFor="wm-offset">
-            <input id="wm-offset" type="range" min={1} max={10} step={0.5} value={extras.offset} onChange={(e) => onExtras({ offset: Number(e.target.value) })} className="w-full accent-[var(--accent)]" />
+          <Field label={<span className="flex justify-between"><span>Distance from the edge</span><span className="font-mono text-ink-3">{wm.edgeOffset}% of short side</span></span>} htmlFor="wm-offset">
+            <input id="wm-offset" type="range" min={0} max={10} step={0.5} value={wm.edgeOffset} onChange={(e) => onChange({ edgeOffset: Number(e.target.value) })} className="w-full accent-[var(--accent)]" />
           </Field>
           <div>
             <div className="mb-1 text-[12px] font-bold text-ink-2">Apply to</div>

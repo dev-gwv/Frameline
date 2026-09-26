@@ -5,15 +5,13 @@ import { Settings2, Stamp } from 'lucide-react'
 import type { WatermarkSettings } from '@frameline/shared'
 import { Button, Chip, cn, ConfirmDialog, PageHeader, Skeleton } from '@frameline/ui'
 import { useApi } from '../../lib/api'
-import { useAction, useWatermark } from '../../lib/queries'
+import { useAction, useEvents, useWatermark } from '../../lib/queries'
 import { QueryError } from '../system'
-import { DEFAULT_EXTRAS, useLocalState, useWatermarkFonts, type LocalExtras } from './lib'
+import { useLocalState, useWatermarkFonts } from './lib'
 import { SimpleSettings } from './SimpleSettings'
 import { PreviewPanel } from './PreviewPanel'
 import { AdvancedRules } from './AdvancedRules'
-import { ADVANCED_KEY, DEFAULT_ADVANCED, enabledRuleCount, type AdvancedState } from './advanced'
-
-const EXTRAS_KEY = 'frameline.watermark.extras.v1'
+import { ADVANCED_KEY, DEFAULT_ADVANCED, localRuleCount, type AdvancedState } from './advanced'
 
 function ModeCard({ selected, icon, title, body, badge, onClick }: { selected: boolean; icon: ReactNode; title: string; body: string; badge: ReactNode; onClick: () => void }) {
   return (
@@ -38,25 +36,25 @@ export default function Watermarks() {
   const qc = useQueryClient()
   const query = useWatermark()
   const [params, setParams] = useSearchParams()
-  const mode = params.get('mode') === 'advanced' ? 'advanced' : 'simple'
-  const setMode = (m: 'simple' | 'advanced') => setParams((p) => { if (m === 'advanced') p.set('mode', 'advanced'); else p.delete('mode'); return p }, { replace: true })
+  const events = useEvents()
+  // ?event=<id> (from event settings) opens Advanced with that event's override highlighted.
+  const focusEventId = params.get('event') ?? undefined
+  const mode = params.get('mode') === 'advanced' || focusEventId ? 'advanced' : 'simple'
+  const setMode = (m: 'simple' | 'advanced') => setParams((p) => { if (m === 'advanced') p.set('mode', 'advanced'); else { p.delete('mode'); p.delete('event') } return p }, { replace: true })
 
-  const [savedExtras, setSavedExtras, extrasPersisted] = useLocalState<LocalExtras>(EXTRAS_KEY, DEFAULT_EXTRAS)
   const [advanced, setAdvanced, advancedPersisted] = useLocalState<AdvancedState>(ADVANCED_KEY, DEFAULT_ADVANCED)
   const [draft, setDraft] = useState<WatermarkSettings>()
-  const [extras, setExtras] = useState<LocalExtras>(savedExtras)
 
   useEffect(() => { if (query.data && !draft) setDraft(query.data) }, [query.data, draft])
 
-  const dirty = !!draft && !!query.data && (JSON.stringify(draft) !== JSON.stringify(query.data) || JSON.stringify(extras) !== JSON.stringify(savedExtras))
-  const invalid = !!draft && draft.mode === 'text' && !draft.text.trim()
+  const dirty = !!draft && !!query.data && JSON.stringify(draft) !== JSON.stringify(query.data)
+  const invalid = !!draft && (draft.mode === 'text' ? !draft.text.trim() : !draft.logoUrl)
 
   const save = useAction((w: WatermarkSettings) => api.updateWatermark(w), {
     success: 'Saved',
     onSuccess: (data) => {
       qc.setQueryData(['watermark'], data)
       setDraft(data)
-      setSavedExtras(extras)
     },
   })
 
@@ -70,7 +68,8 @@ export default function Watermarks() {
     return () => window.removeEventListener('beforeunload', onUnload)
   }, [dirty])
 
-  const rules = enabledRuleCount(advanced)
+  // Store mark is always on; plus local rules and events with the watermark turned off.
+  const rules = 1 + localRuleCount(advanced) + (events.data ?? []).filter((e) => e.settings.watermarkOff && !advanced.overrides[e.id]).length
 
   return (
     <div className="pb-10">
@@ -106,17 +105,13 @@ export default function Watermarks() {
         ) : mode === 'simple' ? (
           <div className="grid items-start gap-4 lg:grid-cols-[330px_1fr]">
             <div className="flex flex-col gap-2">
-              <SimpleSettings
-                wm={draft} extras={extras}
-                onChange={(patch) => setDraft((d) => (d ? { ...d, ...patch } : d))}
-                onExtras={(patch) => setExtras((x) => ({ ...x, ...patch }))}
-              />
-              {!extrasPersisted && <p className="px-1 text-[11.5px] text-warn">This browser couldn’t store your logo. It will be used for this session only.</p>}
+              <SimpleSettings wm={draft} onChange={(patch) => setDraft((d) => (d ? { ...d, ...patch } : d))} />
+              {draft.mode === 'logo' && !draft.logoUrl && <p className="px-1 text-[11.5px] font-semibold text-bad">Upload your logo, or switch back to “Your name”, before saving.</p>}
             </div>
-            <div className="lg:sticky lg:top-4"><PreviewPanel wm={draft} extras={extras} /></div>
+            <div className="lg:sticky lg:top-4"><PreviewPanel wm={draft} /></div>
           </div>
         ) : (
-          <AdvancedRules state={advanced} setState={setAdvanced} wm={draft} persisted={advancedPersisted} />
+          <AdvancedRules state={advanced} setState={setAdvanced} wm={draft} persisted={advancedPersisted} focusEventId={focusEventId} />
         )}
       </div>
 

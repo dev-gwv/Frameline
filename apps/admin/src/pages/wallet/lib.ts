@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import type { ChipTone } from '@frameline/ui'
-import { fmt, type Order } from '@frameline/shared'
+import { fmt, STORE_COMMISSION, type Order } from '@frameline/shared'
 
 /*
  * Page-local helpers shared by the Business and Account screens (store, wallet, reports, plan, settings).
@@ -73,7 +73,6 @@ export const BILLING_KEY = 'frameline.billing'
 export const DEFAULT_BILLING: Billing = { name: 'Northlight Studio LLP', gstin: '27AAKFN4521Q1Z8', address: '14 Hill Road, Bandra West, Mumbai 400050', state: 'Maharashtra', email: 'accounts@northlight.in' }
 
 /* ---------------- Money & orders ---------------- */
-export const COMMISSION = 0.1
 export const GST = 0.18
 export const round2 = (n: number) => Math.round(n * 100) / 100
 
@@ -88,16 +87,10 @@ export const ORDER_STATUS: Record<Order['status'], { label: string; tone: ChipTo
 /** Split of one order: platform commission (incl. its GST), GST inside the seller's price, and the seller's share. */
 export function orderBreakdown(o: Order) {
   const direct = o.status === 'paid-direct'
-  const commission = direct ? 0 : round2(o.paid * COMMISSION)
+  const commission = direct ? 0 : round2(o.paid * STORE_COMMISSION)
   const platformGst = round2(commission - commission / (1 + GST))
   const sellerGst = round2(o.paid - o.paid / (1 + GST))
   return { commission, platformGst, sellerGst, share: o.share }
-}
-
-/** Sample data has buyer names only; derive a believable email for the demo. */
-export const buyerEmail = (buyer: string) => {
-  const clean = buyer.replace(/\(.*?\)/g, '').trim().toLowerCase().replace(/[^a-z ]/g, '').split(/\s+/).filter(Boolean)
-  return `${clean.join('.') || 'guest'}@gmail.com`
 }
 
 export const money = (n: number, currency: Order['currency'] = 'INR', decimals = false) =>
@@ -113,8 +106,8 @@ export async function copyText(text: string) {
 
 export function exportOrdersCsv(orders: Order[], name = 'frameline-orders') {
   downloadCsv(`${name}-${new Date().toISOString().slice(0, 10)}.csv`, [
-    ['Order', 'Date', 'Buyer', 'Event', 'Items', 'Currency', 'Paid', 'Your share', 'Status'],
-    ...orders.map((o) => [o.number, fmt.fullDateTime(o.at), o.buyer, o.eventName, o.items, o.currency, o.paid, o.share, ORDER_STATUS[o.status].label]),
+    ['Order', 'Date', 'Buyer', 'Buyer email', 'Payment', 'Event', 'Items', 'Currency', 'Paid', 'Your share', 'Status'],
+    ...orders.map((o) => [o.number, fmt.fullDateTime(o.at), o.buyer, o.buyerEmail ?? '', o.method ?? '', o.eventName, o.items, o.currency, o.paid, o.share, ORDER_STATUS[o.status].label]),
   ])
 }
 

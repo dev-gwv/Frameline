@@ -1,20 +1,40 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ImagePlus, Plus, Trash2, X } from 'lucide-react'
-import type { Studio } from '@frameline/shared'
+import type { SocialLink, Studio } from '@frameline/shared'
 import { Button, Card, cn, Field, Input, Skeleton, Textarea, Tip, useToast } from '@frameline/ui'
 import { useApi } from '../../lib/api'
 import { useAction, useStudio } from '../../lib/queries'
 import { QueryError } from '../system'
-import { EMAIL_RE, readLocal, writeLocal } from '../wallet/lib'
+import { EMAIL_RE } from '../wallet/lib'
+import { StudioContentEditor, type ContentKind } from '../website/StudioContentEditor'
 
 const COLOURS = ['#8C2F39', '#1B1712', '#C08A2C', '#2A8A8F', '#386641', '#6B4F7A']
-interface Extras { cover: string; facebook: string; youtube: string; portfolio: string[] }
-const EXTRAS_KEY = 'frameline.profileExtras'
-const DEFAULT_EXTRAS: Extras = { cover: '', facebook: '', youtube: '', portfolio: ['https://northlight.in/weddings'] }
 const URL_RE = /^https:\/\/[^\s.]+\.\S+$/
+/** Social platforms edited here; Instagram has its own Studio field. Other platforms in socialLinks are kept as they are. */
+const PLATFORMS = [
+  { id: 'facebook', label: 'Facebook', placeholder: 'https://facebook.com/…' },
+  { id: 'youtube', label: 'YouTube', placeholder: 'https://youtube.com/@…' },
+] as const
 
-type Form = Pick<Studio, 'name' | 'handle' | 'about' | 'phone' | 'email' | 'website' | 'instagram' | 'city' | 'brandColor' | 'logoUrl'>
-const pick = (s: Studio): Form => ({ name: s.name, handle: s.handle, about: s.about ?? '', phone: s.phone, email: s.email, website: s.website ?? '', instagram: s.instagram ?? '', city: s.city, brandColor: s.brandColor, logoUrl: s.logoUrl ?? '' })
+interface Form {
+  name: string; handle: string; about: string; phone: string; email: string; website: string; instagram: string; city: string
+  brandColor: string; logoUrl: string; coverUrl: string; social: Record<string, string>; portfolioLinks: string[]
+}
+const pick = (s: Studio): Form => ({
+  name: s.name, handle: s.handle, about: s.about ?? '', phone: s.phone, email: s.email, website: s.website ?? '', instagram: s.instagram ?? '',
+  city: s.city, brandColor: s.brandColor, logoUrl: s.logoUrl ?? '', coverUrl: s.coverUrl ?? '',
+  social: Object.fromEntries(PLATFORMS.map((p) => [p.id, s.socialLinks.find((l) => l.platform.toLowerCase() === p.id)?.url ?? ''])),
+  portfolioLinks: s.portfolioLinks,
+})
+/** Form → Studio patch. Empty strings clear optional fields (undefined would be dropped from the JSON body). */
+function toPatch(f: Form, studio: Studio): Partial<Studio> {
+  const others = studio.socialLinks.filter((l) => !PLATFORMS.some((p) => p.id === l.platform.toLowerCase()))
+  const socialLinks: SocialLink[] = [...PLATFORMS.filter((p) => f.social[p.id]).map((p) => ({ platform: p.id, url: f.social[p.id] })), ...others]
+  return {
+    name: f.name.trim(), handle: f.handle, about: f.about, phone: f.phone.trim(), email: f.email.trim(), website: f.website, instagram: f.instagram,
+    city: f.city.trim(), brandColor: f.brandColor, logoUrl: f.logoUrl, coverUrl: f.coverUrl, socialLinks, portfolioLinks: f.portfolioLinks.filter(Boolean),
+  }
+}
 
 function readImage(f: File, maxMb: number): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -38,37 +58,38 @@ function ProfileForm({ studio }: { studio: Studio }) {
   const api = useApi()
   const toast = useToast()
   const [form, setForm] = useState<Form>(() => pick(studio))
-  const [extras, setExtras] = useState<Extras>(() => readLocal(EXTRAS_KEY, DEFAULT_EXTRAS))
-  const [savedExtras, setSavedExtras] = useState(extras)
   const [tried, setTried] = useState(false)
+  const [contentKind, setContentKind] = useState<ContentKind>('services')
   const logoRef = useRef<HTMLInputElement>(null)
   const coverRef = useRef<HTMLInputElement>(null)
-  useEffect(() => setForm(pick(studio)), [studio])
+  // Take in server changes (e.g. after saving services below) without wiping unsaved edits.
+  const base = useRef(pick(studio))
+  useEffect(() => {
+    const next = pick(studio)
+    setForm((f) => (JSON.stringify(f) === JSON.stringify(base.current) ? next : f))
+    base.current = next
+  }, [studio])
 
   const set = (p: Partial<Form>) => setForm((f) => ({ ...f, ...p }))
-  const dirty = JSON.stringify(form) !== JSON.stringify(pick(studio)) || JSON.stringify(extras) !== JSON.stringify(savedExtras)
+  const dirty = JSON.stringify(form) !== JSON.stringify(pick(studio))
   const errors = useMemo(() => {
     const e: Partial<Record<string, string>> = {}
     if (!form.name.trim()) e.name = 'Enter your studio name'
     if (!/^[a-z0-9-]{3,30}$/.test(form.handle)) e.handle = '3–30 lowercase letters, numbers or dashes'
-    if ((form.about ?? '').length > 1000) e.about = 'Keep it under 1,000 characters'
+    if (form.about.length > 1000) e.about = 'Keep it under 1,000 characters'
     if (!/^\+?[\d\s-]{10,15}$/.test(form.phone)) e.phone = 'Enter a mobile number like +91 98200 41177'
     if (!EMAIL_RE.test(form.email)) e.email = 'Enter a valid email'
     if (form.website && !URL_RE.test(form.website)) e.website = 'Website must start with https://'
     if (form.instagram && !/^@?[A-Za-z0-9._]{1,30}$/.test(form.instagram)) e.instagram = 'Use your handle, like @northlight.studio'
     if (!form.city.trim()) e.city = 'Enter your city'
     if (!/^#[0-9a-fA-F]{6}$/.test(form.brandColor)) e.brandColor = 'Use a hex colour like #8C2F39'
-    for (const k of ['facebook', 'youtube'] as const) if (extras[k] && !URL_RE.test(extras[k])) e[k] = 'Link must start with https://'
-    extras.portfolio.forEach((p, i) => { if (p && !URL_RE.test(p)) e[`portfolio${i}`] = 'Link must start with https://' })
+    for (const p of PLATFORMS) if (form.social[p.id] && !URL_RE.test(form.social[p.id])) e[p.id] = 'Link must start with https://'
+    form.portfolioLinks.forEach((p, i) => { if (p && !URL_RE.test(p)) e[`portfolio${i}`] = 'Link must start with https://' })
     return e
-  }, [form, extras])
+  }, [form])
   const show = (k: string) => (tried || k === 'website' ? errors[k] : undefined)
 
-  const save = useAction(async () => {
-    const studioSaved = await api.updateStudio({ ...form, logoUrl: form.logoUrl || undefined, website: form.website || undefined })
-    writeLocal(EXTRAS_KEY, extras); setSavedExtras(extras)
-    return studioSaved
-  }, { success: 'Profile saved', onSuccess: () => setTried(false) })
+  const save = useAction(() => api.updateStudio(toPatch(form, studio)), { success: 'Profile saved', onSuccess: () => setTried(false) })
 
   const submit = () => {
     setTried(true)
@@ -79,7 +100,7 @@ function ProfileForm({ studio }: { studio: Studio }) {
     if (!f) return
     try {
       const url = await readImage(f, kind === 'logo' ? 1 : 2)
-      if (kind === 'logo') set({ logoUrl: url }); else setExtras((x) => ({ ...x, cover: url }))
+      set(kind === 'logo' ? { logoUrl: url } : { coverUrl: url })
     } catch (e) { toast.error('Image not added', (e as Error).message) }
   }
 
@@ -94,7 +115,7 @@ function ProfileForm({ studio }: { studio: Studio }) {
               <Input id="p-handle" className="font-mono" value={form.handle} onChange={(e) => set({ handle: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })} />
             </Field>
           </div>
-          <Field label={<span className="flex justify-between">About <span className={cn('font-mono font-medium', (form.about ?? '').length > 1000 ? 'text-bad' : 'text-ink-3')}>{(form.about ?? '').length.toLocaleString('en-IN')} / 1,000</span></span>} error={show('about')} htmlFor="p-about">
+          <Field label={<span className="flex justify-between">About <span className={cn('font-mono font-medium', form.about.length > 1000 ? 'text-bad' : 'text-ink-3')}>{form.about.length.toLocaleString('en-IN')} / 1,000</span></span>} error={show('about')} htmlFor="p-about">
             <Textarea id="p-about" rows={4} value={form.about} onChange={(e) => set({ about: e.target.value })} />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -129,10 +150,10 @@ function ProfileForm({ studio }: { studio: Studio }) {
           </Field>
           <Field label="Cover photo" hint="16:9, up to 2 MB. Shown on your website and studio app page.">
             <div className="relative aspect-video overflow-hidden rounded-card border border-line bg-sunk">
-              {extras.cover ? <img src={extras.cover} alt="Cover" className="size-full object-cover" /> : <div className="grid size-full place-items-center text-[12px] text-ink-3">No cover yet</div>}
+              {form.coverUrl ? <img src={form.coverUrl} alt="Cover" className="size-full object-cover" /> : <div className="grid size-full place-items-center text-[12px] text-ink-3">No cover yet</div>}
               <div className="absolute bottom-2 right-2 flex gap-1.5">
-                <Button size="sm" icon={<ImagePlus size={13} />} onClick={() => coverRef.current?.click()}>{extras.cover ? 'Replace' : 'Upload cover'}</Button>
-                {extras.cover && <Button size="sm" aria-label="Remove cover" onClick={() => setExtras((x) => ({ ...x, cover: '' }))}><Trash2 size={13} /></Button>}
+                <Button size="sm" icon={<ImagePlus size={13} />} onClick={() => coverRef.current?.click()}>{form.coverUrl ? 'Replace' : 'Upload cover'}</Button>
+                {form.coverUrl && <Button size="sm" aria-label="Remove cover" onClick={() => set({ coverUrl: '' })}><Trash2 size={13} /></Button>}
               </div>
               <input ref={coverRef} type="file" hidden accept="image/*" onChange={(e) => { onImage(e.target.files?.[0], 'cover'); e.target.value = '' }} />
             </div>
@@ -144,26 +165,32 @@ function ProfileForm({ studio }: { studio: Studio }) {
         <div className="flex flex-col gap-3">
           <h3 className="font-display text-[15px] font-semibold">Social links</h3>
           <Field label="Instagram" error={show('instagram')} htmlFor="p-ig"><Input id="p-ig" placeholder="@yourstudio" value={form.instagram} onChange={(e) => set({ instagram: e.target.value.trim() })} /></Field>
-          <Field label="Facebook" error={show('facebook')} htmlFor="p-fb"><Input id="p-fb" placeholder="https://facebook.com/…" value={extras.facebook} onChange={(e) => setExtras((x) => ({ ...x, facebook: e.target.value.trim() }))} /></Field>
-          <Field label="YouTube" error={show('youtube')} htmlFor="p-yt"><Input id="p-yt" placeholder="https://youtube.com/@…" value={extras.youtube} onChange={(e) => setExtras((x) => ({ ...x, youtube: e.target.value.trim() }))} /></Field>
+          {PLATFORMS.map((p) => (
+            <Field key={p.id} label={p.label} error={show(p.id)} htmlFor={`p-${p.id}`}>
+              <Input id={`p-${p.id}`} placeholder={p.placeholder} value={form.social[p.id]} onChange={(e) => set({ social: { ...form.social, [p.id]: e.target.value.trim() } })} />
+            </Field>
+          ))}
         </div>
         <div className="flex flex-col gap-3">
           <h3 className="font-display text-[15px] font-semibold">Portfolio links</h3>
-          {extras.portfolio.map((p, i) => (
+          {!form.portfolioLinks.length && <p className="text-[12px] text-ink-3">Link to albums or films hosted elsewhere, like Vimeo or your old site.</p>}
+          {form.portfolioLinks.map((p, i) => (
             <Field key={i} error={show(`portfolio${i}`)}>
               <div className="flex gap-2">
-                <Input aria-label={`Portfolio link ${i + 1}`} placeholder="https://" value={p} onChange={(e) => setExtras((x) => ({ ...x, portfolio: x.portfolio.map((v, j) => (j === i ? e.target.value.trim() : v)) }))} />
-                <Tip label="Remove link"><Button size="icon" variant="ghost" aria-label={`Remove portfolio link ${i + 1}`} onClick={() => setExtras((x) => ({ ...x, portfolio: x.portfolio.filter((_, j) => j !== i) }))}><X size={14} /></Button></Tip>
+                <Input aria-label={`Portfolio link ${i + 1}`} placeholder="https://" value={p} onChange={(e) => set({ portfolioLinks: form.portfolioLinks.map((v, j) => (j === i ? e.target.value.trim() : v)) })} />
+                <Tip label="Remove link"><Button size="icon" variant="ghost" aria-label={`Remove portfolio link ${i + 1}`} onClick={() => set({ portfolioLinks: form.portfolioLinks.filter((_, j) => j !== i) })}><X size={14} /></Button></Tip>
               </div>
             </Field>
           ))}
-          <Button size="sm" className="self-start" icon={<Plus size={13} />} disabled={extras.portfolio.length >= 6} onClick={() => setExtras((x) => ({ ...x, portfolio: [...x.portfolio, ''] }))}>Add link</Button>
+          <Button size="sm" className="self-start" icon={<Plus size={13} />} disabled={form.portfolioLinks.length >= 6} onClick={() => set({ portfolioLinks: [...form.portfolioLinks, ''] })}>Add link</Button>
         </div>
       </Card>
 
+      <StudioContentEditor studio={studio} kind={contentKind} onKindChange={setContentKind} />
+
       <div className="sticky bottom-0 z-10 -mx-4 flex items-center justify-end gap-3 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur sm:-mx-7 sm:px-7">
         <span className="mr-auto flex items-center gap-2 text-[12.5px] text-ink-2"><span className={cn('size-2 rounded-full', dirty ? 'bg-warn' : 'bg-ok')} />{dirty ? 'Unsaved changes' : 'All changes saved'}</span>
-        {dirty && <Button variant="ghost" onClick={() => { setForm(pick(studio)); setExtras(savedExtras); setTried(false) }}>Discard</Button>}
+        {dirty && <Button variant="ghost" onClick={() => { setForm(pick(studio)); setTried(false) }}>Discard</Button>}
         <Button variant="primary" disabled={!dirty} loading={save.isPending} onClick={submit}>Save changes</Button>
       </div>
     </div>

@@ -26,12 +26,11 @@ export function StatusChip({ cam, idleFor }: { cam: Camera; idleFor?: number }) 
   return <Chip dot>Offline</Chip>
 }
 
-export function CamerasTable({ cameras, events, selectedId, onSelect, today, idleFor }: {
+export function CamerasTable({ cameras, events, selectedId, onSelect, idleFor }: {
   cameras: Camera[]
   events: PhotoEvent[]
   selectedId?: string
   onSelect: (id: string) => void
-  today: (c: Camera) => number
   idleFor: (c: Camera) => number | undefined
 }) {
   const eventName = (id: string) => events.find((e) => e.id === id)?.name ?? 'Deleted event'
@@ -66,7 +65,7 @@ export function CamerasTable({ cameras, events, selectedId, onSelect, today, idl
                   <td className="px-3 py-2.5 text-ink-2">{eventName(c.eventId)} / <AlbumName eventId={c.eventId} albumId={c.albumId} /></td>
                   <td className="px-3 py-2.5 text-ink-2">{MODE_LABEL[c.mode]}</td>
                   <td className="px-3 py-2.5"><StatusChip cam={c} idleFor={idleFor(c)} /></td>
-                  <td className="px-4 py-2.5 text-right font-mono tnum">{fmt.count(today(c))}</td>
+                  <td className="px-4 py-2.5 text-right font-mono tnum">{fmt.count(c.today)}</td>
                 </tr>
               )
             })}

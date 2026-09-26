@@ -56,3 +56,14 @@ export function searchArticles(q: string) {
     .sort((x, y) => y.score - x.score)
     .map((x) => x.a)
 }
+
+/** Deep-link topics other screens use (e.g. /support?topic=google-drive-import) → article id. */
+const TOPIC_ALIASES: Record<string, string> = {
+  'google-drive-import': 'drive', 'camera-ftp': 'ftp', 'face-search': 'face-miss', 'event-expiry': 'expiry', 'gst-invoice': 'gst', refunds: 'refund',
+}
+
+export function articleForTopic(topic: string | null): Article | undefined {
+  if (!topic) return undefined
+  const id = TOPIC_ALIASES[topic] ?? topic
+  return ARTICLES.find((a) => a.id === id)
+}
