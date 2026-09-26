@@ -1,0 +1,34 @@
+# Copy to .dev.vars for `wrangler dev` (never commit .dev.vars).
+# In production set each with: wrangler secret put <NAME> --env production
+
+# ── Required ────────────────────────────────────────────────────────────────
+# HS256 key for access/guest/upload tokens and refresh-token hashing. 32+ random bytes:
+#   node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+JWT_SECRET=dev-only-change-me-dev-only-change-me-0123456789
+# Pepper mixed into OTP code hashes (separate from JWT_SECRET).
+OTP_PEPPER=dev-only-otp-pepper-change-me
+
+# ── Email (optional in dev: codes are printed to the wrangler log) ──────────
+RESEND_API_KEY=
+
+# ── Google sign-in (optional) ───────────────────────────────────────────────
+# Authorised redirect URI: <API_PUBLIC_URL or http://localhost:8787>/v1/auth/google/callback
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+# ── Direct-to-R2 presigned uploads (optional; without them parts go through the Worker) ──
+R2_ACCOUNT_ID=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+
+# ── Image processor container / service (optional; simulated when empty) ────
+PROCESSOR_URL=
+PROCESSOR_TOKEN=
+
+# ── Face search: Vectorize has no local simulator. Set to 1 only with remote bindings. ──
+VECTORIZE_REMOTE=
+
+# ── Payments (not used by v1 endpoints yet; reserved for checkout + payouts) ─
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+RAZORPAY_WEBHOOK_SECRET=

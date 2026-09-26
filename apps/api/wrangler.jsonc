@@ -1,0 +1,106 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "frameline-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
+
+  // Non-secret configuration. Secrets live in .dev.vars locally and `wrangler secret put` in production.
+  "vars": {
+    "ENVIRONMENT": "development",
+    "API_VERSION": "1.0.0",
+    "BUILD_SHA": "dev",
+    "CORS_ORIGINS": "http://localhost:5173,http://localhost:5174,http://localhost:8081,http://localhost:19006",
+    "APP_URL": "http://localhost:5173",
+    "GALLERY_URL": "http://localhost:5174",
+    "MAIL_FROM": "Frameline <login@frameline.in>",
+    "R2_BUCKET_NAME": "frameline-media"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "frameline",
+      // Replace with the id from `wrangler d1 create frameline` before deploying.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "frameline-media" }],
+
+  // OAuth state/PKCE verifiers (short TTL).
+  "kv_namespaces": [{ "binding": "KV", "id": "00000000000000000000000000000000" }],
+
+  "queues": {
+    "producers": [{ "binding": "PHOTO_QUEUE", "queue": "frameline-photos" }],
+    "consumers": [
+      {
+        "queue": "frameline-photos",
+        "max_batch_size": 10,
+        "max_batch_timeout": 2,
+        "max_retries": 5,
+        "dead_letter_queue": "frameline-photos-dlq"
+      }
+    ]
+  },
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "EVENT_HUB", "class_name": "EventHub" },
+      { "name": "RATE_LIMITER", "class_name": "RateLimiter" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["EventHub", "RateLimiter"] }],
+
+  // Face embeddings: `wrangler vectorize create frameline-faces --dimensions=512 --metric=cosine`.
+  // Vectorize has no local simulator; in `wrangler dev` face search returns 503 unless run with --remote.
+  "vectorize": [{ "binding": "FACES", "index_name": "frameline-faces" }],
+
+  // Workers Rate Limiting API. Periods can only be 10 or 60 seconds; longer windows use the RateLimiter DO.
+  "ratelimits": [
+    { "name": "RL_GLOBAL", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } },
+    { "name": "RL_PUBLIC", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
+    { "name": "RL_WRITE", "namespace_id": "1003", "simple": { "limit": 120, "period": 60 } }
+  ],
+
+  "env": {
+    "production": {
+      "name": "frameline-api",
+      "routes": [{ "pattern": "api.frameline.in", "custom_domain": true }],
+      "vars": {
+        "ENVIRONMENT": "production",
+        "API_VERSION": "1.0.0",
+        "BUILD_SHA": "set-by-ci",
+        "CORS_ORIGINS": "https://app.frameline.in,https://frameline.in",
+        "APP_URL": "https://app.frameline.in",
+        "GALLERY_URL": "https://frameline.in",
+        "API_PUBLIC_URL": "https://api.frameline.in",
+        "PUBLIC_MEDIA_BASE": "https://media.frameline.in",
+        "MAIL_FROM": "Frameline <login@frameline.in>",
+        "R2_BUCKET_NAME": "frameline-media"
+      },
+      "d1_databases": [{ "binding": "DB", "database_name": "frameline", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
+      "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "frameline-media" }],
+      "kv_namespaces": [{ "binding": "KV", "id": "00000000000000000000000000000000" }],
+      "queues": {
+        "producers": [{ "binding": "PHOTO_QUEUE", "queue": "frameline-photos" }],
+        "consumers": [{ "queue": "frameline-photos", "max_batch_size": 10, "max_batch_timeout": 2, "max_retries": 5, "dead_letter_queue": "frameline-photos-dlq" }]
+      },
+      "durable_objects": {
+        "bindings": [
+          { "name": "EVENT_HUB", "class_name": "EventHub" },
+          { "name": "RATE_LIMITER", "class_name": "RateLimiter" }
+        ]
+      },
+      "vectorize": [{ "binding": "FACES", "index_name": "frameline-faces" }],
+      "ratelimits": [
+        { "name": "RL_GLOBAL", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } },
+        { "name": "RL_PUBLIC", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
+        { "name": "RL_WRITE", "namespace_id": "1003", "simple": { "limit": 120, "period": 60 } }
+      ]
+    }
+  }
+}

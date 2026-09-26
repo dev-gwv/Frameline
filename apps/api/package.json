@@ -1,0 +1,37 @@
+{
+  "name": "@frameline/api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy --minify",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:reset:local": "tsx scripts/seed.ts --reset"
+  },
+  "dependencies": {
+    "@frameline/shared": "workspace:*",
+    "@hono/zod-openapi": "^1.6.3",
+    "@scalar/hono-api-reference": "^0.12.6",
+    "aws4fetch": "^1.0.20",
+    "drizzle-orm": "^0.45.3",
+    "hono": "^4.13.9",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260926.1",
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.23.15",
+    "typescript": "~5.8.3",
+    "vitest": "~4.1.11",
+    "wrangler": "^4.141.0",
+    "@types/node": "^26.6.3"
+  }
+}
