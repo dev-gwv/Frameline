@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
-import { ApiError, createHttpApi, createMockApi, storageTokenStore, type ChangeTopic, type FramelineApi, type FramelineHttpApi } from '@frameline/shared'
+import { ApiError, createHttpApi, createMockApi, storageGuestTokenStore, storageTokenStore, type ChangeTopic, type FramelineApi, type FramelineHttpApi } from '@frameline/shared'
 
 const STORAGE_KEY = 'frameline.mock.v1'
 /** Set to the API origin (e.g. http://localhost:8787) to use the real backend instead of sample data. */
@@ -25,6 +25,7 @@ export function createApi(): FramelineApi {
   return createHttpApi({
     baseUrl: API_URL,
     tokens: tokenStore,
+    guestTokens: storageGuestTokenStore(),
     onUnauthorized: () => {
       if (!location.pathname.startsWith('/login')) location.assign(`/login?expired=1&from=${encodeURIComponent(location.pathname + location.search)}`)
     },
