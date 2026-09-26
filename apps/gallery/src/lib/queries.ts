@@ -1,130 +1,124 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { hash, type Album, type ID, type Photo, type PhotoEvent } from '@frameline/shared'
+import { useInfiniteQuery, useQuery, type QueryClient } from '@tanstack/react-query'
+import type { Album, FramelineApi, Photo, PublicEvent, PublicStudio, WatermarkSettings } from '@frameline/shared'
 import { useApi } from './api'
+import { guest, type FaceMatch } from './guest'
 
-/** Guests never see hidden or still-processing photos. */
-export const visible = (p: Photo) => !p.hidden && p.status === 'ready'
+const up = (shortId: string | undefined) => (shortId ?? '').toUpperCase()
 
-export function useEvent(shortId: string | undefined) {
+/** Event landing data: safe subset of the event + albums + films + studio branding + `blocked`. */
+export function usePublicEvent(shortId: string | undefined) {
   const api = useApi()
   return useQuery({
-    queryKey: ['event', shortId?.toUpperCase()],
-    queryFn: () => api.getEvent(shortId!),
+    queryKey: ['event', up(shortId)],
+    queryFn: () => api.getPublicEvent(shortId!),
     enabled: !!shortId,
     retry: false,
   })
 }
 
-export function useStudio() {
-  const api = useApi()
-  return useQuery({ queryKey: ['studio'], queryFn: () => api.getStudio() })
-}
-
-export function useEvents() {
-  const api = useApi()
-  return useQuery({ queryKey: ['events'], queryFn: () => api.listEvents() })
-}
-
-export function useAlbums(eventId: ID | undefined) {
-  const api = useApi()
-  return useQuery({ queryKey: ['albums', eventId], queryFn: () => api.listAlbums(eventId!), enabled: !!eventId })
-}
-
-export function useFilms(eventId: ID | undefined) {
-  const api = useApi()
-  return useQuery({ queryKey: ['films', eventId], queryFn: () => api.listFilms(eventId!), enabled: !!eventId })
-}
-
 export function usePrices() {
   const api = useApi()
-  return useQuery({ queryKey: ['prices'], queryFn: () => api.listPrices() })
-}
-
-export function useWatermark() {
-  const api = useApi()
-  return useQuery({ queryKey: ['watermark'], queryFn: () => api.getWatermark() })
+  return useQuery({ queryKey: ['prices'], queryFn: () => api.listPrices(), retry: false })
 }
 
 /**
- * Selfie match. The mock has no face search, so a "match" is the deterministic subset of photos whose
- * faces include the matched person (about 1 in 8 of them, so counts read like a real guest: ~30–50).
- * TODO(api): replace with api.searchFaces(eventId, selfie) → personId + photo ids (Vectorize).
+ * Watermark for generated downloads. `null` when the API won't give it to a guest (the HTTP API only serves
+ * it to the studio today) — callers then fall back to a text watermark with the studio name.
  */
-export function useMatches(eventId: ID | undefined, personId: ID | undefined) {
+export const loadWatermark = (api: FramelineApi) => api.getWatermark().catch(() => null)
+export const watermarkQuery = (api: FramelineApi) => ({ queryKey: ['watermark'], queryFn: () => loadWatermark(api), staleTime: 10 * 60_000 })
+export const ensureWatermark = (qc: QueryClient, api: FramelineApi) => qc.ensureQueryData(watermarkQuery(api))
+export function useWatermark() {
+  const api = useApi()
+  return useQuery(watermarkQuery(api))
+}
+export function fallbackWatermark(studio: PublicStudio): WatermarkSettings {
+  return {
+    mode: 'text', text: studio.name, subtitle: '', position: 'br', size: 'normal', opacity: 70, font: 'Fraunces', edgeOffset: 3,
+    applyTo: { previews: false, downloads: true, guestUploads: false, originals: true },
+  }
+}
+
+/**
+ * The guest's matched photos. Face links without a person id resolve it here (after the gates) with
+ * searchFaces; the person id is then remembered for this event.
+ */
+export function useMatches(shortId: string, match: FaceMatch | undefined, enabled = true) {
   const api = useApi()
   return useQuery({
-    queryKey: ['photos', 'match', eventId, personId],
-    enabled: !!eventId && !!personId,
-    queryFn: async () => {
-      const { items } = await api.listPhotos(eventId!, { personId })
-      return items.filter((p) => visible(p) && hash(p.id + personId) % 8 === 0)
+    queryKey: ['photos', 'match', up(shortId), match?.at],
+    enabled: !!match && enabled,
+    queryFn: async (): Promise<Photo[]> => {
+      let personId = match!.personId
+      let ids = match!.photoIds
+      if (!personId && match!.key && !ids) {
+        const r = await api.searchFaces(shortId, { key: match!.key })
+        personId = r.personId ?? undefined
+        ids = personId ? undefined : r.photoIds
+        guest.patchSession(shortId, (s) => (s.match?.at === match!.at ? { match: { ...s.match, personId, photoIds: ids } } : {}))
+      }
+      if (personId) return (await api.listPublicPhotos(shortId, { personId })).items
+      if (!ids?.length) return []
+      // No person (events without face data): the API returned ids only.
+      const wanted = new Set(ids)
+      try { return (await api.listPublicPhotos(shortId)).items.filter((p) => wanted.has(p.id)) } catch { return [] }
     },
   })
 }
 
 /** Most-favourited photos; shown as the "Highlights" album. */
-export function useHighlights(eventId: ID | undefined, enabled = true) {
+export function useHighlights(shortId: string, enabled = true) {
   const api = useApi()
   return useQuery({
-    queryKey: ['photos', 'highlights', eventId],
-    enabled: !!eventId && enabled,
-    queryFn: async () => {
-      const { items } = await api.listPhotos(eventId!, {})
-      return items.filter(visible).sort((a, b) => b.favourites - a.favourites || a.capturedAt.localeCompare(b.capturedAt)).slice(0, 36)
-    },
+    queryKey: ['photos', 'highlights', up(shortId)],
+    enabled,
+    queryFn: async () => (await api.listPublicPhotos(shortId, { highlights: true, limit: 36 })).items,
   })
 }
 
-/** A full list of photo ids for a collection (used by the viewer for "12 / 38" and next/previous). */
-export function usePhotoList(eventId: ID | undefined, albumId: string | undefined, enabled = true) {
+/** Every photo in a collection (viewer next/previous, Download all). `albumId` 'all'/undefined = every album. */
+export function usePhotoList(shortId: string, albumId: string | undefined, enabled = true) {
   const api = useApi()
   return useQuery({
-    queryKey: ['photos', 'list', eventId, albumId ?? 'all'],
-    enabled: !!eventId && enabled,
-    queryFn: async () => {
-      const { items } = await api.listPhotos(eventId!, { albumId: albumId && albumId !== 'all' ? albumId : undefined })
-      return items.filter(visible)
-    },
+    queryKey: ['photos', 'list', up(shortId), albumId ?? 'all'],
+    enabled,
+    queryFn: async () => (await api.listPublicPhotos(shortId, { albumId: albumId && albumId !== 'all' ? albumId : undefined })).items,
+  })
+}
+
+/** First photo of an album, for its cover. */
+export function useAlbumCover(shortId: string, albumId: string, enabled = true) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['photos', 'cover', up(shortId), albumId],
+    enabled,
+    queryFn: async () => (await api.listPublicPhotos(shortId, { albumId, limit: 1 })).items[0] ?? null,
   })
 }
 
 export const PAGE = 48
 
-/** Paged album grid (api.listPhotos limit/offset). `albumId` undefined = every album. */
-export function useInfinitePhotos(eventId: ID | undefined, albumId: ID | undefined, enabled = true) {
+/** Paged album grid (listPublicPhotos offset/limit). `albumId` undefined = every album. */
+export function useInfinitePhotos(shortId: string, albumId: string | undefined, enabled = true) {
   const api = useApi()
   return useInfiniteQuery({
-    queryKey: ['photos', 'page', eventId, albumId ?? 'all'],
-    enabled: !!eventId && enabled,
+    queryKey: ['photos', 'page', up(shortId), albumId ?? 'all'],
+    enabled,
     initialPageParam: 0,
-    queryFn: ({ pageParam }) => api.listPhotos(eventId!, { albumId, offset: pageParam, limit: PAGE }),
+    queryFn: ({ pageParam }) => api.listPublicPhotos(shortId, { albumId, offset: pageParam, limit: PAGE }),
     getNextPageParam: (last, pages) => {
-      const loaded = pages.length * PAGE
-      return loaded < last.total ? loaded : undefined
+      const loaded = pages.reduce((n, p) => n + p.items.length, 0)
+      return loaded < last.total && last.items.length > 0 ? loaded : undefined
     },
   })
 }
 
-export function usePhoto(id: ID | undefined) {
+export function useStudioProfile(code: string | undefined) {
   const api = useApi()
-  return useQuery({ queryKey: ['photo', id], queryFn: () => api.getPhoto(id!), enabled: !!id, retry: false })
+  return useQuery({ queryKey: ['studio', 'profile', (code ?? '').toLowerCase()], queryFn: () => api.getStudioProfile(code!), enabled: !!code, retry: false })
 }
 
 /** Albums a guest can browse: regular albums, plus guest uploads when they don't need review. */
-export function guestAlbums(albums: Album[] | undefined, event: PhotoEvent) {
+export function guestAlbums(albums: Album[] | undefined, event: PublicEvent) {
   return (albums ?? []).filter((a) => a.kind === 'album' || (a.kind === 'guest' && a.photoCount > 0 && !event.settings.reviewGuestUploads))
-}
-
-/** The guest's favourites (ids stored on this device), resolved to photos in the order they were added. */
-export function useFavouritePhotos(eventId: ID | undefined, ids: ID[]) {
-  const api = useApi()
-  return useQuery({
-    queryKey: ['photos', 'favs', eventId, ids.join(',')],
-    enabled: !!eventId,
-    placeholderData: (prev) => prev,
-    queryFn: async () => {
-      const res = await Promise.all(ids.map((id) => api.getPhoto(id).catch(() => null)))
-      return res.filter((p): p is Photo => !!p && visible(p)).reverse()
-    },
-  })
 }

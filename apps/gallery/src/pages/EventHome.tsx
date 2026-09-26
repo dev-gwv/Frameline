@@ -1,9 +1,9 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ChevronRight, Film, Heart, ImagePlus, Images, Lock, MessageCircle, RotateCcw, ScanFace, Share2, Sparkles, Store } from 'lucide-react'
-import { Button, Skeleton, Tip, cn, useToast } from '@frameline/ui'
+import { Button, Tip, cn, useToast } from '@frameline/ui'
 import { fmt, toneCss, type Album, type Tone } from '@frameline/shared'
-import { guestAlbums, useAlbums, useFilms, useHighlights, usePhotoList } from '../lib/queries'
+import { guestAlbums, useAlbumCover, useHighlights } from '../lib/queries'
 import { BrandButton, Container } from '../components/common'
 import { SelfieFlow } from '../components/SelfieFlow'
 import { UploadSheet } from '../components/UploadSheet'
@@ -14,21 +14,18 @@ export function EventHome() {
   const { event, studio, session, base, seeAll, matches, matchesLoading } = useEventCtx()
   const navigate = useNavigate()
   const { toast } = useToast()
-  const albumsQ = useAlbums(event.id)
-  const filmsQ = useFilms(event.id)
-  const highlightsQ = useHighlights(event.id, event.highlights && seeAll)
+  const highlightsQ = useHighlights(event.shortId, event.highlights && seeAll)
   const [selfie, setSelfie] = useState(false)
   const [upload, setUpload] = useState(false)
   const [enquire, setEnquire] = useState(false)
 
-  const albums = guestAlbums(albumsQ.data, event)
-  const guestAlbum = albumsQ.data?.find((a) => a.kind === 'guest')
-  const films = filmsQ.data ?? []
+  const albums = guestAlbums(event.albums, event)
+  const guestAlbum = event.albums.find((a) => a.kind === 'guest')
+  const films = event.films
   // Photos a guest can browse (the event total also counts guest uploads awaiting review).
-  const total = albumsQ.data ? albums.reduce((n, a) => n + a.photoCount, 0) : event.photoCount
+  const total = albums.reduce((n, a) => n + a.photoCount, 0)
   const s = event.settings
 
-  // Albums show a cover from their first photo; one query per album is cheap with the mock and cached.
   function openAlbum(a: Album) {
     if (seeAll) return navigate(`${base}/a/${a.id}`)
     if (session.match) return navigate(`${base}/me?album=${a.id}`)
@@ -50,6 +47,7 @@ export function EventHome() {
     <div className="min-h-dvh pb-10">
       {/* Hero */}
       <section className="relative text-white" style={{ background: toneCss(event.coverTones[0]) }}>
+        {event.coverUrl && <img src={event.coverUrl} alt="" className="absolute inset-0 size-full object-cover" />}
         <div className="hero-fade absolute inset-0" aria-hidden />
         <Container className="relative flex min-h-[320px] flex-col justify-end pb-6 pt-safe sm:min-h-[400px]">
           <div className="absolute inset-x-0 top-5 flex items-center justify-between px-3 sm:px-6">
@@ -101,8 +99,8 @@ export function EventHome() {
             <span className="text-[12px] text-ink-3">{fmt.count(total)} photos{films.length ? ` · ${films.length} ${films.length === 1 ? 'film' : 'films'}` : ''}</span>
           </div>
           {!seeAll && <p className="mb-2.5 flex items-center gap-1.5 text-[12px] text-ink-3"><Lock size={12} />Guests see only the photos they're in. Albums open to your matches.</p>}
-          {albumsQ.isLoading ? (
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">{Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="aspect-[4/3]" />)}</div>
+          {albums.length === 0 && films.length === 0 ? (
+            <p className="rounded-card bg-sunk p-3 text-[13px] text-ink-2">{studio.name} hasn't added albums yet. Check back soon.</p>
           ) : (
             <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
               {event.highlights && seeAll && (highlightsQ.data?.length ?? 0) > 0 && (
@@ -110,7 +108,7 @@ export function EventHome() {
                   <AlbumCard title="Highlights" count={highlightsQ.data!.length} icon={<Sparkles size={13} />} tone={highlightsQ.data![0].tone} url={highlightsQ.data![0].url} onClick={() => navigate(`${base}/a/highlights`)} />
                 </li>
               )}
-              {albums.map((a) => <li key={a.id}><AlbumCover album={a} eventId={event.id} locked={!seeAll} onClick={() => openAlbum(a)} /></li>)}
+              {albums.map((a, i) => <li key={a.id}><AlbumCover album={a} shortId={event.shortId} fallback={event.coverTones[i % 3]} locked={!seeAll} onClick={() => openAlbum(a)} /></li>)}
               {films.map((f, i) => (
                 <li key={f.id}>
                   <a href={f.url} target="_blank" rel="noreferrer noopener" className="group block rounded-card focus-visible:outline-offset-2" aria-label={`${f.name} (opens YouTube)`}>
@@ -159,10 +157,12 @@ function ActionRow({ icon, title, body, onClick }: { icon: ReactNode; title: str
   )
 }
 
-function AlbumCover({ album, eventId, locked, onClick }: { album: Album; eventId: string; locked: boolean; onClick: () => void }) {
-  const q = usePhotoList(eventId, album.id)
-  const first = q.data?.[0]
-  return <AlbumCard title={album.name} count={album.photoCount} tone={first?.tone} url={first?.url} locked={locked} onClick={onClick} />
+/** Cover = the album's first photo. Locked albums (face privacy) can't be listed, so they show an event tone. */
+function AlbumCover({ album, shortId, fallback, locked, onClick }: { album: Album; shortId: string; fallback: Tone; locked: boolean; onClick: () => void }) {
+  const q = useAlbumCover(shortId, album.id, !locked && album.photoCount > 0)
+  const first = q.data
+  const tone = first?.tone ?? (locked || album.photoCount === 0 || q.isError ? fallback : undefined)
+  return <AlbumCard title={album.name} count={album.photoCount} tone={tone} url={first?.url} locked={locked} onClick={onClick} />
 }
 
 function AlbumCard({ title, count, tone, url, icon, locked, onClick }: { title: string; count: number; tone?: Tone; url?: string; icon?: ReactNode; locked?: boolean; onClick: () => void }) {

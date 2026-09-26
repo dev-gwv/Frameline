@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
 import { Download, Globe, Lock, Smartphone, UserRound } from 'lucide-react'
 import { Button, Field, Input, cn } from '@frameline/ui'
-import { fmt, toneCss, type PhotoEvent, type Studio } from '@frameline/shared'
-import { guest, type EventSession } from '../lib/guest'
-import { MAX_PIN_TRIES, now, PIN_LOCK_MS } from '../lib/access'
+import { fmt, toneCss, type PublicEvent, type PublicStudio } from '@frameline/shared'
+import { useApi } from '../lib/api'
+import { authFrom, guest, useGuest, type EventSession } from '../lib/guest'
+import { attemptsRemaining, errorCode, friendlyError, retrySeconds } from '../lib/errors'
 import { isIOS, promptInstall, useCanInstall } from '../lib/pwa'
 import { BrandButton } from './common'
 import { Sheet } from './Sheet'
 
 /** Compact event hero used above every gate. */
-export function GateFrame({ event, studio, session, children }: { event: PhotoEvent; studio: Studio; session: EventSession; children: ReactNode }) {
+export function GateFrame({ event, studio, session, children }: { event: PublicEvent; studio: PublicStudio; session: EventSession; children: ReactNode }) {
   return (
     <main className="mx-auto min-h-dvh w-full max-w-md bg-surface sm:my-8 sm:min-h-0 sm:overflow-hidden sm:rounded-[20px] sm:border sm:border-line sm:shadow-card">
       <div className="relative flex h-[230px] flex-col justify-end p-5 text-white" style={{ background: toneCss(event.coverTones[0]) }}>
+        {event.coverUrl && <img src={event.coverUrl} alt="" className="absolute inset-0 size-full object-cover" />}
         <div className="hero-fade absolute inset-0" aria-hidden />
         <div className="absolute inset-x-0 top-5 text-center font-display text-[11px] font-semibold uppercase tracking-[0.24em] pt-safe">{studio.name}</div>
         <div className="relative">
@@ -28,41 +30,56 @@ export function GateFrame({ event, studio, session, children }: { event: PhotoEv
 
 /* ---------------------------------------------------------------- PIN */
 
-export function PinGate({ event, studio, session }: { event: PhotoEvent; studio: Studio; session: EventSession }) {
+/** PIN gate: checked by api.verifyPin (5 wrong tries lock the gallery for 15 minutes on the server). */
+export function PinGate({ event, studio, session }: { event: PublicEvent; studio: PublicStudio; session: EventSession }) {
+  const api = useApi()
   const [digits, setDigits] = useState(['', '', '', ''])
   const [error, setError] = useState<string | null>(null)
+  const [left, setLeft] = useState<number | null>(null)
   const [shake, setShake] = useState(0)
+  const [busy, setBusy] = useState(false)
   const refs = useRef<(HTMLInputElement | null)[]>([])
-  const lockedFor = session.pinLockedUntil ? session.pinLockedUntil - now() : 0
+  const [clock, setClock] = useState(() => Date.now())
+  const lockedFor = session.pinLockedUntil ? session.pinLockedUntil - clock : 0
   const locked = lockedFor > 0
-  const triesLeft = MAX_PIN_TRIES - session.pinTries
 
-  useEffect(() => { if (!locked) refs.current[0]?.focus() }, [locked, shake])
-  // Unlock automatically when the lock expires.
-  const [, force] = useState(0)
+  useEffect(() => { if (!locked && !busy) refs.current[0]?.focus() }, [locked, shake, busy])
+  // Count down while locked; unlock the form when the server's lock should be over.
   useEffect(() => {
     if (!locked) return
-    const t = setTimeout(() => { guest.patchSession(event.shortId, { pinTries: 0, pinLockedUntil: undefined }); force((x) => x + 1) }, Math.min(lockedFor, 60_000))
+    const t = setTimeout(() => {
+      const now = Date.now()
+      setClock(now)
+      if (session.pinLockedUntil && session.pinLockedUntil <= now) guest.patchSession(event.shortId, { pinLockedUntil: undefined })
+    }, Math.min(lockedFor, 30_000))
     return () => clearTimeout(t)
-  }, [locked, lockedFor, event.shortId])
+  }, [locked, lockedFor, event.shortId, session.pinLockedUntil])
 
-  function check(pin: string) {
-    if (pin === event.settings.pin) {
-      guest.patchSession(event.shortId, { pin: 'typed', pinTries: 0, pinLockedUntil: undefined })
-      return
-    }
-    const tries = session.pinTries + 1
-    setShake((s) => s + 1)
-    setDigits(['', '', '', ''])
-    refs.current[0]?.focus()
-    if (tries >= MAX_PIN_TRIES) {
-      guest.patchSession(event.shortId, { pinTries: tries, pinLockedUntil: now() + PIN_LOCK_MS })
-      setError(null)
-    } else {
-      guest.patchSession(event.shortId, { pinTries: tries })
-      const left = MAX_PIN_TRIES - tries
-      setError(`That PIN didn't match. ${left} ${left === 1 ? 'try' : 'tries'} left.`)
-    }
+  async function check(pin: string) {
+    if (busy) return
+    setBusy(true); setError(null)
+    try {
+      const s = await api.verifyPin(event.shortId, pin)
+      guest.patchSession(event.shortId, (cur) => ({ pin: 'typed', pinLockedUntil: undefined, auth: authFrom(s, cur.auth) }))
+    } catch (err) {
+      setShake((x) => x + 1)
+      setDigits(['', '', '', ''])
+      const code = errorCode(err)
+      if (code === 'pin_locked') {
+        const secs = retrySeconds(err) ?? 900
+        const until = Date.now() + secs * 1000
+        setClock(Date.now())
+        guest.patchSession(event.shortId, { pinLockedUntil: until })
+        setLeft(null)
+      } else if (code === 'invalid_pin') {
+        const n = attemptsRemaining(err)
+        setLeft(n ?? null)
+        setError(`That PIN didn't match.${n !== undefined ? ` ${n} ${n === 1 ? 'try' : 'tries'} left.` : ''}`)
+      } else {
+        const f = friendlyError(err, 'We couldn’t check the PIN')
+        setError(`${f.title}. ${f.body}`)
+      }
+    } finally { setBusy(false) }
   }
 
   function setAt(i: number, v: string) {
@@ -71,19 +88,19 @@ export function PinGate({ event, studio, session }: { event: PhotoEvent; studio:
       const next = clean.slice(0, 4).split('')
       while (next.length < 4) next.push('')
       setDigits(next)
-      if (clean.length >= 4) check(clean.slice(0, 4))
+      if (clean.length >= 4) void check(clean.slice(0, 4))
       else refs.current[clean.length]?.focus()
       return
     }
     const next = [...digits]; next[i] = clean
     setDigits(next); setError(null)
     if (clean && i < 3) refs.current[i + 1]?.focus()
-    if (next.every(Boolean)) check(next.join(''))
+    if (next.every(Boolean)) void check(next.join(''))
   }
 
   function submit(e: FormEvent) {
     e.preventDefault()
-    if (digits.every(Boolean)) check(digits.join(''))
+    if (digits.every(Boolean)) void check(digits.join(''))
     else setError('Enter all 4 digits of the PIN.')
   }
 
@@ -99,10 +116,10 @@ export function PinGate({ event, studio, session }: { event: PhotoEvent; studio:
         </div>
         {locked ? (
           <div role="alert" className="rounded-card bg-bad-soft p-3 text-[13px] font-semibold text-bad">
-            Too many wrong PINs. Try again in {Math.ceil(lockedFor / 60_000)} min, or ask the host for the PIN.
+            Too many wrong PINs. Try again in {Math.max(1, Math.ceil(lockedFor / 60_000))} min, or ask the host for the PIN.
           </div>
         ) : (
-          <fieldset key={shake} className={cn('flex min-w-0 gap-2.5', shake > 0 && 'animate-shake')} aria-describedby="pin-help">
+          <fieldset key={shake} disabled={busy} className={cn('flex min-w-0 gap-2.5', shake > 0 && 'animate-shake')} aria-describedby="pin-help">
             <legend className="sr-only">4-digit PIN</legend>
             {digits.map((d, i) => (
               <input
@@ -124,9 +141,9 @@ export function PinGate({ event, studio, session }: { event: PhotoEvent; studio:
           </fieldset>
         )}
         <div id="pin-help" aria-live="polite" className={cn('min-h-5 text-[12.5px]', error ? 'font-semibold text-bad' : 'text-ink-3')}>
-          {error ?? (!locked && session.pinTries > 0 ? `${triesLeft} tries left.` : '')}
+          {error ?? (!locked && left !== null ? `${left} tries left.` : '')}
         </div>
-        <BrandButton type="submit" disabled={locked}>Continue</BrandButton>
+        <BrandButton type="submit" disabled={locked} loading={busy}>Continue</BrandButton>
         <p className="text-center text-[12px] text-ink-3">No PIN? Ask the host, or call {studio.name} at <a className="font-semibold text-ink-2 underline" href={`tel:${studio.phone.replace(/\s/g, '')}`}>{studio.phone}</a>.</p>
       </form>
     </GateFrame>
@@ -138,32 +155,42 @@ export function PinGate({ event, studio, session }: { event: PhotoEvent; studio:
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 export const validPhone = (v: string) => { const d = v.replace(/[\s()-]/g, ''); return /^\+?\d{10,13}$/.test(d) }
 
-export function RegistrationGate({ event, studio, session }: { event: PhotoEvent; studio: Studio; session: EventSession }) {
-  const [form, setForm] = useState({ name: session.greeting ?? '', email: '', phone: '' })
+/** Registration gate: api.registerGuest adds the guest to the studio's Guests list and returns a session. */
+export function RegistrationGate({ event, studio, session }: { event: PublicEvent; studio: PublicStudio; session: EventSession }) {
+  const api = useApi()
+  const profile = useGuest((s) => s.profile)
+  const [form, setForm] = useState({ name: profile?.name || session.greeting || '', email: profile?.email ?? '', phone: profile?.phone ?? '' })
   const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({})
+  const [formError, setFormError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  function submit(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault()
     const errs: typeof errors = {}
     if (form.name.trim().length < 2) errs.name = 'Enter your name so the host knows who you are.'
     if (!EMAIL.test(form.email.trim())) errs.email = 'Enter an email like name@example.com.'
     if (!validPhone(form.phone)) errs.phone = 'Enter a 10-digit mobile number (you can add +91).'
-    setErrors(errs)
+    setErrors(errs); setFormError(null)
     if (Object.keys(errs).length) {
       const first = Object.keys(errs)[0]
       document.getElementById(`reg-${first}`)?.focus()
       return
     }
     setBusy(true)
-    // TODO(api): api.registerGuest(event.id, { name, email, phone }) — no endpoint yet; stored on this device.
-    setTimeout(() => {
-      const name = form.name.trim()
+    const input = { name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim() }
+    try {
+      const res = await api.registerGuest(event.shortId, input)
+      guest.setProfile(input)
       guest.patchSession(event.shortId, (s) => ({
-        registration: { name, email: form.email.trim(), phone: form.phone.trim(), at: new Date().toISOString() },
-        greeting: s.greeting ?? name.split(/\s+/)[0],
+        registration: { ...input, at: new Date().toISOString() },
+        greeting: s.greeting ?? input.name.split(/\s+/)[0],
+        auth: authFrom(res, s.auth),
       }))
-    }, 350)
+    } catch (err) {
+      const f = friendlyError(err, 'We couldn’t sign you in')
+      setFormError(`${f.title}. ${f.body}`)
+      setBusy(false)
+    }
   }
 
   const set = (k: keyof typeof form) => (e: ChangeEvent<HTMLInputElement>) => { setForm({ ...form, [k]: e.target.value }); setErrors({ ...errors, [k]: undefined }) }
@@ -187,6 +214,7 @@ export function RegistrationGate({ event, studio, session }: { event: PhotoEvent
         <Field label="Mobile number" htmlFor="reg-phone" error={errors.phone} hint="We'll only use it to send you your photos.">
           <Input id="reg-phone" type="tel" inputMode="tel" autoComplete="tel" placeholder="+91 98xxx xxxxx" value={form.phone} onChange={set('phone')} className="h-11 text-[15px]" aria-invalid={!!errors.phone} />
         </Field>
+        {formError && <p role="alert" className="rounded-card bg-bad-soft p-3 text-[13px] font-semibold text-bad">{formError}</p>}
         <BrandButton type="submit" loading={busy} className="mt-1">See the photos</BrandButton>
         <p className="text-center text-[11.5px] text-ink-3">Your details are shared with {studio.name} and the host only.</p>
       </form>
@@ -196,7 +224,7 @@ export function RegistrationGate({ event, studio, session }: { event: PhotoEvent
 
 /* ---------------------------------------------------------------- App interstitial */
 
-export function AppInterstitial({ event, studio, session }: { event: PhotoEvent; studio: Studio; session: EventSession }) {
+export function AppInterstitial({ event, studio, session }: { event: PublicEvent; studio: PublicStudio; session: EventSession }) {
   const canInstall = useCanInstall()
   const [help, setHelp] = useState(false)
   async function getApp() {

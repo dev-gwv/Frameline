@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { CheckCircle2, ImagePlus, X } from 'lucide-react'
 import { Button, Meter, useToast } from '@frameline/ui'
-import { fmt, type Album, type PhotoEvent, type Studio } from '@frameline/shared'
+import { fmt, type Album, type HttpUploadFile, type PublicEvent, type PublicStudio } from '@frameline/shared'
 import { useApi } from '../lib/api'
-import { guest, type EventSession } from '../lib/guest'
+import { guest, useGuest, type EventSession } from '../lib/guest'
+import { friendlyError } from '../lib/errors'
 import { Sheet } from './Sheet'
 
 const MAX_BATCH = 20
@@ -22,11 +23,15 @@ async function toDataUrl(file: File, max = 900): Promise<{ url?: string; width?:
   } catch { return {} }
 }
 
-/** "Add your photos" — guest uploads into the event's guest album. */
+/**
+ * "Add your photos" — guest uploads into the event's guest album with api.uploadPhotos({ source: 'guest' }).
+ * When the studio reviews guest uploads the API returns them as pending ("sent for review").
+ */
 export function UploadSheet({ open, onOpenChange, event, studio, guestAlbum, session }: {
-  open: boolean; onOpenChange: (v: boolean) => void; event: PhotoEvent; studio: Studio; guestAlbum: Album | undefined; session: EventSession
+  open: boolean; onOpenChange: (v: boolean) => void; event: PublicEvent; studio: PublicStudio; guestAlbum: Album | undefined; session: EventSession
 }) {
   const api = useApi()
+  const profileName = useGuest((s) => s.profile?.name)
   const { error } = useToast()
   const input = useRef<HTMLInputElement>(null)
   const [picked, setPicked] = useState<Picked[]>([])
@@ -34,6 +39,7 @@ export function UploadSheet({ open, onOpenChange, event, studio, guestAlbum, ses
   const [progress, setProgress] = useState(0)
   const [note, setNote] = useState<string | null>(null)
   const [sent, setSent] = useState(0)
+  const [pending, setPending] = useState(false)
 
   const remaining = Math.max(0, event.settings.guestUploadLimit - (guestAlbum?.photoCount ?? 0))
   const cap = Math.min(MAX_BATCH, remaining)
@@ -60,20 +66,24 @@ export function UploadSheet({ open, onOpenChange, event, studio, guestAlbum, ses
     if (!guestAlbum || !picked.length) return
     setStage('uploading'); setProgress(0)
     try {
-      const files = []
+      const files: HttpUploadFile[] = []
       for (const [i, p] of picked.entries()) {
+        // The preview data URL is what the mock keeps; the HTTP client uploads the original bytes (blob).
         const r = await toDataUrl(p.file)
-        files.push({ filename: p.file.name, size: p.file.size, ...r })
+        files.push({ filename: p.file.name, size: p.file.size, contentType: p.file.type || 'image/jpeg', blob: p.file, ...r })
         setProgress(i + 1)
       }
-      // TODO(api): uploadPhotos should accept { source: 'guest', uploadedBy: <guest name> } for guest uploads.
-      const created = await api.uploadPhotos(event.id, guestAlbum.id, files, { quality: 'web' })
-      if (event.settings.reviewGuestUploads) await api.updatePhotos(created.map((c) => c.id), { hidden: true })
+      const uploadedBy = session.registration?.name ?? profileName ?? session.greeting ?? 'Guest'
+      const created = await api.uploadPhotos(event.id, guestAlbum.id, files, {
+        quality: 'web', source: 'guest', uploadedBy, watermark: event.settings.watermarkGuestUploads,
+      })
       guest.patchSession(event.shortId, (s) => ({ uploads: s.uploads + created.length }))
       setSent(created.length)
+      setPending(created.some((c) => c.reviewStatus === 'pending'))
       setStage('done')
     } catch (e) {
-      error('Upload failed', e instanceof Error ? e.message : 'Check your connection and try again.')
+      const f = friendlyError(e, 'Upload failed')
+      error(f.title, f.body)
       setStage('pick')
     }
   }
@@ -86,7 +96,7 @@ export function UploadSheet({ open, onOpenChange, event, studio, guestAlbum, ses
 
   return (
     <Sheet open={open} onOpenChange={(v) => { if (stage !== 'uploading') onOpenChange(v) }}
-      title={stage === 'done' ? (event.settings.reviewGuestUploads ? 'Sent for review' : 'Photos added') : 'Add your photos'}
+      title={stage === 'done' ? (pending ? 'Sent for review' : 'Photos added') : 'Add your photos'}
       description={stage === 'pick' ? `Share the photos you took at ${event.name}.` : undefined} footer={footer}>
       <input ref={input} type="file" accept="image/*" multiple className="sr-only" tabIndex={-1} aria-hidden onChange={(e) => { add(e.target.files); e.target.value = '' }} />
       {stage === 'pick' && (
@@ -129,7 +139,7 @@ export function UploadSheet({ open, onOpenChange, event, studio, guestAlbum, ses
         <div className="flex flex-col items-center gap-2 py-4 text-center">
           <CheckCircle2 size={38} className="text-ok" />
           <p className="max-w-xs text-[13.5px] text-ink-2">
-            {event.settings.reviewGuestUploads
+            {pending
               ? `${sent} ${sent === 1 ? 'photo was' : 'photos were'} sent to the photographer for review. They'll appear in Guest uploads once approved.`
               : `${sent} ${sent === 1 ? 'photo is' : 'photos are'} now in Guest uploads. Thank you!`}
           </p>

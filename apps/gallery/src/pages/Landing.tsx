@@ -5,6 +5,7 @@ import { Button, Field, Input, LogoMark, Tip } from '@frameline/ui'
 import { fmt, toneCss } from '@frameline/shared'
 import { useApi } from '../lib/api'
 import { guest, useGuest } from '../lib/guest'
+import { friendlyError, isNotFound } from '../lib/errors'
 import { isStandalone, promptInstall, useCanInstall } from '../lib/pwa'
 
 export function Landing() {
@@ -26,10 +27,11 @@ export function Landing() {
     if (c.length < 6) { setCodeError('Enter the 7-character code from your invite, like 6402F9F.'); return }
     setChecking(true)
     try {
-      await api.getEvent(c)
+      await api.getPublicEvent(c)
       navigate(`/${c.toLowerCase()}`)
-    } catch {
-      setCodeError(`We couldn't find an event with code ${c}. Check it against your invite.`)
+    } catch (err) {
+      if (isNotFound(err)) setCodeError(`We couldn't find an event with code ${c}. Check it against your invite.`)
+      else { const f = friendlyError(err); setCodeError(`${f.title}. ${f.body}`) }
     } finally { setChecking(false) }
   }
 
@@ -38,13 +40,13 @@ export function Landing() {
     const c = follow.trim().toUpperCase().replace(/\s/g, '')
     if (!/^FA-?[A-Z0-9]{4,}$/.test(c)) { setFollowError('Studio codes start with FA-, like FA-KCGWHY.'); return }
     setFollowBusy(true)
+    const code = c.includes('-') ? c : `FA-${c.slice(2)}`
     try {
-      const studio = await api.getStudio()
-      // TODO(api): api.getStudioByFollowCode(code) — the mock has one studio.
-      if (studio.followCode.replace('-', '') !== c.replace('-', '')) throw new Error('not found')
-      navigate(`/studio/${studio.followCode.toLowerCase()}`)
-    } catch {
-      setFollowError(`No studio uses the code ${c}. Ask your photographer for their follow code.`)
+      const profile = await api.getStudioProfile(code)
+      navigate(`/studio/${profile.studio.followCode.toLowerCase()}`)
+    } catch (err) {
+      if (isNotFound(err)) setFollowError(`No studio uses the code ${code}. Ask your photographer for their follow code.`)
+      else { const f = friendlyError(err); setFollowError(`${f.title}. ${f.body}`) }
     } finally { setFollowBusy(false) }
   }
 

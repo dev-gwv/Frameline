@@ -8,10 +8,13 @@ pnpm --filter @frameline/gallery build    # tsc -b && vite build
 node apps/gallery/scripts/gen-icons.mjs   # regenerate PWA PNG icons
 ```
 
-Data comes from `createMockApi` persisted under `localStorage['frameline.gallery.v1']` (see `src/lib/api.tsx`;
-there is a `TODO(api)` switch for `createHttpApi` via `VITE_API_URL`). Everything the guest does on the device
-(PIN, registration, selfie match, favourites, Download-all uses, orders, enquiries, follows, recent events) lives
-in `localStorage['frameline.guest.v1']` (`src/lib/guest.ts`) until the API grows guest endpoints.
+Data comes from the `FramelineApi` guest endpoints (`src/lib/api.tsx`): `createHttpApi` against apps/api when
+`VITE_API_URL` is set (guest tokens in `localStorage['frameline.guest.tokens.<SHORTID>']`), otherwise `createMockApi`
+persisted under `localStorage['frameline.gallery.v1']`. Errors are mapped to plain words in `src/lib/errors.ts`.
+
+`localStorage['frameline.guest.v2']` (`src/lib/guest.ts`) keeps only what the API has no per-guest endpoint for:
+guest-session meta (expiry, see-all), gate choices, the face match, favourites (ids + photo snapshots; each tap is
+sent with `setFavourite`), Download-all uses, photos bought on this device, recent events, follows and form pre-fill.
 
 ## Routes
 
@@ -37,7 +40,7 @@ in `localStorage['frameline.guest.v1']` (`src/lib/guest.ts`) until the API grows
 token = base64url(UTF-8 JSON), no "=" padding
 ```
 
-JSON payload (`GuestLinkPayload` in `src/lib/link.ts`; keys are short on purpose):
+JSON payload (`GuestLinkPayload` in `@frameline/shared` links.ts; keys are short on purpose):
 
 | key | type | meaning |
 | --- | --- | --- |
@@ -53,30 +56,32 @@ JSON payload (`GuestLinkPayload` in `src/lib/link.ts`; keys are short on purpose
 Examples:
 
 ```ts
-import { encodeGuestLink } from './src/lib/link'
+import { encodeGuestLink } from '@frameline/shared'
 encodeGuestLink({ e: '6402F9F', album: 'ev_riya_al2' })                 // /s/eyJlIjoiNjQwMkY5RiIsImFsYnVtIjoiZXZfcml5YV9hbDIifQ
 encodeGuestLink({ e: '6402F9F', n: 'Dadi ji', me: true })               // /s/…  face link
 encodeGuestLink({ e: '6402F9F', n: 'Priya', vip: { skipLogin: true, pin: true } }, 'https://frameline.in') // https://frameline.in/v/…
 ```
 
-Rules: `/s/` links never bypass the PIN; use a VIP link with `pin` for that. A typed PIN also shows all photos
-(per the Share screen: "the PIN … shows every photo when only their photos is on"); an embedded PIN does not unless
-`vip.all` is set. Tokens are unsigned for now — the API should sign them (HMAC) or hide them behind KV short codes
-(`frameline.in/s/Qm7k`); the decoder already ignores unknown keys.
+Rules: `/s/` links never bypass the PIN; use a VIP link with `pin` for that. The gallery calls
+`resolveGuestLink(code)` first (server-signed 14-character codes from `createGuestLink`, or these unsigned tokens);
+VIP links with `pin`/`all` come back with a guest session. If the API doesn't know the code the token is decoded
+locally and its VIP flags are ignored. Face links without `p` look the person up with `searchFaces` after the gates.
 
-## Access & download rules (src/lib/access.ts)
+## Access & download rules (src/lib/access.ts — the API enforces them)
 
-- Blocked states: `settings.disabled` → turned off; `status: archived` → archived; `expiresAt` past → expired;
-  draft with no photos → "Photos are on their way"; unknown code → not found.
-- Gates in order: app interstitial (`!skipAppLanding`), PIN (`access === 'link-pin'`, 5 tries then a 15-minute lock),
-  registration (`requireRegistration` or `access === 'registered'`).
-- Browse all: when `facePrivacy` is off, face search is off, the PIN was typed, or a VIP link has `all`.
-  Otherwise albums open filtered to the guest's matches.
+- Blocked states come from `getPublicEvent(...).blocked`: disabled, archived, expired, empty; unknown code → not found.
+- Gates in order: app interstitial (`!skipAppLanding`), PIN (`verifyPin`; 401 `invalid_pin` shows tries left, 429
+  `pin_locked` shows the 15-minute lock), registration (`registerGuest`). Sessions last 12 h; when the API answers
+  `pin_required` / `registration_required` / expired token, the matching gate opens again.
+- Browse all: when `facePrivacy` or face search is off, or the session has `seeAll` (typed PIN, VIP `all`).
+  Otherwise albums open filtered to the guest's matches (`listPublicPhotos({ personId })`).
 - Single download: `all` → yes; `own` → only photos they're in; `none` → explains why (+ Buy if the store is on).
   Bought photos are always downloadable.
-- Download all (album / all photos): PIN each time (unless embedded), 5 uses per guest per device.
-- Files: rendered on a canvas (tone gradient or uploaded image) at 2048 px (web) or 3072 px (`originalDownloads`),
-  watermarked from `api.getWatermark()` unless `watermarkOff`; >12 photos offers an emailed ZIP (simulated).
+- Download all: PIN each time on PIN galleries (checked by `verifyPin`, unless embedded), 5 uses per guest per
+  device (counted locally — the API doesn't track it).
+- Files: rendered on a canvas at 2048 px (web) or 3072 px (`originalDownloads`), watermarked from `getWatermark()`
+  (falls back to the studio name when the API won't serve it to guests) unless `watermarkOff`; counted with
+  `recordDownload`. >12 photos offers an emailed ZIP (`requestZip`; simulated when the API refuses guests).
 
 ## PWA
 
@@ -85,9 +90,8 @@ hand-written `public/sw.js`: app shell cached on install, navigations network-fi
 hashed assets and fonts cache-first, viewed photo renditions (`destination === 'image'`) cache-first capped at 300.
 The worker registers only in production builds (`src/lib/pwa.ts`).
 
-## Simulated for now (TODO(api) markers in code)
+## Still simulated / TODO(api)
 
-Face search (deterministic subset of photos containing `p_g1/p_g2/p_g3`), guest registration, favourites sync,
-ZIP email, orders/payments (UPI/card mock), enquiries, follows, download counting, studio services/FAQ content and
-lookup by follow code, guest-upload attribution (`uploadPhotos` records `uploadedBy: 'You'`; photos needing review
-are hidden via `updatePhotos({ hidden: true })`).
+Razorpay Checkout for pending orders, print delivery address (not in `OrderInput`), guest ZIP requests, unfollow,
+the guest's purchased-photo list, and a face embedding for `searchFaces` (the dev match uses the selfie key
+`${event.id}:${file.name}:${file.size}`).

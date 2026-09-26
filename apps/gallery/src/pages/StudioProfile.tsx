@@ -1,53 +1,69 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, AtSign, Check, ChevronDown, Copy, Globe, Lock, Mail, MessageCircle, Phone, Plus, SearchX } from 'lucide-react'
+import { ArrowLeft, AtSign, Check, ChevronDown, Copy, Globe, Mail, MessageCircle, Phone, Plus, SearchX } from 'lucide-react'
 import { Button, Skeleton, Tip, cn, useToast } from '@frameline/ui'
-import { fmt, toneCss, type PhotoEvent } from '@frameline/shared'
-import { useEvents, useStudio } from '../lib/queries'
-import { toggleFollow, useGuest } from '../lib/guest'
+import { fmt, toneCss } from '@frameline/shared'
+import { useApi } from '../lib/api'
+import { useStudioProfile } from '../lib/queries'
+import { setFollowing, useGuest } from '../lib/guest'
+import { friendlyError, isNotFound } from '../lib/errors'
 import { Container, StatePage } from '../components/common'
 import { EnquirySheet } from '../components/EnquirySheet'
 import { useBrandColor } from '../lib/brand'
 
 /**
- * Studio content that has no API yet (services, questions) mirrors the admin "Studio app" screen.
- * TODO(api): api.getStudioProfile(followCode) → { studio, featured, services, faqs }.
+ * Studio profile from api.getStudioProfile(followCode | handle): featured galleries, services, questions and
+ * testimonials as the studio set them up in the admin "Studio app" screen. Follow → api.followStudio.
  */
-const SERVICES = [
-  { name: 'Wedding coverage', price: 'From ₹1,50,000', detail: '2 photographers, 3 days, online gallery' },
-  { name: 'Pre-wedding shoot', price: 'From ₹35,000', detail: 'Half day, 2 locations, 60 edits' },
-  { name: 'Events and parties', price: 'From ₹18,000', detail: '4 hours, same-night preview' },
-  { name: 'Family and baby', price: 'From ₹12,000', detail: 'At home or in studio, 40 edits' },
-]
-const FAQS = [
-  { q: 'How long until we get photos?', a: 'Previews go live on the gallery the same night. The full edited set arrives within 3 weeks.' },
-  { q: 'Do you travel outside Mumbai?', a: 'Yes — anywhere in India and abroad. Travel and stay are billed at cost.' },
-  { q: 'Can guests order prints?', a: 'Yes. Guests can buy prints straight from the gallery; we print on matte paper and ship in about 5 days.' },
-  { q: 'How do we book a date?', a: 'Send an enquiry with your date and city. A 30% advance confirms the booking.' },
-]
-const FEATURED_ORDER = ['6402F9F', '2A6F1C9', '91B7F3A', 'E4B0937']
-
 export function StudioProfile() {
   const { followCode = '' } = useParams()
-  const studioQ = useStudio()
-  const eventsQ = useEvents()
+  const api = useApi()
+  const profileQ = useStudioProfile(followCode)
   const follows = useGuest((s) => s.follows)
   const { toast } = useToast()
   const [enquire, setEnquire] = useState(false)
-  useBrandColor(studioQ.data?.brandColor)
+  const [followBusy, setFollowBusy] = useState(false)
+  useBrandColor(profileQ.data?.studio.brandColor)
 
-  if (studioQ.isLoading) return <Container className="flex flex-col gap-3 pt-10"><Skeleton className="h-16" /><Skeleton className="h-40" /><Skeleton className="h-40" /></Container>
-  const studio = studioQ.data
-  if (!studio || studio.followCode.toLowerCase() !== followCode.toLowerCase()) {
+  if (profileQ.isLoading) return <Container className="flex flex-col gap-3 pt-10"><Skeleton className="h-16" /><Skeleton className="h-40" /><Skeleton className="h-40" /></Container>
+  if (profileQ.isError && !isNotFound(profileQ.error)) {
+    const f = friendlyError(profileQ.error, 'The studio page didn’t load')
+    return (
+      <StatePage icon={<SearchX size={26} />} eyebrow={followCode.toUpperCase()} title={f.title} body={f.body}>
+        <Button variant="primary" size="lg" onClick={() => void profileQ.refetch()}>Try again</Button>
+      </StatePage>
+    )
+  }
+  const profile = profileQ.data
+  if (!profile) {
     return (
       <StatePage icon={<SearchX size={26} />} eyebrow={followCode.toUpperCase()} title="We couldn't find this studio" body="Check the follow code with your photographer. Codes start with FA-.">
         <Link to="/"><Button variant="primary" size="lg">Go to Frameline</Button></Link>
       </StatePage>
     )
   }
+  const studio = profile.studio
   const following = follows.includes(studio.followCode.toUpperCase())
-  const events = eventsQ.data ?? []
-  const featured = FEATURED_ORDER.map((s) => events.find((e) => e.shortId === s)).filter((e): e is PhotoEvent => !!e && e.status !== 'draft')
+  const featured = profile.featured
+
+  /** Following is sent to the API (the studio's follower count); there is no unfollow endpoint, so unfollow is local. */
+  async function toggleFollow() {
+    if (following) {
+      setFollowing(studio.followCode, false)
+      toast({ title: `Unfollowed ${studio.name}` })
+      return
+    }
+    setFollowBusy(true)
+    try {
+      await api.followStudio(studio.followCode)
+      setFollowing(studio.followCode, true)
+      void profileQ.refetch()
+      toast({ title: `Following ${studio.name}`, body: 'New events from this studio will show up on your home screen.' })
+    } catch (err) {
+      const f = friendlyError(err, 'Couldn’t follow the studio')
+      toast({ kind: 'error', title: f.title, body: f.body })
+    } finally { setFollowBusy(false) }
+  }
 
   async function copy(text: string, what: string) {
     try { await navigator.clipboard.writeText(text); toast({ title: `${what} copied`, body: text }) }
@@ -64,7 +80,7 @@ export function StudioProfile() {
           <span className="bg-brand grid size-8 shrink-0 place-items-center rounded-[9px] font-display text-[14px] font-bold" aria-hidden>{studio.name[0]}</span>
           <b className="min-w-0 flex-1 truncate font-display text-[16px]">{studio.name}</b>
           <Button variant={following ? 'secondary' : 'primary'} icon={following ? <Check size={15} /> : <Plus size={15} />} aria-pressed={following}
-            onClick={() => { toggleFollow(studio.followCode); toast({ title: following ? `Unfollowed ${studio.name}` : `Following ${studio.name}`, body: following ? undefined : 'New events from this studio will show up on your home screen.' }) }}>
+            loading={followBusy} onClick={() => void toggleFollow()}>
             {following ? 'Following' : 'Follow'}
           </Button>
         </div>
@@ -72,22 +88,20 @@ export function StudioProfile() {
 
       <Container className="flex max-w-3xl flex-col gap-7 pt-5">
         <section>
-          <div className="eyebrow">{studio.city} · <span className="font-mono">{studio.followCode}</span></div>
+          <div className="eyebrow">{studio.city} · <span className="font-mono">{studio.followCode}</span>{studio.followers > 0 && <> · {fmt.count(studio.followers)} followers</>}</div>
           <h1 className="mt-1 font-display text-[28px] font-semibold leading-tight">{studio.name}</h1>
           {studio.about && <p className="mt-1 text-[14px] text-ink-2">{studio.about}</p>}
         </section>
 
-        <section aria-labelledby="feat-h">
+        {featured.length > 0 && <section aria-labelledby="feat-h">
           <h2 id="feat-h" className="eyebrow mb-2">Featured galleries</h2>
-          {eventsQ.isLoading ? <div className="flex gap-2.5"><Skeleton className="h-40 w-32" /><Skeleton className="h-40 w-32" /></div> : (
+          {(
             <ul className="no-scrollbar -mx-4 flex snap-x gap-2.5 overflow-x-auto px-4 sm:mx-0 sm:grid sm:grid-cols-4 sm:px-0">
               {featured.map((e) => {
-                const isPrivate = e.settings.access !== 'link' || e.settings.facePrivacy
                 return (
                   <li key={e.id} className="w-[132px] shrink-0 snap-start sm:w-auto">
                     <Link to={`/${e.shortId.toLowerCase()}`} className="group block">
                       <div className="vignette relative aspect-[4/5] overflow-hidden rounded-card" style={{ background: toneCss(e.coverTones[0]) }}>
-                        {isPrivate && <span className="absolute right-2 top-2 z-[1] grid size-6 place-items-center rounded-full bg-black/50 text-white" aria-label="Private gallery"><Lock size={12} /></span>}
                       </div>
                       <b className="mt-1.5 block truncate text-[13px] group-hover:underline">{e.name}</b>
                       <span className="block text-[11.5px] text-ink-3">{fmt.date(e.date)} · {e.city}</span>
@@ -97,26 +111,43 @@ export function StudioProfile() {
               })}
             </ul>
           )}
-        </section>
+        </section>}
 
         <section aria-labelledby="svc-h">
-          <h2 id="svc-h" className="eyebrow mb-1">Services</h2>
-          <ul>
-            {SERVICES.map((s) => (
-              <li key={s.name} className="flex items-start justify-between gap-3 border-t border-line py-3 first:border-t-0">
-                <div className="min-w-0"><b className="text-[14px]">{s.name}</b><div className="text-[12.5px] text-ink-2">{s.detail}</div></div>
-                <span className="shrink-0 font-mono text-[12.5px] tnum">{s.price}</span>
-              </li>
-            ))}
-          </ul>
+          {studio.services.length > 0 && <>
+            <h2 id="svc-h" className="eyebrow mb-1">Services</h2>
+            <ul>
+              {studio.services.map((s) => (
+                <li key={s.id} className="flex items-start justify-between gap-3 border-t border-line py-3 first:border-t-0">
+                  <div className="min-w-0"><b className="text-[14px]">{s.name}</b><div className="text-[12.5px] text-ink-2">{s.description}</div></div>
+                  <span className="shrink-0 font-mono text-[12.5px] tnum">{s.price}</span>
+                </li>
+              ))}
+            </ul>
+          </>}
+          {studio.services.length === 0 && <h2 id="svc-h" className="eyebrow mb-1">Book {studio.name}</h2>}
           <Button variant="primary" size="lg" icon={<MessageCircle size={16} />} className="mt-2 w-full justify-center sm:w-auto" onClick={() => setEnquire(true)}>Send an enquiry</Button>
         </section>
 
-        <section aria-labelledby="faq-h">
+        {studio.testimonials.length > 0 && (
+          <section aria-labelledby="tst-h">
+            <h2 id="tst-h" className="eyebrow mb-2">Kind words</h2>
+            <ul className="flex flex-col gap-2.5">
+              {studio.testimonials.map((t) => (
+                <li key={t.id} className="rounded-card border border-line bg-surface p-3.5">
+                  <p className="text-[13.5px] text-ink">“{t.quote}”</p>
+                  <div className="mt-1.5 text-[12px] text-ink-3"><b className="text-ink-2">{t.name}</b>{t.detail ? ` · ${t.detail}` : ''}</div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {studio.faq.length > 0 && <section aria-labelledby="faq-h">
           <h2 id="faq-h" className="eyebrow mb-1">Questions</h2>
           <div>
-            {FAQS.map((f) => (
-              <details key={f.q} className="group border-t border-line py-3 first:border-t-0">
+            {studio.faq.map((f) => (
+              <details key={f.id} className="group border-t border-line py-3 first:border-t-0">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[14px] font-bold [&::-webkit-details-marker]:hidden">
                   {f.q}<ChevronDown size={16} className="shrink-0 text-ink-3 transition group-open:rotate-180" />
                 </summary>
@@ -124,7 +155,7 @@ export function StudioProfile() {
               </details>
             ))}
           </div>
-        </section>
+        </section>}
 
         <section aria-labelledby="contact-h" className="rounded-card border border-line bg-surface p-4">
           <h2 id="contact-h" className="mb-2 text-[16px]">Contact</h2>

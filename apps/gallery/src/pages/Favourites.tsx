@@ -1,19 +1,20 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, Heart } from 'lucide-react'
 import { Button, EmptyState } from '@frameline/ui'
 import { fmt } from '@frameline/shared'
-import { useFavouritePhotos } from '../lib/queries'
-import { Container, GridSkeleton, PhotoGrid, TopBar } from '../components/common'
+import { Container, PhotoGrid, TopBar } from '../components/common'
 import { DownloadSheet } from '../components/DownloadSheet'
 import { useEventCtx } from './EventLayout'
 
-/** The guest's picks. TODO(api): sync to the studio's "Who favourited" list (api.setFavourite). */
+/**
+ * The guest's picks. Each tap is sent to the API (api.setFavourite → the studio's "Who favourited" list);
+ * this list is the device's copy because the API has no "my favourites" endpoint for guests.
+ */
 export function Favourites() {
   const { event, studio, session, base, seeAll, ownIds } = useEventCtx()
-  const favs = useFavouritePhotos(event.id, session.favourites)
   const [dl, setDl] = useState(false)
-  const photos = favs.data ?? []
+  const photos = useMemo(() => session.favourites.map((id) => session.favPhotos[id]).filter((p) => !!p).reverse(), [session.favourites, session.favPhotos])
   const downloadable = photos.filter((p) => session.purchased.includes(p.id) || (event.settings.downloads === 'all') || (event.settings.downloads === 'own' && ownIds.has(p.id)))
 
   return (
@@ -28,7 +29,7 @@ export function Favourites() {
           {downloadable.length > 0 && <Button icon={<Download size={15} />} onClick={() => setDl(true)}>Download {downloadable.length}</Button>}
         </div>
         <div className="mt-4">
-          {favs.isLoading ? <GridSkeleton n={9} /> : photos.length ? (
+          {photos.length ? (
             <PhotoGrid photos={photos} hrefFor={(p) => `${base}/p/${p.id}?from=fav`} />
           ) : (
             <EmptyState icon={<Heart size={26} />} title="No favourites yet" body="Open a photo and tap Favourite. Your picks help the studio choose prints and album pages."

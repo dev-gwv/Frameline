@@ -1,32 +1,53 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, Download, KeyRound, Mail, ShoppingBag } from 'lucide-react'
 import { Button, Field, Input, Meter, Skeleton, useToast } from '@frameline/ui'
-import { fmt, type Photo, type PhotoEvent, type Studio } from '@frameline/shared'
-import { useWatermark } from '../lib/queries'
-import { guest, type EventSession } from '../lib/guest'
+import { fmt, type FramelineApi, type Photo, type PublicEvent, type PublicStudio, type WatermarkSettings } from '@frameline/shared'
+import { useApi } from '../lib/api'
+import { ensureWatermark, fallbackWatermark, useWatermark } from '../lib/queries'
+import { authFrom, guest, useGuest, type EventSession } from '../lib/guest'
 import { canDownloadAll, DIRECT_DOWNLOAD_LIMIT, MAX_DOWNLOAD_ALL } from '../lib/access'
+import { errorCode, friendlyError, isStudioOnly } from '../lib/errors'
 import { downloadName, downloadPhotos, renderPhoto, saveBlob, type RenderOptions } from '../lib/download'
 import { Sheet } from './Sheet'
 
-export function useRenderOptions(event: PhotoEvent, studio: Studio): RenderOptions {
-  const wm = useWatermark().data
+function renderOptions(event: PublicEvent, studio: PublicStudio, fetched: WatermarkSettings | null | undefined): RenderOptions {
+  // No watermark from the API (guests can't read it on the HTTP API yet): fall back to the studio name.
+  const wm = fetched ?? (fetched === null ? fallbackWatermark(studio) : undefined)
   const original = event.settings.originalDownloads
   const applyWatermark = !!wm && !event.settings.watermarkOff && (original ? wm.applyTo.originals : wm.applyTo.downloads)
   return { watermark: wm, applyWatermark, original, studio }
 }
 
+/** Render options for the sheet's description (may still be loading). */
+export function useRenderOptions(event: PublicEvent, studio: PublicStudio): RenderOptions {
+  return renderOptions(event, studio, useWatermark().data)
+}
+
+/** Resolves the watermark before generating files, so nothing downloads unwatermarked while it loads. */
+function useResolveOptions(event: PublicEvent, studio: PublicStudio) {
+  const qc = useQueryClient()
+  const api = useApi()
+  return async () => renderOptions(event, studio, await ensureWatermark(qc, api))
+}
+
+/** Tells the studio (Reports / photo stats); a failure here never blocks the guest. */
+const countDownloads = (api: FramelineApi, ids: string[], shortId: string) => { if (ids.length) api.recordDownload(ids, shortId).catch(() => {}) }
+
 /** Downloads a single photo immediately, with toasts. */
-export function useDownloadOne(event: PhotoEvent, studio: Studio) {
-  const opts = useRenderOptions(event, studio)
+export function useDownloadOne(event: PublicEvent, studio: PublicStudio) {
+  const api = useApi()
+  const resolve = useResolveOptions(event, studio)
   const { success, error } = useToast()
   const [busy, setBusy] = useState(false)
   async function run(photo: Photo) {
     setBusy(true)
     try {
+      const opts = await resolve()
       const blob = await renderPhoto(photo, opts)
       saveBlob(blob, downloadName(studio, event, photo, opts.original))
       success('Downloaded', `${photo.filename} · ${opts.original ? 'original quality' : 'web quality'}`)
-      // TODO(api): count the download (api.recordDownload) so the studio sees it in Reports.
+      countDownloads(api, [photo.id], event.shortId)
     } catch (e) {
       error('Download failed', e instanceof Error ? e.message : 'Try again in a moment.')
     } finally { setBusy(false) }
@@ -41,10 +62,13 @@ type Stage = 'pin' | 'choose' | 'running' | 'done' | 'emailed' | 'blocked'
  * Up to DIRECT_DOWNLOAD_LIMIT files download one by one; bigger sets offer an emailed ZIP.
  */
 export function DownloadSheet({ open, onOpenChange, photos, event, studio, session, all, title, onBuy, loading }: {
-  open: boolean; onOpenChange: (v: boolean) => void; photos: Photo[]; event: PhotoEvent; studio: Studio; session: EventSession
+  open: boolean; onOpenChange: (v: boolean) => void; photos: Photo[]; event: PublicEvent; studio: PublicStudio; session: EventSession
   all?: boolean; title?: string; onBuy?: () => void; loading?: boolean
 }) {
+  const api = useApi()
   const opts = useRenderOptions(event, studio)
+  const resolve = useResolveOptions(event, studio)
+  const profileEmail = useGuest((s) => s.profile?.email)
   const verdict: { ok: boolean; reason?: string; buy?: boolean; needsPin?: boolean; left?: number } = all
     ? canDownloadAll(event, session)
     : { ok: event.settings.downloads !== 'none' || photos.every((p) => session.purchased.includes(p.id)), reason: 'The photographer has turned off downloads for this event.', buy: event.settings.storeEnabled }
@@ -53,7 +77,9 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
   const [pin, setPin] = useState('')
   const [pinError, setPinError] = useState<string | null>(null)
   const [done, setDone] = useState(0)
-  const [email, setEmail] = useState(session.registration?.email ?? '')
+  const [email, setEmail] = useState(session.registration?.email ?? profileEmail ?? '')
+  const [pinBusy, setPinBusy] = useState(false)
+  const [zipBusy, setZipBusy] = useState(false)
   const [emailError, setEmailError] = useState<string | null>(null)
   const abort = useRef<AbortController | null>(null)
   const counted = useRef(false)
@@ -72,30 +98,57 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
     if (all && !counted.current) { counted.current = true; guest.patchSession(event.shortId, (s) => ({ downloadAllUses: s.downloadAllUses + 1 })) }
   }
 
-  function submitPin(e: FormEvent) {
+  /** The API checks the PIN (wrong tries count toward the 15-minute lock). */
+  async function submitPin(e: FormEvent) {
     e.preventDefault()
-    if (pin === event.settings.pin) { setPinError(null); setStage('choose') }
-    else setPinError(pin.length < 4 ? 'Enter all 4 digits.' : 'That PIN didn\'t match. Check the message from the host.')
+    if (pin.length < 4) { setPinError('Enter all 4 digits.'); return }
+    setPinBusy(true)
+    try {
+      const s = await api.verifyPin(event.shortId, pin)
+      guest.patchSession(event.shortId, (cur) => ({ pin: cur.pin ?? 'typed', auth: authFrom(s, cur.auth) }))
+      setPinError(null); setStage('choose')
+    } catch (err) {
+      const f = friendlyError(err, 'We couldn’t check the PIN')
+      setPinError(errorCode(err) === 'invalid_pin' ? `That PIN didn't match. ${f.body}` : `${f.title}. ${f.body}`)
+      setPin('')
+    } finally { setPinBusy(false) }
   }
 
   async function start() {
     countUse()
     setStage('running'); setDone(0)
     abort.current = new AbortController()
+    let saved = 0
     try {
-      await downloadPhotos(photos, event, opts, setDone, abort.current.signal)
+      const resolved = await resolve()
+      saved = await downloadPhotos(photos, event, resolved, (d) => { saved = d; setDone(d) }, abort.current.signal)
       if (!abort.current.signal.aborted) setStage('done')
     } catch (e) {
       error('Download stopped', e instanceof Error ? e.message : 'Try again.')
       setStage('choose')
+    } finally {
+      countDownloads(api, photos.slice(0, saved).map((p) => p.id), event.shortId)
     }
   }
 
-  function emailZip(e: FormEvent) {
+  async function emailZip(e: FormEvent) {
     e.preventDefault()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) { setEmailError('Enter an email like name@example.com.'); return }
+    setZipBusy(true)
+    try {
+      await api.requestZip(event.id, email.trim(), { photoIds: photos.map((p) => p.id) })
+    } catch (err) {
+      // TODO(api): requestZip is studio-only on the HTTP API; guests get the simulated confirmation until a guest ZIP endpoint exists.
+      if (!isStudioOnly(err)) {
+        const f = friendlyError(err, 'We couldn’t request the ZIP')
+        setEmailError(`${f.title}. ${f.body}`)
+        setZipBusy(false)
+        return
+      }
+    }
+    setZipBusy(false)
     countUse()
-    // TODO(api): api.requestZip(eventId, photoIds, email) → queue a ZIP job; simulated here.
+    guest.setProfile({ email: email.trim() })
     setStage('emailed')
   }
 
@@ -119,7 +172,7 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
               onChange={(e) => { setPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setPinError(null) }}
               className="h-12 text-center font-mono text-[22px] tracking-[0.5em]" aria-invalid={!!pinError} />
           </Field>
-          <Button type="submit" variant="primary" size="lg" className="w-full justify-center">Unlock download</Button>
+          <Button type="submit" variant="primary" size="lg" loading={pinBusy} className="w-full justify-center">Unlock download</Button>
         </form>
       )}
       {stage === 'choose' && loading && (
@@ -136,7 +189,7 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
                 <Field htmlFor="dl-email" error={emailError}>
                   <Input id="dl-email" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(null) }} className="h-11 text-[15px]" aria-label="Email for the ZIP link" />
                 </Field>
-                <Button type="submit" variant="primary" size="lg" className="w-full justify-center">Email me the ZIP</Button>
+                <Button type="submit" variant="primary" size="lg" loading={zipBusy} className="w-full justify-center">Email me the ZIP</Button>
               </form>
               <Button size="lg" icon={<Download size={16} />} className="w-full justify-center" onClick={start}>Download here, one by one</Button>
               <p className="text-[11.5px] text-ink-3">Your browser may ask to allow multiple downloads.</p>

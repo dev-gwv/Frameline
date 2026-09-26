@@ -1,40 +1,39 @@
-import { DEMO_NOW, type Photo, type PhotoEvent } from '@frameline/shared'
-import type { EventSession } from './guest'
+import type { Photo, PublicEvent } from '@frameline/shared'
+import { authValid, type EventSession } from './guest'
 
-export const MAX_PIN_TRIES = 5
-export const PIN_LOCK_MS = 15 * 60_000
+/**
+ * Client-side mirror of the API's guest rules, used to pick the right screen. The API enforces them
+ * (401 pin_required / registration_required, 403 face_privacy, 429 pin_locked); api.tsx resets the
+ * matching gate when it answers that way.
+ */
+
+/** Not tracked by the API: counted per guest on this device. */
 export const MAX_DOWNLOAD_ALL = 5
 /** Bigger batches are offered as an emailed ZIP instead of one-by-one downloads. */
 export const DIRECT_DOWNLOAD_LIMIT = 12
 
-/** Sample data is dated around DEMO_NOW; use whichever is later so demo events don't expire early. */
-export const now = () => Math.max(Date.now(), DEMO_NOW)
+export const needsPin = (e: PublicEvent, s: EventSession) => e.settings.access === 'link-pin' && !(s.pin && authValid(s))
 
-export type EventBlock = 'disabled' | 'expired' | 'archived' | 'draft' | null
-export function eventBlock(e: PhotoEvent): EventBlock {
-  if (e.settings.disabled) return 'disabled'
-  if (e.status === 'archived') return 'archived'
-  if (new Date(e.expiresAt).getTime() < now()) return 'expired'
-  if (e.status === 'draft' && e.photoCount === 0) return 'draft'
-  return null
+export function needsRegistration(e: PublicEvent, s: EventSession) {
+  if (!(e.settings.requireRegistration || e.settings.access === 'registered') || s.vip?.skipLogin) return false
+  if (!s.registration) return true
+  // 'registered' galleries need a live session with a guest id (tokens last 12 hours).
+  return e.settings.access === 'registered' && !(authValid(s) && s.auth?.guestId)
 }
 
-export const needsPin = (e: PhotoEvent, s: EventSession) => e.settings.access === 'link-pin' && !s.pin
-export const needsRegistration = (e: PhotoEvent, s: EventSession) =>
-  (e.settings.requireRegistration || e.settings.access === 'registered') && !s.registration && !s.vip?.skipLogin
-export const needsAppChoice = (e: PhotoEvent, s: EventSession) => !e.settings.skipAppLanding && !s.webChosen && !s.vip?.skipLogin
+export const needsAppChoice = (e: PublicEvent, s: EventSession) => !e.settings.skipAppLanding && !s.webChosen && !s.vip?.skipLogin
 
 /**
  * Whether the guest may browse every photo. With face privacy on, only their own matches are visible —
- * unless they typed the PIN (the PIN "shows every photo") or hold a VIP link with "See all photos".
+ * unless the API session says "see all" (a typed PIN, or a VIP link with "See all photos").
  */
-export const canSeeAll = (e: PhotoEvent, s: EventSession) =>
-  !e.settings.facePrivacy || !e.settings.faceSearch || s.pin === 'typed' || !!s.vip?.all
+export const canSeeAll = (e: PublicEvent, s: EventSession) =>
+  !e.settings.facePrivacy || !e.settings.faceSearch || (authValid(s) && !!s.auth?.seeAll)
 
 export type Verdict = { ok: true } | { ok: false; reason: string; buy?: boolean; selfie?: boolean }
 
 /** Single-photo download policy. `own` = the guest is in this photo (selfie match). */
-export function canDownload(e: PhotoEvent, s: EventSession, photo: Photo, own: boolean): Verdict {
+export function canDownload(e: PublicEvent, s: EventSession, photo: Photo, own: boolean): Verdict {
   if (s.purchased.includes(photo.id)) return { ok: true }
   const d = e.settings.downloads
   if (d === 'none') {
@@ -45,14 +44,18 @@ export function canDownload(e: PhotoEvent, s: EventSession, photo: Photo, own: b
   return { ok: false, reason: 'You can download the photos you are in. Take a selfie to find them.', selfie: e.settings.faceSearch, buy: e.settings.storeEnabled }
 }
 
-/** Download all (an album or the whole event): PIN-gated, 5 uses per guest. */
-export function canDownloadAll(e: PhotoEvent, s: EventSession): Verdict & { needsPin?: boolean; left?: number } {
+/**
+ * Download all (an album or the whole event): 5 uses per guest on this device. PIN galleries ask for the PIN
+ * each time (checked by api.verifyPin) unless it came embedded in a VIP link. Galleries without a PIN gate skip
+ * the PIN step: the API can only check a PIN for 'link-pin' galleries.
+ */
+export function canDownloadAll(e: PublicEvent, s: EventSession): Verdict & { needsPin?: boolean; left?: number } {
   if (e.settings.downloads === 'none') {
     return { ok: false, reason: 'The photographer has turned off downloads for this event.', buy: e.settings.storeEnabled }
   }
   const left = MAX_DOWNLOAD_ALL - s.downloadAllUses
   if (left <= 0) return { ok: false, reason: `Download all has been used ${MAX_DOWNLOAD_ALL} times on this device. Ask the studio to send you a ZIP.` }
-  return { ok: true, needsPin: s.pin !== 'embedded', left }
+  return { ok: true, needsPin: e.settings.access === 'link-pin' && s.pin !== 'embedded', left }
 }
 
 /** Returns white or near-black, whichever reads better on the given hex colour. */

@@ -1,15 +1,16 @@
-import type { Photo, PhotoEvent, Studio, WatermarkSettings } from '@frameline/shared'
+import type { Photo, PublicEvent, PublicStudio, WatermarkSettings } from '@frameline/shared'
 
 /**
  * Real downloads without a backend: each photo is rendered to a canvas (its tone gradient, or its uploaded
  * image when one exists), watermarked with the studio's watermark settings, and saved as a JPEG.
- * TODO(api): swap for signed R2 URLs of the web/original rendition (watermarked server-side).
+ * TODO(api): swap for signed R2 URLs of the web/original rendition (watermarked server-side); downloads are
+ * counted with api.recordDownload by the callers.
  */
 export interface RenderOptions {
   watermark?: WatermarkSettings
   applyWatermark: boolean
   original: boolean
-  studio: Studio
+  studio: PublicStudio
 }
 
 const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
@@ -101,12 +102,12 @@ export function saveBlob(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 4000)
 }
 
-export const downloadName = (studio: Studio, event: PhotoEvent, photo: Photo, original: boolean) =>
+export const downloadName = (studio: PublicStudio, event: PublicEvent, photo: Photo, original: boolean) =>
   `${studio.handle}-${event.shortId}-${photo.filename.replace(/\.[a-z0-9]+$/i, '')}${original ? '' : '-web'}.jpg`
 
 /** Downloads photos one after another; reports progress and can be cancelled via the signal. */
 export async function downloadPhotos(
-  photos: Photo[], event: PhotoEvent, opts: RenderOptions, onProgress: (done: number) => void, signal?: AbortSignal,
+  photos: Photo[], event: PublicEvent, opts: RenderOptions, onProgress: (done: number) => void, signal?: AbortSignal,
 ) {
   let done = 0
   for (const p of photos) {

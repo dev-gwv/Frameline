@@ -1,47 +1,79 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Link2Off } from 'lucide-react'
+import { Link2Off, WifiOff } from 'lucide-react'
 import { Button } from '@frameline/ui'
+import { decodeGuestLink, type GuestLinkPayload, type GuestSession } from '@frameline/shared'
 import { useApi } from '../lib/api'
-import { decodeGuestLink } from '../lib/link'
-import { guest } from '../lib/guest'
+import { authFrom, guest } from '../lib/guest'
+import { isNetwork } from '../lib/errors'
 import { StatePage } from '../components/common'
-import { personFor } from '../components/SelfieFlow'
+
+type LinkError = 'bad' | 'missing' | 'offline'
 
 /**
- * /s/:token (album + face links) and /v/:token (VIP links).
- * Applies the link's greeting, VIP flags and face match to this device, then redirects.
+ * /s/:code (album + face links) and /v/:code (VIP links).
+ * The API resolves the code first (signed short codes, or unsigned tokens in the README format) and may hand back
+ * a ready guest session for VIP links with an embedded PIN or "see all". If the API doesn't know the code, the
+ * token is decoded locally; its VIP flags are then ignored because anyone could forge them.
  */
 export function PersonalLink() {
   const { token = '' } = useParams()
   const { pathname } = useLocation()
-  const isVip = pathname.startsWith('/v/')
+  const isVipPath = pathname.startsWith('/v/')
   const api = useApi()
   const navigate = useNavigate()
-  const [error, setError] = useState<'bad' | 'missing' | null>(null)
+  const [error, setError] = useState<LinkError | null>(null)
 
   useEffect(() => {
-    const data = decodeGuestLink(token)
-    if (!data) { setError('bad'); return }
     let cancelled = false
-    api.getEvent(data.e).then(async (event) => {
+    async function open() {
+      let payload: GuestLinkPayload | null = null
+      let session: GuestSession | undefined
+      let trusted = false
+      try {
+        const r = await api.resolveGuestLink(token)
+        payload = r.payload
+        session = r.session
+        trusted = r.kind === 'v' && isVipPath
+      } catch (err) {
+        if (isNetwork(err)) throw err
+        payload = decodeGuestLink(token)
+      }
+      if (!payload) { setError('bad'); return }
+      const event = await api.getPublicEvent(payload.e)
       if (cancelled) return
-      const vip = isVip && data.vip ? { skipLogin: !!data.vip.skipLogin, pin: !!data.vip.pin, all: !!data.vip.all } : undefined
-      let albumOk = false
-      if (data.album) albumOk = (await api.listAlbums(event.id)).some((a) => a.id === data.album)
+      const vip = trusted && payload.vip ? { skipLogin: !!payload.vip.skipLogin, pin: !!payload.vip.pin, all: !!payload.vip.all } : undefined
+      const albumOk = !!payload.album && event.albums.some((a) => a.id === payload!.album)
+      const me = payload.me
+      const personId = payload.p
+      const name = payload.n
       guest.patchSession(event.shortId, (s) => ({
-        ...(data.n ? { greeting: data.n } : {}),
+        ...(name ? { greeting: name } : {}),
         ...(vip ? { vip } : {}),
-        ...(vip?.pin ? { pin: s.pin === 'typed' ? 'typed' : 'embedded' } : {}),
+        ...(session ? { auth: authFrom(session, s.auth) } : {}),
+        ...(session && vip?.pin ? { pin: s.pin === 'typed' ? 'typed' : 'embedded' } : {}),
         ...(vip?.skipLogin ? { webChosen: true } : {}),
-        ...(data.me ? { match: { personId: data.p ?? personFor(`${event.id}:${data.n ?? token}`), at: new Date().toISOString(), via: 'link' as const } } : {}),
+        // Face link: the person comes with the link, or is looked up by face search (same key every time).
+        ...(me ? { match: { personId, key: personId ? undefined : `${event.id}:link:${name ?? token}`, at: new Date().toISOString(), via: 'link' as const } } : {}),
       }))
       const base = `/${event.shortId.toLowerCase()}`
-      navigate(data.me ? `${base}/me` : albumOk ? `${base}/a/${data.album}` : base, { replace: true })
-    }).catch(() => { if (!cancelled) setError('missing') })
+      navigate(me ? `${base}/me` : albumOk ? `${base}/a/${payload.album}` : base, { replace: true })
+    }
+    open().catch((err) => {
+      if (cancelled) return
+      // Unknown event (404) or a blocked/removed gallery both read as "no longer here".
+      setError(isNetwork(err) ? 'offline' : 'missing')
+    })
     return () => { cancelled = true }
-  }, [api, token, isVip, navigate])
+  }, [api, token, isVipPath, navigate])
 
+  if (error === 'offline') {
+    return (
+      <StatePage icon={<WifiOff size={26} />} title="You seem to be offline" body="We couldn't open your link. Check your internet connection and try again.">
+        <Button variant="primary" size="lg" onClick={() => location.reload()}>Try again</Button>
+      </StatePage>
+    )
+  }
   if (error) {
     return (
       <StatePage icon={<Link2Off size={26} />} title={error === 'bad' ? 'This link is broken' : 'This gallery is no longer here'}

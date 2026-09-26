@@ -1,24 +1,27 @@
 import { useEffect, useMemo } from 'react'
 import { Link, Outlet, useOutletContext, useParams } from 'react-router-dom'
-import { Archive, CalendarX, Clock, EyeOff, SearchX } from 'lucide-react'
+import { Archive, CalendarX, Clock, EyeOff, SearchX, WifiOff } from 'lucide-react'
 import { Button, Skeleton } from '@frameline/ui'
-import { fmt, type Photo, type PhotoEvent, type Studio } from '@frameline/shared'
-import { useEvent, useMatches, useStudio } from '../lib/queries'
+import { fmt, type Photo, type PublicEvent, type PublicStudio } from '@frameline/shared'
+import { useMatches, usePublicEvent } from '../lib/queries'
 import { rememberEvent, useSession, type EventSession } from '../lib/guest'
 import { useBrandColor } from '../lib/brand'
-import { canSeeAll, eventBlock, needsAppChoice, needsPin, needsRegistration } from '../lib/access'
+import { canSeeAll, needsAppChoice, needsPin, needsRegistration } from '../lib/access'
+import { friendlyError, isNotFound } from '../lib/errors'
 import { AppInterstitial, PinGate, RegistrationGate } from '../components/Gates'
 import { StatePage } from '../components/common'
 
 export interface EventCtx {
-  event: PhotoEvent
-  studio: Studio
+  event: PublicEvent
+  studio: PublicStudio
   session: EventSession
   /** "/6402f9f" */
   base: string
   seeAll: boolean
   matches: Photo[] | undefined
   matchesLoading: boolean
+  matchesError: unknown
+  retryMatches: () => void
   ownIds: Set<string>
 }
 
@@ -26,12 +29,12 @@ export const useEventCtx = () => useOutletContext<EventCtx>()
 
 export function EventLayout() {
   const { shortId = '' } = useParams()
-  const eventQ = useEvent(shortId)
-  const studioQ = useStudio()
+  const eventQ = usePublicEvent(shortId)
   const session = useSession(shortId)
   const event = eventQ.data
-  const matchQ = useMatches(event?.id, session.match?.personId)
-  useBrandColor(studioQ.data?.brandColor)
+  const gated = !event || !!event.blocked || needsAppChoice(event, session) || needsPin(event, session) || needsRegistration(event, session)
+  const matchQ = useMatches(shortId, session.match, !gated)
+  useBrandColor(event?.studio.brandColor)
 
   useEffect(() => {
     if (event) {
@@ -43,7 +46,7 @@ export function EventLayout() {
 
   const ownIds = useMemo(() => new Set((matchQ.data ?? []).map((p) => p.id)), [matchQ.data])
 
-  if (eventQ.isLoading || studioQ.isLoading) {
+  if (eventQ.isLoading) {
     return (
       <main className="mx-auto w-full max-w-md" aria-busy aria-label="Loading gallery">
         <Skeleton className="h-[300px] rounded-none" />
@@ -52,30 +55,31 @@ export function EventLayout() {
     )
   }
   if (eventQ.isError || !event) {
+    if (!eventQ.error || isNotFound(eventQ.error)) {
+      return (
+        <StatePage icon={<SearchX size={26} />} eyebrow={`Code ${shortId.toUpperCase()}`} title="We couldn't find this gallery"
+          body="Check the link or the event code on your invite. Codes are 7 letters and numbers, like 6402F9F.">
+          <Link to="/"><Button variant="primary" size="lg">Enter a code</Button></Link>
+        </StatePage>
+      )
+    }
+    const f = friendlyError(eventQ.error, 'The gallery didn’t load')
     return (
-      <StatePage icon={<SearchX size={26} />} eyebrow={`Code ${shortId.toUpperCase()}`} title="We couldn't find this gallery"
-        body="Check the link or the event code on your invite. Codes are 7 letters and numbers, like 6402F9F.">
-        <Link to="/"><Button variant="primary" size="lg">Enter a code</Button></Link>
+      <StatePage icon={<WifiOff size={26} />} eyebrow={`Code ${shortId.toUpperCase()}`} title={f.title} body={f.body}>
+        <Button variant="primary" size="lg" loading={eventQ.isFetching} onClick={() => void eventQ.refetch()}>Try again</Button>
       </StatePage>
     )
   }
-  if (studioQ.isError || !studioQ.data) {
-    return (
-      <StatePage title="The gallery didn't load" body="Check your connection and try again.">
-        <Button variant="primary" size="lg" onClick={() => { void eventQ.refetch(); void studioQ.refetch() }}>Try again</Button>
-      </StatePage>
-    )
-  }
-  const studio = studioQ.data
+  const studio = event.studio
 
-  const block = eventBlock(event)
-  if (block) {
+  if (event.blocked) {
     const contact = (
       <div className="flex flex-wrap justify-center gap-2">
         <a href={`tel:${studio.phone.replace(/\s/g, '')}`}><Button size="lg">Call {studio.name}</Button></a>
         <a href={`mailto:${studio.email}?subject=${encodeURIComponent(event.name)}`}><Button size="lg">Email</Button></a>
       </div>
     )
+    const block = event.blocked
     if (block === 'disabled') return <StatePage icon={<EyeOff size={26} />} eyebrow={studio.name} title="This gallery is turned off" body={`${studio.name} has paused ${event.name} for now. Your photos are safe; ask the studio when it will be back.`}>{contact}</StatePage>
     if (block === 'expired') return <StatePage icon={<CalendarX size={26} />} eyebrow={studio.name} title="This gallery has expired" body={`${event.name} was available until ${fmt.date(event.expiresAt)}. The studio can reopen it for you.`}>{contact}</StatePage>
     if (block === 'archived') return <StatePage icon={<Archive size={26} />} eyebrow={studio.name} title="This gallery has been archived" body={`${studio.name} has moved ${event.name} to their archive. Ask them to restore it or send you your photos.`}>{contact}</StatePage>
@@ -91,6 +95,7 @@ export function EventLayout() {
     event, studio, session, base: `/${event.shortId.toLowerCase()}`,
     seeAll: canSeeAll(event, session),
     matches: matchQ.data, matchesLoading: matchQ.isLoading && !!session.match,
+    matchesError: matchQ.error, retryMatches: () => void matchQ.refetch(),
     ownIds,
   }
   return <Outlet context={ctx} />

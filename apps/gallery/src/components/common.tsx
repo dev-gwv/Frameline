@@ -1,7 +1,8 @@
 import { forwardRef, useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Heart } from 'lucide-react'
-import { cn, LogoMark, PhotoTile, Tip } from '@frameline/ui'
+import { ArrowLeft, Heart, WifiOff } from 'lucide-react'
+import { Button, cn, EmptyState, LogoMark, PhotoTile, Tip } from '@frameline/ui'
+import { friendlyError } from '../lib/errors'
 import type { Photo } from '@frameline/shared'
 
 /** Icon-only button: always has an aria-label and a tooltip. */
@@ -119,4 +120,10 @@ export function Sentinel({ onVisible, disabled, watch }: { onVisible: () => void
 
 export function Container({ className, children }: { className?: string; children: ReactNode }) {
   return <div className={cn('mx-auto w-full max-w-5xl px-4 sm:px-7', className)}>{children}</div>
+}
+
+/** Error state for a failed list: says what went wrong in plain words, with a retry. */
+export function LoadError({ error, onRetry, title = 'Photos didn’t load' }: { error: unknown; onRetry: () => void; title?: string }) {
+  const f = friendlyError(error, title)
+  return <EmptyState icon={<WifiOff size={26} />} title={f.code === 'unknown' ? title : f.title} body={f.body} action={<Button variant="primary" onClick={onRetry}>Try again</Button>} />
 }

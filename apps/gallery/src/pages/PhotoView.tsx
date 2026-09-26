@@ -3,9 +3,11 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Lock, ScanFace, Share2, ShoppingBag } from 'lucide-react'
 import { Button, cn, Tip, useToast } from '@frameline/ui'
 import { fmt, toneCss, type Photo } from '@frameline/shared'
-import { useFavouritePhotos, useHighlights, usePhoto, usePhotoList } from '../lib/queries'
-import { guest } from '../lib/guest'
+import { useHighlights, usePhotoList } from '../lib/queries'
+import { useApi } from '../lib/api'
+import { guest, snapshot } from '../lib/guest'
 import { canDownload } from '../lib/access'
+import { friendlyError } from '../lib/errors'
 import { IconBtn } from '../components/common'
 import { Sheet } from '../components/Sheet'
 import { BuySheet } from '../components/BuySheet'
@@ -19,22 +21,23 @@ export function PhotoView() {
   const from = params.get('from') ?? ''
   const albumParam = params.get('album') ?? ''
   const navigate = useNavigate()
+  const api = useApi()
   const { toast } = useToast()
-  const { event, studio, session, base, seeAll, matches, ownIds } = useEventCtx()
-  const photoQ = usePhoto(photoId)
-  const photo = photoQ.data
+  const { event, studio, session, base, seeAll, matches, matchesLoading, ownIds } = useEventCtx()
 
-  // Which list we are stepping through.
-  const listAlbum = from === 'me' || from === 'fav' || from === 'highlights' ? undefined : from || photo?.albumId
-  const albumList = usePhotoList(event.id, listAlbum, !!listAlbum && seeAll)
-  const highlightList = useHighlights(event.id, from === 'highlights')
-  const favList = useFavouritePhotos(event.id, from === 'fav' ? session.favourites : [])
+  // Which list we are stepping through. There's no single-photo endpoint for guests: the photo comes from its list.
+  const listAlbum = from === 'me' || from === 'fav' || from === 'highlights' ? undefined : from || 'all'
+  const albumList = usePhotoList(event.shortId, listAlbum, !!listAlbum && seeAll)
+  const highlightList = useHighlights(event.shortId, from === 'highlights' && seeAll)
+  const favList = useMemo(() => session.favourites.map((id) => session.favPhotos[id]).filter((p) => !!p).reverse(), [session.favourites, session.favPhotos])
   const list: Photo[] = useMemo(() => {
     if (from === 'me') return (matches ?? []).filter((p) => !albumParam || p.albumId === albumParam)
-    if (from === 'fav') return favList.data ?? []
+    if (from === 'fav') return favList
     if (from === 'highlights') return highlightList.data ?? []
     return albumList.data ?? []
-  }, [from, albumParam, matches, favList.data, highlightList.data, albumList.data])
+  }, [from, albumParam, matches, favList, highlightList.data, albumList.data])
+  const photo = list.find((p) => p.id === photoId) ?? matches?.find((p) => p.id === photoId) ?? session.favPhotos[photoId]
+  const loading = !photo && (from === 'me' ? matchesLoading : from === 'highlights' ? highlightList.isLoading : from === 'fav' ? false : seeAll && albumList.isLoading)
 
   const idx = list.findIndex((p) => p.id === photoId)
   const prev = idx > 0 ? list[idx - 1] : undefined
@@ -43,7 +46,7 @@ export function PhotoView() {
   const go = useCallback((p?: Photo) => { if (p) navigate(`${base}/p/${p.id}${search ? `?${search}` : ''}`, { replace: true }) }, [base, navigate, search])
 
   const backTo = from === 'me' ? `${base}/me${albumParam ? `?album=${albumParam}` : ''}` : from === 'fav' ? `${base}/favourites`
-    : from ? `${base}/a/${from}` : seeAll && photo ? `${base}/a/${photo.albumId}` : base
+    : from ? `${base}/a/${from}` : seeAll ? `${base}/a/all` : base
 
   const own = ownIds.has(photoId)
   const isFav = session.favourites.includes(photoId)
@@ -81,9 +84,26 @@ export function PhotoView() {
     start.current = null; setDx(0)
   }
 
-  function toggleFav() {
-    guest.patchSession(event.shortId, (s) => ({ favourites: s.favourites.includes(photoId) ? s.favourites.filter((x) => x !== photoId) : [...s.favourites, photoId] }))
-    toast({ kind: 'success', title: isFav ? 'Removed from favourites' : 'Added to favourites', body: isFav ? undefined : `${studio.name} can see your picks.` })
+  /** Instant on this device, then sent to the API (the studio's "Who favourited"); rolled back if that fails. */
+  async function toggleFav() {
+    if (!photo) return
+    const on = !isFav
+    const id = photo.id
+    const apply = (want: boolean) => guest.patchSession(event.shortId, (s) => {
+      const favPhotos = { ...s.favPhotos }
+      if (want) favPhotos[id] = snapshot(photo)
+      else delete favPhotos[id]
+      return { favourites: want ? [...s.favourites.filter((x) => x !== id), id] : s.favourites.filter((x) => x !== id), favPhotos }
+    })
+    apply(on)
+    toast({ kind: 'success', title: on ? 'Added to favourites' : 'Removed from favourites', body: on ? `${studio.name} can see your picks.` : undefined })
+    try {
+      await api.setFavourite(id, on, event.shortId)
+    } catch (err) {
+      apply(!on)
+      const f = friendlyError(err, 'Favourite not saved')
+      toast({ kind: 'error', title: f.title, body: f.body })
+    }
   }
 
   function download() {
@@ -116,11 +136,11 @@ export function PhotoView() {
 
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden px-0 sm:px-16"
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} style={{ touchAction: 'pan-y' }}>
-        {photoQ.isLoading ? (
+        {loading ? (
           <div className="shimmer aspect-[3/2] w-full max-w-3xl bg-side-2" />
-        ) : !photo ? (
+        ) : !photo && seeAll ? (
           <div className="px-6 text-center"><b className="font-display text-[20px]">This photo isn't available</b><p className="mt-1 text-[13px] text-side-ink-2">It may have been removed by the studio.</p><Link to={backTo}><Button variant="side" className="mt-4">Back to photos</Button></Link></div>
-        ) : !allowed ? (
+        ) : !photo || !allowed ? (
           <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center">
             <span className="grid size-14 place-items-center rounded-full bg-side-2 text-side-gold"><Lock size={24} /></span>
             <b className="font-display text-[20px]">This photo is private</b>

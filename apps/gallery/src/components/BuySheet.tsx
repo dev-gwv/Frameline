@@ -1,31 +1,43 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { CheckCircle2, CreditCard, Minus, Plus, Smartphone } from 'lucide-react'
 import { Button, Field, Input, Segmented, Skeleton, Textarea, cn } from '@frameline/ui'
-import { fmt, type Photo, type PhotoEvent, type Studio } from '@frameline/shared'
+import { fmt, type Order, type OrderItemInput, type Photo, type PublicEvent, type PublicStudio } from '@frameline/shared'
+import { isLiveApi, useApi } from '../lib/api'
 import { usePrices } from '../lib/queries'
-import { guest, uid, useGuest, type EventSession } from '../lib/guest'
+import { guest, useGuest, type EventSession } from '../lib/guest'
+import { friendlyError } from '../lib/errors'
 import { validPhone } from './Gates'
 import { Sheet } from './Sheet'
+import { LoadError } from './common'
 
 interface Option { id: string; label: string; detail: string; unit: number; qty: number; total: number; digital: boolean; badge?: string }
 
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
 /**
- * Buy photos (single / multiple / all my photos) or a print, with a mock UPI or card checkout.
- * TODO(api): api.createOrder(...) + Razorpay checkout; orders are stored on this device for now.
+ * Buy photos (single / multiple / all my photos) or a print. Prices come from api.listPrices and the order is
+ * placed with api.createOrder (priced by the API). Payment is the API's simulated capture; card and UPI details
+ * are only checked for shape here and never sent.
+ * TODO(api): Razorpay Checkout when the API returns `order.checkout` (status 'pending').
  */
 export function BuySheet({ open, onOpenChange, photos, mode, event, studio, session }: {
   open: boolean; onOpenChange: (v: boolean) => void; photos: Photo[]; mode: 'photo' | 'mine'
-  event: PhotoEvent; studio: Studio; session: EventSession
+  event: PublicEvent; studio: PublicStudio; session: EventSession
 }) {
+  const api = useApi()
   const pricesQ = usePrices()
-  const orderCount = useGuest((s) => s.orders.length)
+  const profile = useGuest((s) => s.profile)
   const [stage, setStage] = useState<'pick' | 'pay' | 'processing' | 'done'>('pick')
   const [choice, setChoice] = useState<string>('')
   const [printQty, setPrintQty] = useState(1)
   const [method, setMethod] = useState<'upi' | 'card'>('upi')
-  const [form, setForm] = useState({ name: session.registration?.name ?? session.greeting ?? '', phone: session.registration?.phone ?? '', upi: '', card: '', exp: '', cvc: '', address: '' })
+  const [form, setForm] = useState({
+    name: session.registration?.name ?? profile?.name ?? session.greeting ?? '', phone: session.registration?.phone ?? profile?.phone ?? '',
+    email: session.registration?.email ?? profile?.email ?? '', upi: '', card: '', exp: '', cvc: '', address: '',
+  })
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [orderNo, setOrderNo] = useState(0)
+  const [payError, setPayError] = useState<string | null>(null)
+  const [order, setOrder] = useState<Order | null>(null)
 
   const n = photos.length
   const options = useMemo<Option[]>(() => {
@@ -46,7 +58,7 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
   }, [pricesQ.data, mode, n, printQty])
 
   useEffect(() => {
-    if (open) { setStage('pick'); setErrors({}); setPrintQty(1) }
+    if (open) { setStage('pick'); setErrors({}); setPayError(null); setPrintQty(1); setOrder(null) }
   }, [open])
   useEffect(() => {
     if (open && options.length && !options.some((o) => o.id === choice)) setChoice((options.find((o) => o.badge) ?? options[0]).id)
@@ -54,12 +66,13 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
 
   const selected = options.find((o) => o.id === choice)
 
-  function pay(e: FormEvent) {
+  async function pay(e: FormEvent) {
     e.preventDefault()
     if (!selected) return
     const errs: Record<string, string> = {}
     if (form.name.trim().length < 2) errs.name = 'Enter your name.'
     if (!validPhone(form.phone)) errs.phone = 'Enter a 10-digit mobile number.'
+    if (!EMAIL.test(form.email.trim())) errs.email = 'Enter an email for the receipt, like name@example.com.'
     if (method === 'upi' && !/^[\w.-]{2,}@[a-z]{2,}$/i.test(form.upi.trim())) errs.upi = 'Enter a UPI ID like name@okhdfc.'
     if (method === 'card') {
       if (form.card.replace(/\s/g, '').length < 15) errs.card = 'Enter the 16-digit card number.'
@@ -67,19 +80,27 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
       if (!/^\d{3,4}$/.test(form.cvc.trim())) errs.cvc = '3 digits on the back.'
     }
     if (!selected.digital && form.address.trim().length < 10) errs.address = 'Enter the full delivery address with PIN code.'
-    setErrors(errs)
+    setErrors(errs); setPayError(null)
     if (Object.keys(errs).length) return
     setStage('processing')
-    setTimeout(() => {
-      const number = 1044 + orderCount
-      setOrderNo(number)
-      guest.update((s) => ({
-        ...s,
-        orders: [{ id: uid('ord'), number, shortId: event.shortId, eventName: event.name, items: selected.id === 'print812' ? `Print 8×12 ×${printQty}` : selected.label, photoIds: photos.map((p) => p.id), amount: selected.total, method, at: new Date().toISOString() }, ...s.orders],
-      }))
-      if (selected.digital) guest.patchSession(event.shortId, (s) => ({ purchased: [...new Set([...s.purchased, ...photos.map((p) => p.id)])] }))
+    const photoIds = photos.map((p) => p.id)
+    const item: OrderItemInput = selected.id === 'all' ? { priceId: 'all', photoIds }
+      : selected.id === 'print812' ? { priceId: 'print812', photoIds, quantity: printQty }
+      : { priceId: selected.id, photoIds, quantity: selected.qty }
+    const buyer = { name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim() }
+    try {
+      // TODO(api): OrderInput has no delivery address yet; prints need one (collected above, not sent).
+      const placed = await api.createOrder(event.shortId, { items: [item], method, buyer })
+      guest.setProfile(buyer)
+      const paid = placed.status === 'paid' || placed.status === 'paid-direct'
+      if (paid && selected.digital) guest.patchSession(event.shortId, (s) => ({ purchased: [...new Set([...s.purchased, ...photoIds])] }))
+      setOrder(placed)
       setStage('done')
-    }, 1400)
+    } catch (err) {
+      const f = friendlyError(err, 'Payment didn’t go through')
+      setPayError(`${f.title}. ${f.body}`)
+      setStage('pay')
+    }
   }
 
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => { setForm({ ...form, [k]: e.target.value }); setErrors({ ...errors, [k]: '' }) }
@@ -93,7 +114,9 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
       title={stage === 'done' ? 'Order placed' : mode === 'photo' ? 'Buy this photo' : 'Buy your photos'}
       description={stage === 'pick' ? `From ${studio.name} · paid securely` : undefined} footer={footer}>
       {stage === 'pick' && (
-        pricesQ.isLoading ? <div className="flex flex-col gap-2"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : (
+        pricesQ.isLoading ? <div className="flex flex-col gap-2"><Skeleton className="h-16" /><Skeleton className="h-16" /></div>  : pricesQ.isError || !options.length ? (
+          <LoadError error={pricesQ.error} title="Prices didn’t load" onRetry={() => void pricesQ.refetch()} />
+        ) : (
           <div role="radiogroup" aria-label="What to buy" className="flex flex-col gap-2">
             {options.map((o) => (
               <div key={o.id}
@@ -127,6 +150,7 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
             <Field label="Name" htmlFor="buy-name" error={errors.name}><Input id="buy-name" autoComplete="name" value={form.name} onChange={set('name')} className="h-11" /></Field>
             <Field label="Mobile" htmlFor="buy-phone" error={errors.phone}><Input id="buy-phone" type="tel" inputMode="tel" autoComplete="tel" value={form.phone} onChange={set('phone')} className="h-11" /></Field>
           </div>
+          <Field label="Email for the receipt" htmlFor="buy-email" error={errors.email}><Input id="buy-email" type="email" inputMode="email" autoComplete="email" value={form.email} onChange={set('email')} className="h-11" /></Field>
           {!selected.digital && (
             <Field label="Delivery address" htmlFor="buy-address" error={errors.address}><Textarea id="buy-address" autoComplete="street-address" value={form.address} onChange={set('address')} /></Field>
           )}
@@ -142,11 +166,12 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
               <Field label="CVC" htmlFor="buy-cvc" error={errors.cvc}><Input id="buy-cvc" inputMode="numeric" autoComplete="cc-csc" placeholder="123" value={form.cvc} onChange={set('cvc')} className="h-11" /></Field>
             </div>
           )}
+          {payError && <p role="alert" className="rounded-card bg-bad-soft p-3 text-[13px] font-semibold text-bad">{payError}</p>}
           <div className="flex gap-2">
             <Button size="lg" onClick={() => setStage('pick')}>Back</Button>
             <Button type="submit" variant="primary" size="lg" className="flex-1 justify-center">Pay {fmt.rupees(selected.total)}</Button>
           </div>
-          <p className="text-center text-[11px] text-ink-3">Demo checkout — no money is taken.</p>
+          <p className="text-center text-[11px] text-ink-3">{isLiveApi ? 'Test payments — no money is taken yet.' : 'Demo checkout — no money is taken.'}</p>
         </form>
       )}
       {stage === 'processing' && (
@@ -155,14 +180,23 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
           <b>{method === 'upi' ? 'Waiting for your UPI app…' : 'Confirming with your bank…'}</b>
         </div>
       )}
-      {stage === 'done' && selected && (
+      {stage === 'done' && selected && order && order.status === 'pending' && (
+        <div className="flex flex-col items-center gap-2 py-4 text-center">
+          <CheckCircle2 size={40} className="text-warn" />
+          <div className="font-mono text-[12px] text-ink-3">Order #{order.number}</div>
+          <b className="font-display text-[20px]">Payment pending</b>
+          <p className="max-w-xs text-[13px] text-ink-2">Your order is saved. Online payment isn't switched on in this gallery yet — {studio.name} will send you a payment link.</p>
+          <Button className="mt-2" onClick={() => onOpenChange(false)}>Done</Button>
+        </div>
+      )}
+      {stage === 'done' && selected && order && order.status !== 'pending' && (
         <div className="flex flex-col items-center gap-2 py-4 text-center">
           <CheckCircle2 size={40} className="text-ok" />
-          <div className="font-mono text-[12px] text-ink-3">Order #{orderNo}</div>
-          <b className="font-display text-[20px]">{fmt.rupees(selected.total)} paid</b>
+          <div className="font-mono text-[12px] text-ink-3">Order #{order.number}</div>
+          <b className="font-display text-[20px]">{fmt.rupees(order.paid)} paid</b>
           <p className="max-w-xs text-[13px] text-ink-2">
             {selected.digital
-              ? `Your ${n === 1 ? 'photo is' : `${n} photos are`} unlocked for full-resolution download. A receipt is on its way to you on WhatsApp.`
+              ? `Your ${n === 1 ? 'photo is' : `${n} photos are`} unlocked for full-resolution download. A receipt is on its way to ${order.buyerEmail ?? form.email.trim()}.`
               : `${studio.name} will print and ship your photo in about 5 days. We'll send tracking on WhatsApp.`}
           </p>
           <Button className="mt-2" onClick={() => onOpenChange(false)}>Done</Button>

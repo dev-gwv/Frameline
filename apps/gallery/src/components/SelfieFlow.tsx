@@ -2,14 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Camera, ImageUp, RotateCcw, ShieldCheck } from 'lucide-react'
 import { Button } from '@frameline/ui'
-import { hash, type PhotoEvent, type Studio } from '@frameline/shared'
+import type { PublicEvent, PublicStudio } from '@frameline/shared'
+import { useApi } from '../lib/api'
 import { guest } from '../lib/guest'
+import { friendlyError } from '../lib/errors'
 import { BrandButton } from './common'
 import { Sheet } from './Sheet'
-
-/** Unnamed guests in the sample data; a selfie maps deterministically to one of them. */
-export const GUEST_PEOPLE = ['p_g1', 'p_g2', 'p_g3']
-export const personFor = (key: string) => GUEST_PEOPLE[hash(key) % GUEST_PEOPLE.length]
 
 /** Small square thumbnail (data URL) so "Matched to your selfie" survives a reload. */
 async function thumbnail(file: File, size = 160): Promise<string | undefined> {
@@ -26,9 +24,10 @@ async function thumbnail(file: File, size = 160): Promise<string | undefined> {
 type Step = 'intro' | 'preview' | 'matching'
 
 export function SelfieFlow({ open, onOpenChange, event, studio, base }: {
-  open: boolean; onOpenChange: (v: boolean) => void; event: PhotoEvent; studio: Studio; base: string
+  open: boolean; onOpenChange: (v: boolean) => void; event: PublicEvent; studio: PublicStudio; base: string
 }) {
   const navigate = useNavigate()
+  const api = useApi()
   const [step, setStep] = useState<Step>('intro')
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
@@ -48,12 +47,22 @@ export function SelfieFlow({ open, onOpenChange, event, studio, base }: {
 
   async function match() {
     if (!file) return
-    setStep('matching')
-    const [thumb] = await Promise.all([thumbnail(file), new Promise((r) => setTimeout(r, 2400))])
-    // TODO(api): upload the selfie to face search (Vectorize) and get back the matched person.
-    guest.patchSession(event.shortId, { match: { personId: personFor(`${event.id}:${file.name}:${file.size}`), thumb, at: new Date().toISOString(), via: 'selfie' } })
-    onOpenChange(false)
-    navigate(`${base}/me`)
+    setStep('matching'); setError(null)
+    // Same key as the API's deterministic dev match; the real API uses `embedding` once an on-device model exists.
+    const key = `${event.id}:${file.name}:${file.size}`
+    try {
+      const [thumb, res] = await Promise.all([thumbnail(file), api.searchFaces(event.shortId, { key }), new Promise((r) => setTimeout(r, 1600))])
+      const personId = res.personId ?? undefined
+      guest.patchSession(event.shortId, {
+        match: { personId, photoIds: personId ? undefined : res.photoIds, key, thumb, at: new Date().toISOString(), via: 'selfie' },
+      })
+      onOpenChange(false)
+      navigate(`${base}/me`)
+    } catch (err) {
+      const f = friendlyError(err, 'We couldn’t search for you')
+      setError(`${f.title}. ${f.body}`)
+      setStep('preview')
+    }
   }
 
   const inputs = (
@@ -85,7 +94,8 @@ export function SelfieFlow({ open, onOpenChange, event, studio, base }: {
         <div className="flex flex-col items-center gap-4">
           <img src={preview} alt="Your selfie" className="size-44 rounded-full border-4 border-surface object-cover shadow-card" />
           <p className="text-center text-[13px] text-ink-2">Make sure your face is clear and centred.</p>
-          <BrandButton onClick={match}>Find my photos</BrandButton>
+          {error && <p role="alert" className="text-center text-[12.5px] font-semibold text-bad">{error}</p>}
+          <BrandButton onClick={match}>{error ? 'Try again' : 'Find my photos'}</BrandButton>
           <Button variant="ghost" icon={<RotateCcw size={15} />} onClick={() => cameraRef.current?.click()}>Retake</Button>
         </div>
       )}

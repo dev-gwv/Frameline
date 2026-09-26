@@ -3,18 +3,16 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Download, RotateCcw, ScanFace, ShoppingBag, UserRoundSearch } from 'lucide-react'
 import { Button, EmptyState, cn } from '@frameline/ui'
 import { fmt } from '@frameline/shared'
-import { useAlbums } from '../lib/queries'
 import { useGuest } from '../lib/guest'
-import { BrandButton, Container, GridSkeleton, PhotoGrid, TopBar } from '../components/common'
+import { BrandButton, Container, GridSkeleton, LoadError, PhotoGrid, TopBar } from '../components/common'
 import { SelfieFlow } from '../components/SelfieFlow'
 import { DownloadSheet } from '../components/DownloadSheet'
 import { BuySheet } from '../components/BuySheet'
 import { useEventCtx } from './EventLayout'
 
 export function MyPhotos() {
-  const { event, studio, session, base, matches, matchesLoading } = useEventCtx()
+  const { event, studio, session, base, matches, matchesLoading, matchesError, retryMatches } = useEventCtx()
   const [params, setParams] = useSearchParams()
-  const albumsQ = useAlbums(event.id)
   const [selfie, setSelfie] = useState(false)
   const [download, setDownload] = useState(false)
   const [buy, setBuy] = useState(false)
@@ -25,8 +23,8 @@ export function MyPhotos() {
   const chips = useMemo(() => {
     const counts = new Map<string, number>()
     all.forEach((p) => counts.set(p.albumId, (counts.get(p.albumId) ?? 0) + 1))
-    return (albumsQ.data ?? []).filter((a) => counts.has(a.id)).map((a) => ({ id: a.id, name: a.name, count: counts.get(a.id)! }))
-  }, [all, albumsQ.data])
+    return event.albums.filter((a) => counts.has(a.id)).map((a) => ({ id: a.id, name: a.name, count: counts.get(a.id)! }))
+  }, [all, event.albums])
   const shown = albumFilter ? all.filter((p) => p.albumId === albumFilter) : all
   const n = shown.length
 
@@ -53,7 +51,7 @@ export function MyPhotos() {
       {bar}
       <Container className="pt-4">
         <h1 className="font-display text-[24px] font-semibold leading-tight sm:text-[28px]">
-          {matchesLoading ? 'Finding your photos…' : all.length ? `We found you in ${fmt.count(all.length)} photos` : 'We couldn\'t find you yet'}
+          {matchesLoading ? 'Finding your photos…' : matchesError && !matches ? 'Your photos' : all.length ? `We found you in ${fmt.count(all.length)} photos` : 'We couldn\'t find you yet'}
         </h1>
         <div className="mt-2 flex items-center gap-2 text-[12.5px] text-ink-2">
           {session.match.thumb
@@ -74,7 +72,7 @@ export function MyPhotos() {
         )}
 
         <div className="mt-3">
-          {matchesLoading ? <GridSkeleton /> : n ? (
+          {matchesLoading ? <GridSkeleton /> : matchesError && !matches ? <LoadError error={matchesError} onRetry={retryMatches} title="Your photos didn’t load" /> : n ? (
             <PhotoGrid photos={shown} hrefFor={(p) => `${base}/p/${p.id}?from=me${albumFilter ? `&album=${albumFilter}` : ''}`} favourites={session.favourites} />
           ) : (
             <EmptyState icon={<ScanFace size={26} />} title={albumFilter ? 'You\'re not in this album' : 'No matches yet'}

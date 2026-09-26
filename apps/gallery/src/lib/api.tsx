@@ -1,22 +1,70 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
-import { createMockApi, type ChangeTopic, type FramelineApi } from '@frameline/shared'
+import {
+  ApiError, createHttpApi, createMockApi, memoryTokenStore, storageGuestTokenStore, type ChangeTopic, type FramelineApi,
+} from '@frameline/shared'
+import { guest } from './guest'
 
 /** Mock data for the guest gallery lives under its own key so it never collides with the admin demo. */
 export const STORAGE_KEY = 'frameline.gallery.v1'
+/** Guest session tokens (HTTP mode), one per gallery: `frameline.guest.tokens.<SHORTID>`. */
+export const GUEST_TOKENS_KEY = 'frameline.guest.tokens'
+
+const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.trim()
+/** True when talking to apps/api over HTTP (VITE_API_URL is set); false for the in-browser mock. */
+export const isLiveApi = !!API_URL
 
 /**
- * Picks the data source.
- *
- * TODO(api): switch to the HTTP client once `packages/shared/src/http.ts` lands:
- *   const url = import.meta.env.VITE_API_URL
- *   if (url) return createHttpApi({ baseUrl: url })
- * Until then the in-memory mock (persisted to localStorage) keeps every guest flow usable.
+ * Picks the data source: the HTTP client when VITE_API_URL is set (guests have no studio session, so the
+ * studio token store stays in memory; guest tokens persist per gallery), otherwise the mock persisted to
+ * localStorage so every guest flow works offline.
  */
 export function createApi(): FramelineApi {
+  if (API_URL) {
+    return createHttpApi({ baseUrl: API_URL, tokens: memoryTokenStore(), guestTokens: storageGuestTokenStore(GUEST_TOKENS_KEY) })
+  }
   return createMockApi({
     load: () => { try { return localStorage.getItem(STORAGE_KEY) } catch { return null } },
     save: (d) => { try { localStorage.setItem(STORAGE_KEY, d) } catch { /* quota or private mode */ } },
+  })
+}
+
+/** Guest calls and where their gallery short id is, so a lost session can reopen the right gate. */
+const SHORT_ID_ARG: Partial<Record<keyof FramelineApi, (args: unknown[]) => unknown>> = {
+  registerGuest: (a) => a[0],
+  listPublicPhotos: (a) => a[0],
+  searchFaces: (a) => a[0],
+  createOrder: (a) => a[0],
+  setFavourite: (a) => a[2],
+  recordDownload: (a) => a[1],
+  createEnquiry: (a) => (a[0] as { shortId?: string } | undefined)?.shortId,
+}
+
+/**
+ * When the API says the guest's session is gone (expired token, PIN or registration needed), forget the
+ * matching local state so EventLayout shows that gate again instead of a broken screen.
+ */
+function onGuestError(shortId: string, err: unknown) {
+  if (!(err instanceof ApiError)) return
+  if (err.code === 'pin_required' || err.code === 'guest_token_expired' || err.code === 'invalid_guest_token') {
+    guest.patchSession(shortId, { pin: undefined, auth: undefined })
+  } else if (err.code === 'registration_required') {
+    guest.patchSession(shortId, (s) => ({ registration: undefined, auth: undefined, vip: s.vip ? { ...s.vip, skipLogin: false } : undefined }))
+  }
+}
+
+function withGuestRecovery(api: FramelineApi): FramelineApi {
+  return new Proxy(api, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver)
+      const pickShortId = SHORT_ID_ARG[prop as keyof FramelineApi]
+      if (typeof value !== 'function' || !pickShortId) return value
+      return (...args: unknown[]) => (value as (...a: unknown[]) => Promise<unknown>).apply(target, args).catch((err: unknown) => {
+        const shortId = pickShortId(args)
+        if (typeof shortId === 'string' && shortId) onGuestError(shortId, err)
+        throw err
+      })
+    },
   })
 }
 
@@ -24,21 +72,25 @@ const ApiCtx = createContext<FramelineApi | null>(null)
 
 export const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { staleTime: 60_000, refetchOnWindowFocus: false, retry: 1 },
+    queries: {
+      staleTime: 60_000, refetchOnWindowFocus: false,
+      // Don't retry answers that won't change (not found, gates, blocked galleries).
+      retry: (count, err) => count < 1 && !(err instanceof ApiError && err.status >= 400 && err.status < 500),
+    },
     mutations: { retry: 0 },
   },
 })
 
 /** Which query-key roots to refresh when the backend announces a change. */
 const TOPIC_KEYS: Record<ChangeTopic, string[]> = {
-  events: ['event', 'events'],
-  albums: ['albums'],
-  photos: ['photos', 'photo'],
+  events: ['event'],
+  albums: ['event'],
+  photos: ['photos'],
   studio: ['studio'],
   usage: [],
   guests: [],
   activity: [],
-  misc: ['films', 'watermark', 'prices'],
+  misc: ['event', 'watermark', 'prices'],
 }
 
 function LiveUpdates({ api }: { api: FramelineApi }) {
@@ -50,11 +102,12 @@ function LiveUpdates({ api }: { api: FramelineApi }) {
 }
 
 export function ApiProvider({ children, api: given }: { children: ReactNode; api?: FramelineApi }) {
-  const api = useMemo(() => given ?? createApi(), [given])
+  const api = useMemo(() => withGuestRecovery(given ?? createApi()), [given])
   return (
     <ApiCtx.Provider value={api}>
       <QueryClientProvider client={queryClient}>
-        <LiveUpdates api={api} />
+        {/* The realtime socket needs a studio session; guests on the HTTP API refresh on navigation instead. */}
+        {!isLiveApi && <LiveUpdates api={api} />}
         {children}
       </QueryClientProvider>
     </ApiCtx.Provider>

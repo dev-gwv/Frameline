@@ -3,31 +3,31 @@ import { Link, Navigate, useParams } from 'react-router-dom'
 import { Download, ImageOff, Sparkles } from 'lucide-react'
 import { Button, EmptyState, cn } from '@frameline/ui'
 import { fmt } from '@frameline/shared'
-import { guestAlbums, useAlbums, useHighlights, useInfinitePhotos, usePhotoList, visible } from '../lib/queries'
+import { guestAlbums, useHighlights, useInfinitePhotos, usePhotoList } from '../lib/queries'
 import { useGuest } from '../lib/guest'
-import { Container, GridSkeleton, PhotoGrid, Sentinel, TopBar } from '../components/common'
+import { Container, GridSkeleton, LoadError, PhotoGrid, Sentinel, TopBar } from '../components/common'
 import { DownloadSheet } from '../components/DownloadSheet'
 import { useEventCtx } from './EventLayout'
 
 export function AlbumView() {
   const { albumId = 'all' } = useParams()
   const { event, studio, session, base, seeAll } = useEventCtx()
-  const albumsQ = useAlbums(event.id)
   const favCount = useGuest((s) => s.events[event.shortId.toUpperCase()]?.favourites.length ?? 0)
   const [dlOpen, setDlOpen] = useState(false)
 
   const isHighlights = albumId === 'highlights'
   const isAll = albumId === 'all'
-  const album = albumsQ.data?.find((a) => a.id === albumId)
-  const pages = useInfinitePhotos(event.id, isAll ? undefined : albumId, seeAll && !isHighlights)
-  const highlights = useHighlights(event.id, seeAll && isHighlights)
-  const full = usePhotoList(event.id, isAll ? undefined : albumId, dlOpen && !isHighlights)
+  const album = event.albums.find((a) => a.id === albumId)
+  const known = isAll || isHighlights || !!album
+  const pages = useInfinitePhotos(event.shortId, isAll ? undefined : albumId, seeAll && !isHighlights && known)
+  const highlights = useHighlights(event.shortId, seeAll && isHighlights)
+  const full = usePhotoList(event.shortId, isAll ? undefined : albumId, seeAll && dlOpen && !isHighlights && known)
 
-  const photos = useMemo(() => isHighlights ? (highlights.data ?? []) : (pages.data?.pages.flatMap((p) => p.items) ?? []).filter(visible), [isHighlights, highlights.data, pages.data])
+  const photos = useMemo(() => isHighlights ? (highlights.data ?? []) : (pages.data?.pages.flatMap((p) => p.items) ?? []), [isHighlights, highlights.data, pages.data])
   const total = isHighlights ? photos.length : isAll ? pages.data?.pages[0]?.total ?? event.photoCount : album?.photoCount ?? pages.data?.pages[0]?.total ?? 0
 
   if (!seeAll) return <Navigate to={isAll || isHighlights ? base : `${base}/me?album=${albumId}`} replace />
-  if (!isAll && !isHighlights && albumsQ.data && !album) {
+  if (!known) {
     return (
       <div className="min-h-dvh">
         <TopBar back={base} studioName={studio.name} favouritesTo={`${base}/favourites`} favCount={favCount} />
@@ -38,7 +38,7 @@ export function AlbumView() {
 
   const title = isHighlights ? 'Highlights' : isAll ? 'All photos' : album?.name ?? 'Album'
   const loading = isHighlights ? highlights.isLoading : pages.isLoading
-  const tabs = [{ id: 'all', name: 'All' }, ...(event.highlights ? [{ id: 'highlights', name: 'Highlights' }] : []), ...guestAlbums(albumsQ.data, event).map((a) => ({ id: a.id, name: a.name }))]
+  const tabs = [{ id: 'all', name: 'All' }, ...(event.highlights ? [{ id: 'highlights', name: 'Highlights' }] : []), ...guestAlbums(event.albums, event).map((a) => ({ id: a.id, name: a.name }))]
   const downloadList = isHighlights ? photos : (full.data ?? [])
 
   return (
@@ -72,8 +72,8 @@ export function AlbumView() {
               {pages.isFetchingNextPage && <div className="mt-1"><GridSkeleton n={6} /></div>}
               {!isHighlights && !pages.hasNextPage && photos.length > 24 && <p className="mt-6 text-center text-[12px] text-ink-3">That's all {fmt.count(photos.length)} photos.</p>}
             </>
-          ) : pages.isError ? (
-            <EmptyState title="Photos didn't load" body="Check your connection and try again." action={<Button variant="primary" onClick={() => void pages.refetch()}>Try again</Button>} />
+          ) : (isHighlights ? highlights.isError : pages.isError) ? (
+            <LoadError error={isHighlights ? highlights.error : pages.error} onRetry={() => void (isHighlights ? highlights.refetch() : pages.refetch())} />
           ) : (
             <EmptyState icon={<ImageOff size={26} />} title="No photos here yet" body="The studio is still adding photos to this album. Check back soon." action={<Link to={base}><Button>Back to albums</Button></Link>} />
           )}
