@@ -30,7 +30,7 @@ const JSON_LIMIT = 1024 * 1024 // 1 MiB for JSON bodies
 const PART_LIMIT = 16 * 1024 * 1024 // proxy part uploads (10 MiB parts + headroom)
 const ASSET_LIMIT = 11 * 1024 * 1024 // assets are ≤ 10 MB; the route returns the precise 413
 
-const ALLOWED_HEADERS = ['Authorization', 'Content-Type', 'Idempotency-Key', 'X-Request-Id', 'X-Studio-Id', 'X-Guest-Token']
+const ALLOWED_HEADERS = ['Authorization', 'Content-Type', 'Idempotency-Key', 'X-Request-Id', 'X-Studio-Id', 'X-Guest-Token', 'X-Guest-Device']
 const EXPOSED_HEADERS = [
   'X-Request-Id', 'Retry-After', 'RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset', 'RateLimit-Policy', 'ETag',
   'Idempotent-Replayed', 'API-Version', 'Deprecation', 'Sunset', 'Link', 'Server-Timing',
