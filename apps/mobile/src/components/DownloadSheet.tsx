@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { Linking, View } from 'react-native'
-import type { Photo, PhotoEvent } from '@frameline/shared'
+import type { Photo, PublicEvent } from '@frameline/shared'
+import { useApi } from '@/lib/api'
+import { errorText } from '@/lib/errors'
+import { recordDownloads } from '@/lib/guest'
+import { actions, useLocal } from '@/lib/local'
 import { PermissionError, savePhotos, type CaptureHandle } from '@/lib/save'
 import { useTheme } from '@/theme'
 import { Button, Field, Input, Meter, Txt } from './primitives'
@@ -9,12 +13,16 @@ import { Sheet } from './overlays'
 type Phase = { k: 'pin' } | { k: 'saving'; done: number } | { k: 'done'; n: number } | { k: 'error'; msg: string; settings?: boolean }
 
 /**
- * "Download N" flow: PIN check for PIN-protected galleries, then saves each photo to the library with
- * progress. Placeholder photos are captured to JPEG via the CaptureHost.
+ * "Download N" flow: PIN check (verifyPin) for PIN galleries this phone hasn't unlocked yet, then saves each photo
+ * to the library with progress and counts the downloads (recordDownload). Placeholder photos are captured to JPEG
+ * via the CaptureHost.
  */
-export function DownloadSheet({ open, onClose, photos, event, host }: { open: boolean; onClose: () => void; photos: Photo[]; event: PhotoEvent; host: RefObject<CaptureHandle | null> }) {
+export function DownloadSheet({ open, onClose, photos, event, host }: { open: boolean; onClose: () => void; photos: Photo[]; event: PublicEvent; host: RefObject<CaptureHandle | null> }) {
   const { c } = useTheme()
-  const needsPin = event.settings.access === 'link-pin'
+  const api = useApi()
+  const unlocked = useLocal((s) => s.unlocked.includes(event.id))
+  const needsPin = event.settings.access === 'link-pin' && !unlocked
+  const [checking, setChecking] = useState(false)
   const [phase, setPhase] = useState<Phase>({ k: 'pin' })
   const [pin, setPin] = useState('')
   const [pinError, setPinError] = useState<string>()
@@ -30,6 +38,7 @@ export function DownloadSheet({ open, onClose, photos, event, host }: { open: bo
         setPhase({ k: 'saving', done })
       })
       setPhase({ k: 'done', n })
+      recordDownloads(api, photos.slice(0, n), event.shortId)
     } catch (e) {
       if (e instanceof Error && e.message === 'cancelled') return
       if (e instanceof PermissionError) setPhase({ k: 'error', msg: e.message, settings: true })
@@ -59,8 +68,16 @@ export function DownloadSheet({ open, onClose, photos, event, host }: { open: bo
             <Field label="PIN" error={pinError}>
               <Input mono value={pin} onChangeText={(t) => { setPin(t.replace(/\D/g, '')); setPinError(undefined) }} maxLength={4} keyboardType="number-pad" placeholder="••••" invalid={!!pinError} style={{ letterSpacing: 10, textAlign: 'center', fontSize: 22 }} />
             </Field>
-            <Button label={`Save ${photos.length} photos`} variant="primary" size="lg" disabled={pin.length !== 4}
-              onPress={() => (pin === event.settings.pin ? start() : setPinError('That PIN doesn’t match. Check your invitation.'))} />
+            <Button label={`Save ${photos.length} photos`} variant="primary" size="lg" disabled={pin.length !== 4} loading={checking}
+              onPress={async () => {
+                setChecking(true)
+                try {
+                  const session = await api.verifyPin(event.shortId, pin)
+                  started.current = true
+                  actions.unlock(event.id, session.seeAll)
+                  start()
+                } catch (e) { setPinError(errorText(e)) } finally { setChecking(false) }
+              }} />
           </>
         ) : null}
         {phase.k === 'saving' ? (

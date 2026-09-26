@@ -3,20 +3,20 @@ import { ActivityIndicator, View } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import { EmptyState, Txt } from '@/components'
 import { actions, local } from '@/lib/local'
-import { useEvent } from '@/lib/queries'
+import { usePublicEvent } from '@/lib/queries'
 import { useTheme } from '@/theme'
 
 /** Deep-link entry: frameline://e/<shortId>?n=<welcome name> (and https links via +native-intent). */
 export default function OpenEventLink() {
   const { c } = useTheme()
   const { shortId, n } = useLocalSearchParams<{ shortId: string; n?: string }>()
-  const { data: event, error } = useEvent(shortId)
+  const { data: event, error } = usePublicEvent(shortId)
 
   useEffect(() => {
     if (!event) return
     if (!local.get().mode) actions.setMode('guest')
     actions.join(event, n || undefined)
-    router.replace({ pathname: '/event/[id]', params: { id: event.id } })
+    router.replace({ pathname: '/event/[id]', params: { id: event.shortId } })
   }, [event, n])
 
   if (error) {

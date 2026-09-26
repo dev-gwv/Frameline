@@ -3,16 +3,16 @@ import { ActivityIndicator, FlatList, Pressable, Share, StyleSheet, Text, View, 
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar'
-import * as Haptics from 'expo-haptics'
-import { fmt, palette, type Photo } from '@frameline/shared'
+import { fmt, palette, type EventSettings, type Photo } from '@frameline/shared'
 import { Icon, IconButton, PhotoFill, Sheet, SettingRow, type IconName } from '@/components'
 import { EnquiryPrompt } from '@/components/guest'
 import { Zoomable } from '@/components/Zoomable'
 import { useApi } from '@/lib/api'
 import { eventLink } from '@/lib/links'
-import { actions, useLocal } from '@/lib/local'
+import { recordDownloads, useToggleFavourite } from '@/lib/guest'
+import { useLocal } from '@/lib/local'
 import { usePhotoList, type PhotoScope } from '@/lib/photoList'
-import { useAction, useEvent } from '@/lib/queries'
+import { useAction, useEvent, usePublicEvent } from '@/lib/queries'
 import { CaptureHost, PermissionError, savePhotos, sharePhoto, type CaptureHandle } from '@/lib/save'
 import { toast } from '@/lib/toast'
 import { font } from '@/theme'
@@ -24,11 +24,17 @@ export default function Viewer() {
   const { width, height } = useWindowDimensions()
   const insets = useSafeAreaInsets()
   const api = useApi()
-  const params = useLocalSearchParams<{ eventId: string; scope: PhotoScope; albumId?: string; start?: string }>()
+  const params = useLocalSearchParams<{ eventId?: string; shortId?: string; scope: PhotoScope; albumId?: string; start?: string }>()
   const scope = params.scope ?? 'album'
   const studioMode = scope === 'studio'
-  const { data: event } = useEvent(params.eventId)
-  const { photos } = usePhotoList(params.eventId, scope, params.albumId || undefined)
+  const shortId = params.shortId || undefined
+  // Studio viewer reads the studio event; guests read the public gallery (no PIN, no host details).
+  const { data: studioEvent } = useEvent(studioMode ? params.eventId : undefined)
+  const { data: publicEvent } = usePublicEvent(studioMode ? undefined : shortId)
+  const event: { id: string; shortId: string; name: string; coverPhotoId?: string; settings: Omit<EventSettings, 'pin'> } | undefined = studioMode ? studioEvent : publicEvent
+  const studioName = publicEvent?.studio.name
+  const { photos } = usePhotoList(scope, { eventId: params.eventId || publicEvent?.id, shortId, albumId: params.albumId || undefined })
+  const toggleFavourite = useToggleFavourite()
   const startIndex = Math.max(0, photos.findIndex((p) => p.id === params.start))
   const [picked, setIndex] = useState<number | null>(null)
   const index = picked ?? startIndex
@@ -42,7 +48,7 @@ export default function Viewer() {
   const isFav = !!photo && favs.some((f) => f.photoId === photo.id)
 
   const hide = useAction((p: Photo) => api.updatePhotos([p.id], { hidden: !p.hidden }), { success: (_, p) => (p.hidden ? 'Photo visible to guests' : 'Photo hidden from guests') })
-  const cover = useAction((p: Photo) => api.setCover(p.eventId, p.id, 'event'), { success: 'Set as event cover' })
+  const cover = useAction((v: { p: Photo; scope: 'event' | 'album' }) => api.setCover(v.p.eventId, v.p.id, v.scope), { success: (_, v) => (v.scope === 'event' ? 'Set as event cover' : 'Set as album cover') })
 
   const onViewable = useCallback(({ viewableItems }: { viewableItems: ViewToken<Photo>[] }) => {
     const first = viewableItems[0]
@@ -55,6 +61,7 @@ export default function Viewer() {
     setBusy('download')
     try {
       await savePhotos([photo], host)
+      if (!studioMode) recordDownloads(api, [photo], event.shortId)
       toast.success('Saved to your photos')
     } catch (e) {
       if (e instanceof PermissionError) toast.error('Can’t save yet', e.message)
@@ -87,15 +94,16 @@ export default function Viewer() {
   }, [width, height, zoomed])
 
   const guestActions: { icon: IconName; label: string; on: () => void; active?: boolean; loading?: boolean }[] = studioMode ? [] : [
-    { icon: 'heart', label: isFav ? 'Favourited' : 'Favourite', active: isFav, on: () => { if (photo) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); actions.toggleFavourite(photo.id, photo.eventId) } } },
+    { icon: 'heart', label: isFav ? 'Favourited' : 'Favourite', active: isFav, on: () => { if (photo) toggleFavourite(photo, event?.shortId ?? shortId) } },
     { icon: 'download', label: 'Download', loading: busy === 'download', on: download },
     { icon: 'share', label: 'Share', loading: busy === 'share', on: share },
-    { icon: 'shopping-bag', label: 'Buy print', on: () => photo && router.push({ pathname: '/buy', params: { eventId: photo.eventId, photoId: photo.id, count: '1' } }) },
+    ...(event?.settings.storeEnabled ? [{ icon: 'shopping-bag' as const, label: 'Buy print', on: () => { if (photo && event) router.push({ pathname: '/buy', params: { shortId: event.shortId, eventId: event.id, photoId: photo.id } }) } }] : []),
   ]
 
   const studioActions: typeof guestActions = photo && studioMode ? [
     { icon: photo.hidden ? 'eye' : 'eye-off', label: photo.hidden ? 'Show' : 'Hide', on: () => hide.mutate(photo) },
-    { icon: 'image', label: 'Set cover', on: () => cover.mutate(photo) },
+    { icon: 'image', label: event?.coverPhotoId === photo.id ? 'Cover ✓' : 'Set cover', active: event?.coverPhotoId === photo.id, loading: cover.isPending && cover.variables?.scope === 'event', on: () => cover.mutate({ p: photo, scope: 'event' }) },
+    ...(params.albumId ? [{ icon: 'folder' as const, label: 'Album cover', loading: cover.isPending && cover.variables?.scope === 'album', on: () => cover.mutate({ p: photo, scope: 'album' }) }] : []),
     { icon: 'share', label: 'Share', loading: busy === 'share', on: share },
     { icon: 'download', label: 'Save', loading: busy === 'download', on: download },
   ] : []
@@ -141,7 +149,7 @@ export default function Viewer() {
                 </Pressable>
               ))}
             </View>
-            {!studioMode && event?.settings.allowEnquiries ? <View style={{ paddingHorizontal: 12 }}><EnquiryPrompt dark eventId={event.id} source={`${event.name} photo viewer`} /></View> : null}
+            {!studioMode && event?.settings.allowEnquiries ? <View style={{ paddingHorizontal: 12 }}><EnquiryPrompt dark shortId={event.shortId} studioName={studioName} source={`${event.name} photo viewer`} /></View> : null}
           </View>
         </>
       ) : null}

@@ -2,53 +2,86 @@ import { useState } from 'react'
 import { Pressable, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import * as Haptics from 'expo-haptics'
-import { fmt } from '@frameline/shared'
-import { Button, Card, DarkCard, Icon, IconButton, LoadingList, Screen, Segmented, Txt } from '@/components'
-import { actions } from '@/lib/local'
-import { useEvent, usePrices, useStudio } from '@/lib/queries'
+import { fmt, type Order, type PaymentMethod } from '@frameline/shared'
+import { Button, Card, DarkCard, Field, Icon, IconButton, Input, LoadingList, Screen, Segmented, Txt } from '@/components'
+import { API_MODE, useApi } from '@/lib/api'
+import { friendlyError } from '@/lib/errors'
+import { actions, lastRegistration, useLocal } from '@/lib/local'
+import { usePhotoList, type PhotoScope } from '@/lib/photoList'
+import { usePrices, usePublicEvent } from '@/lib/queries'
+import { toast } from '@/lib/toast'
 import { font, radius, useTheme } from '@/theme'
 
+const emailOk = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())
+
 /**
- * Buy sheet: prices from api.listPrices, mock checkout (no payment is taken). The order is kept on the
- * phone until the API gains an order-creation endpoint.
+ * Buy sheet: prices from listPrices, order via createOrder (priced by the server from the studio's price list).
+ * Without Razorpay keys the API simulates payment and the order comes back `paid`; with keys it comes back
+ * `pending` with `checkout` details — Razorpay Checkout isn't wired into the app yet.
  */
 export default function Buy() {
   const { c } = useTheme()
-  const { eventId, photoId, count } = useLocalSearchParams<{ eventId: string; photoId?: string; count?: string }>()
-  const n = Math.max(1, Number(count) || 1)
-  const { data: prices } = usePrices()
-  const { data: event } = useEvent(eventId)
-  const { data: studio } = useStudio()
+  const api = useApi()
+  const params = useLocalSearchParams<{ shortId: string; eventId?: string; photoId?: string; scope?: PhotoScope; albumId?: string }>()
+  const { data: event } = usePublicEvent(params.shortId)
+  const { data: priceList } = usePrices()
+  const { photos } = usePhotoList(params.scope ?? 'album', { shortId: params.shortId, eventId: params.eventId || event?.id, albumId: params.albumId || undefined })
+  const photoIds = params.photoId ? [params.photoId] : photos.map((p) => p.id)
+  const n = Math.max(1, photoIds.length)
+  const reg = useLocal(lastRegistration)
+  const [name, setName] = useState(reg?.name ?? '')
+  const [email, setEmail] = useState(reg?.email ?? '')
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [picked, setSelected] = useState<string>()
-  const selected = picked ?? (photoId ? 'print812' : n >= 3 ? 'all' : 'single')
+  const selected = picked ?? (params.photoId ? 'print812' : n >= 3 ? 'all' : 'single')
   const [qty, setQty] = useState(1)
   const [method, setMethod] = useState<'upi' | 'card'>('upi')
-  const [phase, setPhase] = useState<'choose' | 'paying' | { orderId: string }>('choose')
+  const [phase, setPhase] = useState<'choose' | 'paying' | { order: Order }>('choose')
 
-
-  if (!prices || !event) return <LoadingList />
+  if (!priceList || !event) return <LoadingList />
+  const prices = priceList.prices
+  const studio = event.studio
   const item = prices.find((p) => p.id === selected)
-  const units = item?.id === 'print812' ? qty : item?.id === 'multi' ? Math.max(3, n) : item?.id === 'single' ? (photoId ? 1 : n) : 1
+  const units = item?.id === 'print812' ? qty : item?.id === 'multi' ? Math.max(3, n) : item?.id === 'single' ? n : 1
   const total = (item?.price ?? 0) * units
 
   const pay = async () => {
     if (!item) return
+    const e: Record<string, string> = {}
+    if (name.trim().length < 2) e.name = 'Enter your name for the receipt'
+    if (!emailOk(email)) e.email = 'Enter an email so we can send your photos'
+    setErrors(e)
+    if (Object.keys(e).length) return
     setPhase('paying')
-    await new Promise((r) => setTimeout(r, 1400))
-    const orderId = actions.addOrder({ eventId: event.id, item: `${item.label}${units > 1 ? ` ×${units}` : ''}`, amount: total })
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {})
-    setPhase({ orderId })
+    try {
+      const order = await api.createOrder(event.shortId, {
+        items: [{ priceId: item.id, photoIds: item.id === 'all' ? [] : photoIds.slice(0, 500), quantity: item.id === 'print812' ? qty : undefined }],
+        method: method as PaymentMethod,
+        buyer: { name: name.trim(), email: email.trim(), phone: reg?.phone || undefined },
+      })
+      actions.addOrder({ id: order.id, number: order.number, eventId: event.id, item: order.items, amount: order.paid, at: order.at, status: order.status })
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {})
+      setPhase({ order })
+    } catch (err) {
+      setPhase('choose')
+      const f = friendlyError(err)
+      toast.error(f.title, f.detail)
+    }
   }
 
   if (typeof phase === 'object') {
+    const { order } = phase
+    const pending = order.status === 'pending'
     return (
       <Screen contentStyle={{ alignItems: 'center', paddingTop: 40, gap: 12 }}>
-        <Stack.Screen options={{ title: 'Order placed', headerLeft: () => null }} />
-        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: c.okSoft, alignItems: 'center', justifyContent: 'center' }}><Icon name="check" size={32} color={c.ok} /></View>
-        <Txt v="h2" center>Thank you!</Txt>
-        <Txt v="small" center>Order <Txt v="mono">#{phase.orderId}</Txt> · {fmt.rupees(total)}</Txt>
-        <Txt v="small" center style={{ maxWidth: 300 }}>{item?.id === 'print812' ? `${studio?.name ?? 'The studio'} will print and ship your photos within 5 days.` : 'Full-resolution photos will be emailed to you within a few minutes.'}</Txt>
-        <Txt v="small" center color={c.ink3}>Demo checkout — no payment was taken.</Txt>
+        <Stack.Screen options={{ title: pending ? 'Payment pending' : 'Order placed', headerLeft: () => null }} />
+        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: pending ? c.warnSoft : c.okSoft, alignItems: 'center', justifyContent: 'center' }}><Icon name={pending ? 'clock' : 'check'} size={32} color={pending ? c.warn : c.ok} /></View>
+        <Txt v="h2" center>{pending ? 'Almost there' : 'Thank you!'}</Txt>
+        <Txt v="small" center>Order <Txt v="mono">#{order.number}</Txt> · {fmt.money(order.paid, order.currency)}</Txt>
+        <Txt v="small" center style={{ maxWidth: 300 }}>{pending
+          ? `Online payment isn’t available in the app yet. ${studio.name} will send you a payment link at ${order.buyerEmail ?? 'your email'}.`
+          : item?.id === 'print812' ? `${studio.name} will print and ship your photos within 5 days.` : 'Full-resolution photos will be emailed to you within a few minutes.'}</Txt>
+        {API_MODE === 'mock' ? <Txt v="small" center color={c.ink3}>Demo checkout — no payment was taken.</Txt> : null}
         <Button label="Done" variant="primary" full size="lg" style={{ marginTop: 12 }} onPress={() => router.back()} />
       </Screen>
     )
@@ -57,7 +90,7 @@ export default function Buy() {
   return (
     <Screen>
       <Stack.Screen options={{ headerRight: () => <IconButton icon="x" label="Close" onPress={() => router.back()} /> }} />
-      <Txt v="small">{event.name} · {photoId ? '1 photo' : `${n} photos`}</Txt>
+      <Txt v="small">{event.name} · {n === 1 ? '1 photo' : `${n} photos`}</Txt>
       <View style={{ gap: 10 }}>
         {prices.map((p) => {
           const on = p.id === selected
@@ -76,6 +109,7 @@ export default function Buy() {
           )
         })}
       </View>
+      {priceList.standard ? <Txt v="small" color={c.ink3}>Standard prices shown. The studio’s own prices apply at checkout.</Txt> : null}
 
       {item?.id === 'print812' ? (
         <Card style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -87,6 +121,9 @@ export default function Buy() {
           </View>
         </Card>
       ) : null}
+
+      <Field label="Your name" error={errors.name}><Input value={name} onChangeText={setName} autoComplete="name" placeholder="Full name" invalid={!!errors.name} /></Field>
+      <Field label="Email for your photos and receipt" error={errors.email}><Input value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoComplete="email" placeholder="you@gmail.com" invalid={!!errors.email} /></Field>
 
       <View style={{ gap: 8 }}>
         <Txt v="label">Pay with</Txt>
@@ -102,11 +139,11 @@ export default function Buy() {
           <Txt weight="bold" color={c.sideInk}>Total</Txt>
           <Txt style={{ fontFamily: font.display, fontSize: 26, color: '#F2D38A' }}>{fmt.rupees(total)}</Txt>
         </View>
-        <Txt v="small" color={c.sideInk2}>Paid to {studio?.name ?? 'the studio'}. GST included.</Txt>
+        <Txt v="small" color={c.sideInk2}>Paid to {studio.name}. GST included.</Txt>
       </DarkCard>
 
-      <Button label={phase === 'paying' ? 'Processing…' : `Pay ${fmt.rupees(total)}`} variant="primary" size="lg" loading={phase === 'paying'} disabled={!item} onPress={pay} />
-      <Txt v="small" center color={c.ink3}>Demo checkout — no money moves.</Txt>
+      <Button label={phase === 'paying' ? 'Processing…' : `Pay ${fmt.rupees(total)}`} variant="primary" size="lg" loading={phase === 'paying'} disabled={!item || (!photoIds.length && item.id !== 'all')} onPress={pay} />
+      {API_MODE === 'mock' ? <Txt v="small" center color={c.ink3}>Demo checkout — no money moves.</Txt> : null}
     </Screen>
   )
 }

@@ -4,12 +4,9 @@ import { router } from 'expo-router'
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera'
 import * as Haptics from 'expo-haptics'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useQueryClient } from '@tanstack/react-query'
 import { Button, Card, IconButton, Screen, Txt } from '@/components'
-import { JoinForm } from '@/components/guest'
-import { useApi } from '@/lib/api'
+import { JoinForm, notFoundText, useOpenCode } from '@/components/guest'
 import { parseCode } from '@/lib/links'
-import { actions } from '@/lib/local'
 import { toast } from '@/lib/toast'
 import { radius, useTheme } from '@/theme'
 
@@ -17,8 +14,7 @@ import { radius, useTheme } from '@/theme'
 export default function Scan() {
   const { c } = useTheme()
   const insets = useSafeAreaInsets()
-  const api = useApi()
-  const qc = useQueryClient()
+  const openCode = useOpenCode()
   const [permission, requestPermission] = useCameraPermissions()
   const [manual, setManual] = useState(false)
   const handled = useRef(false)
@@ -33,15 +29,9 @@ export default function Scan() {
     handled.current = true
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {})
     try {
-      if (parsed.kind === 'studio') {
-        router.replace({ pathname: '/studio/[code]', params: { code: parsed.code } })
-      } else {
-        const event = await qc.fetchQuery({ queryKey: ['event', parsed.code], queryFn: () => api.getEvent(parsed.code) })
-        actions.join(event, parsed.name)
-        router.replace({ pathname: '/event/[id]', params: { id: event.id } })
-      }
-    } catch {
-      toast.error('Gallery not found', `No event uses the code ${parsed.code}`)
+      await openCode(parsed, 'replace')
+    } catch (e) {
+      toast.error('Couldn’t open that code', notFoundText(parsed, e))
       handled.current = false
     }
   }

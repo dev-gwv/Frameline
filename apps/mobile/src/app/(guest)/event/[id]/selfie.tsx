@@ -8,19 +8,23 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { useQueryClient } from '@tanstack/react-query'
 import { fmt } from '@frameline/shared'
 import { Button, Card, Icon, Meter, Screen, Txt } from '@/components'
+import { friendlyError } from '@/lib/errors'
 import { actions } from '@/lib/local'
-import { myPhotosQuery, useEvent, useStudio } from '@/lib/queries'
+import { usePublicEvent } from '@/lib/queries'
 import { useApi } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import { goldGradient, useTheme } from '@/theme'
 
-type Phase = { k: 'intro'; denied?: boolean } | { k: 'matching'; uri: string } | { k: 'found'; n: number }
+type Picked = { uri: string; name: string; size: number }
+type Phase = { k: 'intro'; denied?: boolean } | { k: 'matching'; pic: Picked } | { k: 'found'; n: number }
+
+const picked = (a: ImagePicker.ImagePickerAsset): Picked => ({ uri: a.uri, name: a.fileName ?? a.uri.split('/').pop() ?? 'selfie.jpg', size: a.fileSize ?? a.width * a.height })
 
 export default function Selfie() {
   const { c } = useTheme()
-  const { id } = useLocalSearchParams<{ id: string }>()
-  const { data: event } = useEvent(id)
-  const { data: studio } = useStudio()
+  const { id: shortId } = useLocalSearchParams<{ id: string }>()
+  const { data: event } = usePublicEvent(shortId)
+  const studio = event?.studio
   const qc = useQueryClient()
   const api = useApi()
   const [phase, setPhase] = useState<Phase>({ k: 'intro' })
@@ -30,41 +34,53 @@ export default function Selfie() {
     if (!perm.granted) { setPhase({ k: 'intro', denied: true }); return }
     try {
       const res = await ImagePicker.launchCameraAsync({ cameraType: ImagePicker.CameraType.front, mediaTypes: ['images'], quality: 0.6, allowsEditing: false })
-      if (!res.canceled && res.assets[0]) setPhase({ k: 'matching', uri: res.assets[0].uri })
+      if (!res.canceled && res.assets[0]) setPhase({ k: 'matching', pic: picked(res.assets[0]) })
     } catch {
       toast.error('The camera isn’t available', 'Choose a photo of yourself from your gallery instead')
     }
   }
   const pick = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.6, selectionLimit: 1 })
-    if (!res.canceled && res.assets[0]) setPhase({ k: 'matching', uri: res.assets[0].uri })
+    if (!res.canceled && res.assets[0]) setPhase({ k: 'matching', pic: picked(res.assets[0]) })
   }
 
-  // Simulated matching: ~2.6 s scan, then load the (deterministic) matches.
+  // searchFaces with a stable key for the selfie (`${event.id}:${name}:${size}`); the animation runs at least 1.8 s.
   useEffect(() => {
     if (phase.k !== 'matching' || !event) return
     let alive = true
-    const t = setTimeout(async () => {
-      actions.saveSelfie(event.id, phase.uri)
-      const mine = await qc.fetchQuery(myPhotosQuery(api, event.id)).catch(() => null)
-      if (!alive) return
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {})
-      setPhase({ k: 'found', n: mine?.length ?? 0 })
-    }, 2600)
-    return () => { alive = false; clearTimeout(t) }
+    const { pic } = phase
+    ;(async () => {
+      const key = `${event.id}:${pic.name}:${pic.size}`
+      try {
+        const [match] = await Promise.all([api.searchFaces(event.shortId, { key }), new Promise((r) => setTimeout(r, 1800))])
+        if (!alive) return
+        actions.saveSelfie(event.id, { uri: pic.uri, key, personId: match.personId, photoIds: match.photoIds })
+        qc.invalidateQueries({ queryKey: ['my-photos', event.shortId.toUpperCase()] })
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {})
+        setPhase({ k: 'found', n: match.photoIds.length })
+      } catch (e) {
+        if (!alive) return
+        const f = friendlyError(e)
+        toast.error(f.title, f.detail)
+        setPhase({ k: 'intro' })
+      }
+    })()
+    return () => { alive = false }
   }, [phase, event, qc, api])
 
   if (!event) return null
 
-  if (phase.k === 'matching') return <Matching uri={phase.uri} total={event.photoCount} />
+  if (phase.k === 'matching') return <Matching uri={phase.pic.uri} total={event.photoCount} />
 
   if (phase.k === 'found') {
     return (
       <Screen contentStyle={{ alignItems: 'center', paddingTop: 60, gap: 14 }}>
         <View style={[styles.badge, { backgroundColor: c.accentSoft }]}><Icon name="check" size={34} color={c.accentText} /></View>
-        <Txt v="h1" center>We found you in {phase.n} photos</Txt>
-        <Txt v="small" center>From {event.name}. Favourite the ones you love — {studio?.name ?? 'the studio'} sees your picks.</Txt>
-        <Button label="See your photos" variant="primary" size="lg" full style={{ marginTop: 12 }} onPress={() => { router.back(); router.push({ pathname: '/event/[id]/photos', params: { id: event.id, scope: 'mine' } }) }} />
+        <Txt v="h1" center>{phase.n ? `We found you in ${phase.n} photos` : 'We couldn’t find you yet'}</Txt>
+        <Txt v="small" center>{phase.n ? `From ${event.name}. Favourite the ones you love — ${studio?.name ?? 'the studio'} sees your picks.` : 'The studio may still be adding photos. Try again later, or with a clearer selfie.'}</Txt>
+        {phase.n
+          ? <Button label="See your photos" variant="primary" size="lg" full style={{ marginTop: 12 }} onPress={() => { router.back(); router.push({ pathname: '/event/[id]/photos', params: { id: event.shortId, scope: 'mine' } }) }} />
+          : <Button label="Try another selfie" variant="primary" size="lg" full style={{ marginTop: 12 }} onPress={() => setPhase({ k: 'intro' })} />}
       </Screen>
     )
   }

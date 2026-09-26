@@ -1,8 +1,11 @@
+import { useState } from 'react'
 import { Linking, Share, View } from 'react-native'
 import { router } from 'expo-router'
 import * as Clipboard from 'expo-clipboard'
 import { DEMO_NOW, PLANS, fmt, type Camera } from '@frameline/shared'
-import { Button, Card, Chip, DarkCard, Icon, LogoMark, Meter, Screen, SectionHeader, SettingRow, Txt, type ChipTone } from '@/components'
+import { Button, Card, Chip, DarkCard, Field, Icon, Input, LogoMark, Meter, Screen, SectionHeader, SettingRow, Sheet, Txt, type ChipTone } from '@/components'
+import { API_MODE, queryClient, useHttp } from '@/lib/api'
+import { errorText } from '@/lib/errors'
 import { followLink } from '@/lib/links'
 import { actions, useLocal } from '@/lib/local'
 import { useCameras, useEvents, useStudio, useUsage } from '@/lib/queries'
@@ -20,6 +23,19 @@ export default function More() {
   const { data: events } = useEvents()
   const email = useLocal((s) => s.studioSession?.email)
   const plan = PLANS.find((p) => p.id === usage?.planId)
+  const http = useHttp()
+  const [signingOut, setSigningOut] = useState(false)
+  const [pwOpen, setPwOpen] = useState(false)
+
+  const signOut = async () => {
+    setSigningOut(true)
+    try { await http?.auth.logout() } finally {
+      actions.signOut()
+      queryClient.clear()
+      setSigningOut(false)
+      router.replace('/sign-in')
+    }
+  }
 
   return (
     <Screen>
@@ -82,12 +98,37 @@ export default function More() {
 
       <Card padded={false} style={{ paddingHorizontal: 16 }}>
         <SettingRow first icon="smile" title="Switch to guest mode" detail="See galleries the way your guests do" onPress={() => { actions.setMode('guest'); router.replace('/events') }} />
-        <SettingRow icon="log-out" title="Sign out" onPress={() => { actions.signOut(); router.replace('/sign-in') }} right={<Icon name="chevron-right" size={18} color={c.ink3} />} />
+        {http ? <SettingRow icon="lock" title="Set password" detail="Sign in without an email code next time" onPress={() => setPwOpen(true)} /> : null}
+        <SettingRow icon="log-out" title={signingOut ? 'Signing out…' : 'Sign out'} detail={API_MODE === 'http' ? 'Ends this phone’s session' : undefined} onPress={signingOut ? undefined : signOut} right={<Icon name="chevron-right" size={18} color={c.ink3} />} />
       </Card>
+      {http ? <PasswordSheet open={pwOpen} onClose={() => setPwOpen(false)} setPassword={(n, cur) => http.auth.setPassword(n, cur)} /> : null}
       <View style={{ alignItems: 'center', gap: 6, marginTop: 8 }}>
         <LogoMark size={26} />
         <Txt v="small" color={c.ink3}>Frameline for studios</Txt>
       </View>
     </Screen>
+  )
+}
+
+/** auth.setPassword: the current password is needed only when one is already set. */
+function PasswordSheet({ open, onClose, setPassword }: { open: boolean; onClose: () => void; setPassword: (next: string, current?: string) => Promise<void> }) {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+  const close = () => { setCurrent(''); setNext(''); setError(undefined); onClose() }
+  const save = async () => {
+    if (next.length < 8) { setError('Use at least 8 characters'); return }
+    setBusy(true)
+    try { await setPassword(next, current || undefined); toast.success('Password saved'); close() } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
+  }
+  return (
+    <Sheet open={open} onClose={close} title="Set password">
+      <View style={{ paddingHorizontal: 16, gap: 12, paddingBottom: 8 }}>
+        <Field label="Current password (if you have one)"><Input value={current} onChangeText={setCurrent} secureTextEntry autoComplete="current-password" placeholder="Leave empty if you never set one" /></Field>
+        <Field label="New password" error={error}><Input value={next} onChangeText={(t) => { setNext(t); setError(undefined) }} secureTextEntry autoComplete="new-password" placeholder="At least 8 characters" invalid={!!error} /></Field>
+        <Button label="Save password" variant="primary" size="lg" loading={busy} onPress={save} />
+      </View>
+    </Sheet>
   )
 }

@@ -6,7 +6,8 @@ import {
 import { LinearGradient } from 'expo-linear-gradient'
 import * as Haptics from 'expo-haptics'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { gold, type EventStatus } from '@frameline/shared'
+import { EVENT_STATUS_LABELS, gold, type EventStatus } from '@frameline/shared'
+import { friendlyError } from '@/lib/errors'
 import { font, goldGradient, radius, shadow, useTheme } from '@/theme'
 import { Icon, type IconName } from './Icon'
 
@@ -118,8 +119,8 @@ export function Chip({ label, tone = 'neutral', selected, onPress, count, icon, 
 }
 
 const STATUS: Record<EventStatus, { label: string; tone: ChipTone }> = {
-  live: { label: 'Live', tone: 'ok' }, uploading: { label: 'Uploading', tone: 'accent' }, expiring: { label: 'Expiring', tone: 'warn' },
-  draft: { label: 'Draft', tone: 'neutral' }, archived: { label: 'Archived', tone: 'neutral' },
+  live: { label: EVENT_STATUS_LABELS.live, tone: 'ok' }, uploading: { label: EVENT_STATUS_LABELS.uploading, tone: 'accent' }, expiring: { label: EVENT_STATUS_LABELS.expiring, tone: 'warn' },
+  draft: { label: EVENT_STATUS_LABELS.draft, tone: 'neutral' }, archived: { label: EVENT_STATUS_LABELS.archived, tone: 'neutral' },
 }
 export const EventStatusChip = ({ status }: { status: EventStatus }) => <Chip label={STATUS[status].label} tone={STATUS[status].tone} dot />
 export const statusLabel = (s: EventStatus) => STATUS[s].label
@@ -277,7 +278,8 @@ export function LoadingList({ rows = 4 }: { rows?: number }) {
 }
 
 export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
-  return <EmptyState icon="alert-triangle" title="Couldn’t load this" body={`${error instanceof Error ? error.message : 'Something went wrong'}. Check your connection and try again.`} action={onRetry ? 'Try again' : undefined} onAction={onRetry} />
+  const f = friendlyError(error)
+  return <EmptyState icon="alert-triangle" title={f.title === 'That didn’t work' ? 'Couldn’t load this' : f.title} body={f.detail} action={onRetry ? 'Try again' : undefined} onAction={onRetry} />
 }
 
 /* ---------------- Screen scaffold ---------------- */

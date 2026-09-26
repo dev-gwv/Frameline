@@ -1,10 +1,13 @@
 import { useSyncExternalStore } from 'react'
 import type { FramelineApi, ID, UploadQuality } from '@frameline/shared'
+import { errorText } from './errors'
+import { local } from './local'
 
 /**
- * Photographer upload queue. Transfer progress is simulated per file (the mock API has no byte stream);
- * finished files are committed to `api.uploadPhotos` in batches of 5 with their real device URIs as `url`,
- * so they show up (processing → ready) in the event grid. Pause stops the transfer loop.
+ * Photographer upload queue. The per-file progress bar is a local estimate; files are committed to `api.uploadPhotos`
+ * in batches of 5 with their device URIs as `url` (source 'web', uploadedBy = the signed-in name). With the HTTP
+ * client that call reads the file:// / content:// bytes and PUTs them to storage; the mock stores the URI directly.
+ * Pause stops the loop.
  */
 export interface UploadItem {
   id: string
@@ -64,10 +67,10 @@ async function commit() {
   committing = true
   const ids = new Set(batch.map((i) => i.id))
   try {
-    await api.uploadPhotos(first.eventId, first.albumId, batch.map((i) => ({ filename: i.filename, size: i.size, url: i.uri, width: i.width, height: i.height })), { quality: first.quality })
+    await api.uploadPhotos(first.eventId, first.albumId, batch.map((i) => ({ filename: i.filename, size: i.size, url: i.uri, width: i.width, height: i.height })), { quality: first.quality, source: 'web', uploadedBy: local.get().studioSession?.name || local.get().studioSession?.email })
     patch(ids, { status: 'done' })
   } catch (e) {
-    patch(ids, { status: 'error', error: e instanceof Error ? e.message : 'Upload failed' })
+    patch(ids, { status: 'error', error: errorText(e) })
   } finally {
     committing = false
   }

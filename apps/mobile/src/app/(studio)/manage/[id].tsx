@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ScrollView, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
-import { fmt, type EventSettings } from '@frameline/shared'
+import { EVENT_TYPE_LABELS, fmt, type EventSettings } from '@frameline/shared'
 import { Button, Card, Chip, CoverMosaic, EmptyState, ErrorState, EventStatusChip, IconButton, LoadingList, PhotoGrid, SettingRow, Toggle, Txt } from '@/components'
 import { useApi } from '@/lib/api'
 import { usePhotoList } from '@/lib/photoList'
@@ -15,7 +15,7 @@ export default function ManageEvent() {
   const { data: event, error, refetch } = useEvent(id)
   const { data: albums } = useAlbums(id)
   const [albumId, setAlbumId] = useState<string>()
-  const { photos, isLoading } = usePhotoList(id, 'studio', albumId)
+  const { photos, isLoading } = usePhotoList('studio', { eventId: id, albumId })
 
   const settings = useAction((patch: Partial<EventSettings>) => api.updateEventSettings(id, patch), { success: 'Saved' })
 
@@ -34,7 +34,7 @@ export default function ManageEvent() {
           <Txt v="mono" color={c.ink3} style={{ fontSize: 12 }}>{event.shortId}</Txt>
         </View>
         <Txt v="h2">{event.name}</Txt>
-        <Txt v="small">{fmt.dateRange(event.date, event.endDate)} · {event.city} · expires {fmt.date(event.expiresAt)}</Txt>
+        <Txt v="small">{EVENT_TYPE_LABELS[event.type]} · {fmt.dateRange(event.date, event.endDate)} · {event.city} · expires {fmt.date(event.expiresAt)}</Txt>
       </View>
 
       <View style={{ flexDirection: 'row', gap: 8 }}>

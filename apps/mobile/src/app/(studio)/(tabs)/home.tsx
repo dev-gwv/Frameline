@@ -1,12 +1,13 @@
-import { useMemo } from 'react'
-import { RefreshControl, Share, View } from 'react-native'
+import { useMemo, useState } from 'react'
+import { Alert, RefreshControl, Share, View } from 'react-native'
 import { router } from 'expo-router'
-import { DEMO_NOW, fmt } from '@frameline/shared'
+import { BASE_RENEWAL, DEMO_NOW, RENEWAL_CREDIT_DISCOUNT, fmt, type PhotoEvent } from '@frameline/shared'
 import { Button, Card, Chip, Icon, LoadingList, Screen, SectionHeader, Txt } from '@/components'
 import { EventRow, StatCard } from '@/components/studio'
 import { useApi } from '@/lib/api'
-import { eventLink } from '@/lib/links'
-import { useAction, useActivity, useEvents, useOrders, useStudio } from '@/lib/queries'
+import { friendlyError } from '@/lib/errors'
+import { useAction, useActivity, useEvents, useOrders, useStudio, useUsage } from '@/lib/queries'
+import { toast } from '@/lib/toast'
 import { useUploads } from '@/lib/uploads'
 import { useTheme } from '@/theme'
 
@@ -23,7 +24,33 @@ export default function Home() {
   const { items } = useUploads()
   const running = items.filter((i) => i.status === 'uploading' || i.status === 'queued').length
 
-  const renew = useAction((id: string) => api.updateEvent(id, { status: 'live', expiresAt: new Date(DEMO_NOW + 365 * 86_400_000).toISOString() }), { success: 'Renewed for another year' })
+  const { data: usage } = useUsage()
+  const renew = useAction((v: { id: string; payWith: 'credits' | 'card' }) => api.renewEvent(v.id, { payWith: v.payWith }), {
+    success: (r) => `Renewed till ${fmt.date(r.event.expiresAt)} · ${fmt.rupees(r.charged)}${r.payWith === 'credits' ? ' in credits' : ''}`,
+  })
+  const [linking, setLinking] = useState<string | null>(null)
+
+  const askRenew = (e: PhotoEvent) => {
+    const credits = BASE_RENEWAL * (1 - RENEWAL_CREDIT_DISCOUNT)
+    const enough = (usage?.walletCredits ?? 0) >= credits
+    Alert.alert(`Renew ${e.name}?`, `Adds a year to the gallery. ${fmt.rupees(credits)} in credits (you have ${fmt.rupees(usage?.walletCredits ?? 0)}) or ${fmt.rupees(BASE_RENEWAL)} by card.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Pay by card', onPress: () => renew.mutate({ id: e.id, payWith: 'card' }) },
+      ...(enough ? [{ text: 'Use credits', onPress: () => renew.mutate({ id: e.id, payWith: 'credits' as const }) }] : []),
+    ])
+  }
+
+  /** createRenewalLink → share sheet, so the client can pay for the renewal. */
+  const sendRenewalLink = async (e: PhotoEvent, days: number) => {
+    setLinking(e.id)
+    try {
+      const link = await api.createRenewalLink(e.id)
+      await Share.share({ message: `Your gallery "${e.name}" expires in ${days} days. Keep it online for another year (${fmt.rupees(link.price)}): ${link.url}` })
+    } catch (err) {
+      const f = friendlyError(err)
+      toast.error(f.title, f.detail)
+    } finally { setLinking(null) }
+  }
 
   const stats = useMemo(() => {
     const ev = events ?? []
@@ -61,8 +88,8 @@ export default function Home() {
               </View>
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Button label="Send renewal link" size="sm" style={{ flex: 1 }} onPress={() => Share.share({ message: `Your gallery "${e.name}" expires in ${days} days. Renew it here: ${eventLink(e)}/renew` })} />
-              <Button label="Renew" size="sm" variant="primary" style={{ flex: 1 }} loading={renew.isPending} onPress={() => renew.mutate(e.id)} />
+              <Button label="Send renewal link" size="sm" style={{ flex: 1 }} loading={linking === e.id} onPress={() => sendRenewalLink(e, days)} />
+              <Button label="Renew" size="sm" variant="primary" style={{ flex: 1 }} loading={renew.isPending && renew.variables?.id === e.id} onPress={() => askRenew(e)} />
             </View>
           </Card>
         )

@@ -2,6 +2,7 @@ import { View } from 'react-native'
 import { router } from 'expo-router'
 import { Card, EmptyState, Screen, SectionHeader, Txt } from '@/components'
 import { EventCard, JoinForm } from '@/components/guest'
+import { API_MODE } from '@/lib/api'
 import { useLocal } from '@/lib/local'
 import { useTheme } from '@/theme'
 
@@ -21,13 +22,13 @@ export default function GuestEvents() {
       {joined.length ? (
         <>
           <SectionHeader title="Your events" count={String(joined.length)} />
-          {joined.map((j) => <EventCard key={j.eventId} eventId={j.eventId} onPress={() => router.push({ pathname: '/event/[id]', params: { id: j.eventId } })} />)}
+          {joined.map((j) => <EventCard key={j.eventId} shortId={j.shortId} eventId={j.eventId} onPress={() => router.push({ pathname: '/event/[id]', params: { id: j.shortId } })} />)}
         </>
       ) : (
         <EmptyState icon="image" title="No events yet" body="Events you open appear here so you can come back to your photos any time."
-          action="Try the sample wedding" onAction={() => router.push('/e/6402F9F')} />
+          action={API_MODE === 'mock' ? 'Try the sample wedding' : undefined} onAction={() => router.push('/e/6402F9F')} />
       )}
-      <Txt v="small" center color={c.ink3}>Sample codes: event 6402F9F (PIN 5211) · studio FA-KCGWHY</Txt>
+      {API_MODE === 'mock' ? <Txt v="small" center color={c.ink3}>Sample codes: event 6402F9F (PIN 5211) · studio FA-KCGWHY</Txt> : null}
     </Screen>
   )
 }

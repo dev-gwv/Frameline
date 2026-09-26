@@ -66,6 +66,8 @@ function Root() {
           <Stack.Screen name="(guest)" options={{ headerShown: false, animation: 'fade' }} />
           <Stack.Screen name="(studio)" options={{ headerShown: false, animation: 'fade' }} />
           <Stack.Screen name="e/[shortId]" options={{ headerShown: false, animation: 'fade' }} />
+          <Stack.Screen name="s/[code]" options={{ headerShown: false, animation: 'fade' }} />
+          <Stack.Screen name="v/[code]" options={{ headerShown: false, animation: 'fade' }} />
           <Stack.Screen name="viewer" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade' }} />
           <Stack.Screen name="scan" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
           <Stack.Screen name="join" options={{ title: 'Join an event', presentation: 'modal' }} />

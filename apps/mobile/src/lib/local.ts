@@ -1,29 +1,39 @@
 import { useRef, useSyncExternalStore } from 'react'
-import type { ID } from '@frameline/shared'
+import type { ID, Photo } from '@frameline/shared'
 import { kv } from './storage'
 
 /**
- * On-device state that is not part of the FramelineApi contract yet: which audience the phone is set up
- * for, the photographer session, and the guest's joined events, follows, favourites, registrations,
- * unlocked PINs and selfie matches. Persisted in kv-store and read synchronously.
+ * On-device state, persisted in kv-store and read synchronously. The data itself lives in the API; this keeps
+ * only what the phone has to remember because the contract has no endpoint for it:
+ *
+ * - `mode` and the photographer's display session (tokens live in SecureStore in API mode)
+ * - `joined`: galleries this phone opened (no guest "my galleries" endpoint)
+ * - `following`: studios this phone follows (followStudio counts the follow; there's no list endpoint)
+ * - `favourites`: photo snapshots for the Favourites tab (setFavourite records the pick; there's no list endpoint)
+ * - `unlocked` / `seeAll` / `registrations`: which gates this phone passed (the guest token itself is in kv-store)
+ * - `selfie`: the last searchFaces result per event, so "My photos" survives a restart
+ * - `orders` / `enquiries` / `guestUploads`: receipts of what was sent, for Profile and the per-phone upload limit
  */
 export type Mode = 'guest' | 'studio'
 
 export interface JoinedEvent { eventId: ID; shortId: string; joinedAt: string; welcomeName?: string }
-export interface Favourite { photoId: ID; eventId: ID; at: string }
+export interface Favourite { photoId: ID; eventId: ID; shortId?: string; at: string; photo?: Photo }
 export interface Registration { name: string; email: string; phone: string }
 export interface SentEnquiry { id: string; name: string; phone: string; email: string; message: string; source: string; at: string }
-export interface PlacedOrder { id: string; eventId: ID; item: string; amount: number; at: string }
+export interface PlacedOrder { id: string; number?: number; eventId: ID; item: string; amount: number; at: string; status?: string }
+export interface SelfieMatch { uri?: string; at: string; key?: string; personId?: ID | null; photoIds?: ID[] }
+export interface StudioSession { email: string; name?: string; studioName?: string; signedInAt: string }
 
 export interface LocalState {
   mode: Mode | null
-  studioSession: { email: string; signedInAt: string } | null
+  studioSession: StudioSession | null
   joined: JoinedEvent[]
   following: string[] // studio follow codes
   favourites: Favourite[]
   registrations: Record<ID, Registration>
-  unlocked: ID[] // event ids whose PIN was entered
-  selfie: Record<ID, { uri?: string; at: string }> // event id → selfie taken
+  unlocked: ID[] // event ids whose PIN was accepted
+  seeAll: ID[] // event ids whose guest session may browse every photo (typed PIN / VIP "all")
+  selfie: Record<ID, SelfieMatch>
   enquiries: SentEnquiry[]
   orders: PlacedOrder[]
   guestUploads: Record<ID, number>
@@ -31,7 +41,7 @@ export interface LocalState {
 
 const KEY = 'frameline.local.v1'
 const initial: LocalState = {
-  mode: null, studioSession: null, joined: [], following: [], favourites: [], registrations: {}, unlocked: [], selfie: {},
+  mode: null, studioSession: null, joined: [], following: [], favourites: [], registrations: {}, unlocked: [], seeAll: [], selfie: {},
   enquiries: [], orders: [], guestUploads: {},
 }
 
@@ -53,7 +63,8 @@ export const local = {
     listeners.forEach((l) => l())
   },
   subscribe(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn) } },
-  reset() { state = { ...initial, mode: state.mode }; kv.set(KEY, JSON.stringify(state)); listeners.forEach((l) => l()) },
+  /** Clears guest history; keeps the mode and the photographer session. */
+  reset() { state = { ...initial, mode: state.mode, studioSession: state.studioSession }; kv.set(KEY, JSON.stringify(state)); listeners.forEach((l) => l()) },
 }
 
 /** Subscribe to a slice of local state. The selector may derive new arrays; results are cached per state version. */
@@ -68,18 +79,23 @@ export function useLocal<T>(select: (s: LocalState) => T): T {
   return useSyncExternalStore(local.subscribe, snap, snap)
 }
 
+const addId = (list: ID[], id: ID) => (list.includes(id) ? list : [...list, id])
+
 /* ---------------- actions ---------------- */
 
 export const actions = {
   setMode: (mode: Mode) => local.set({ mode }),
-  signIn: (email: string) => local.set({ studioSession: { email, signedInAt: new Date().toISOString() }, mode: 'studio' }),
+  signIn: (email: string, extra: Omit<StudioSession, 'email' | 'signedInAt'> = {}) =>
+    local.set({ studioSession: { email, ...extra, signedInAt: new Date().toISOString() }, mode: 'studio' }),
+  /** Refreshes the display session (launch check) without touching the mode. */
+  setSession: (s: Omit<StudioSession, 'signedInAt'>) => local.set((st) => ({ studioSession: { signedInAt: st.studioSession?.signedInAt ?? new Date().toISOString(), ...s } })),
   signOut: () => local.set({ studioSession: null }),
 
   join(e: { id: ID; shortId: string }, welcomeName?: string) {
     local.set((s) => {
       const existing = s.joined.find((j) => j.eventId === e.id)
       const rest = s.joined.filter((j) => j.eventId !== e.id)
-      const entry: JoinedEvent = { eventId: e.id, shortId: e.shortId, joinedAt: existing?.joinedAt ?? new Date().toISOString(), welcomeName: welcomeName ?? existing?.welcomeName }
+      const entry: JoinedEvent = { eventId: e.id, shortId: e.shortId.toUpperCase(), joinedAt: existing?.joinedAt ?? new Date().toISOString(), welcomeName: welcomeName ?? existing?.welcomeName }
       return { joined: [entry, ...rest] }
     })
   },
@@ -88,21 +104,24 @@ export const actions = {
   follow: (code: string) => local.set((s) => ({ following: s.following.includes(code) ? s.following : [...s.following, code] })),
   unfollow: (code: string) => local.set((s) => ({ following: s.following.filter((c) => c !== code) })),
 
-  toggleFavourite(photoId: ID, eventId: ID) {
-    local.set((s) => s.favourites.some((f) => f.photoId === photoId)
-      ? { favourites: s.favourites.filter((f) => f.photoId !== photoId) }
-      : { favourites: [{ photoId, eventId, at: new Date().toISOString() }, ...s.favourites] })
+  /** Local half of a favourite: keeps a snapshot so the Favourites tab needs no list endpoint. Returns the new state. */
+  setFavourite(photo: Photo, shortId: string | undefined, on: boolean) {
+    local.set((s) => {
+      const rest = s.favourites.filter((f) => f.photoId !== photo.id)
+      return { favourites: on ? [{ photoId: photo.id, eventId: photo.eventId, shortId, at: new Date().toISOString(), photo }, ...rest] : rest }
+    })
   },
-  unlock: (eventId: ID) => local.set((s) => ({ unlocked: s.unlocked.includes(eventId) ? s.unlocked : [...s.unlocked, eventId] })),
-  register: (eventId: ID, r: Registration) => local.set((s) => ({ registrations: { ...s.registrations, [eventId]: r } })),
-  saveSelfie: (eventId: ID, uri?: string) => local.set((s) => ({ selfie: { ...s.selfie, [eventId]: { uri, at: new Date().toISOString() } } })),
+  /** The guest passed the PIN (or a VIP link) for this event. */
+  unlock: (eventId: ID, seeAll = false) => local.set((s) => ({ unlocked: addId(s.unlocked, eventId), seeAll: seeAll ? addId(s.seeAll, eventId) : s.seeAll })),
+  /** The guest session ended (token expired / PIN required again). */
+  lock: (eventId: ID) => local.set((s) => ({ unlocked: s.unlocked.filter((id) => id !== eventId), seeAll: s.seeAll.filter((id) => id !== eventId) })),
+  register: (eventId: ID, r: Registration, seeAll = false) =>
+    local.set((s) => ({ registrations: { ...s.registrations, [eventId]: r }, seeAll: seeAll ? addId(s.seeAll, eventId) : s.seeAll })),
+  unregister: (eventId: ID) => local.set((s) => { const next = { ...s.registrations }; delete next[eventId]; return { registrations: next } }),
+  saveSelfie: (eventId: ID, match: Omit<SelfieMatch, 'at'>) => local.set((s) => ({ selfie: { ...s.selfie, [eventId]: { ...match, at: new Date().toISOString() } } })),
   clearSelfie: (eventId: ID) => local.set((s) => { const next = { ...s.selfie }; delete next[eventId]; return { selfie: next } }),
-  addEnquiry: (e: Omit<SentEnquiry, 'id' | 'at'>) => local.set((s) => ({ enquiries: [{ ...e, id: `enq_${Date.now()}`, at: new Date().toISOString() }, ...s.enquiries] })),
-  addOrder: (o: Omit<PlacedOrder, 'id' | 'at'>) => {
-    const id = `FL${String(Date.now()).slice(-6)}`
-    local.set((s) => ({ orders: [{ ...o, id, at: new Date().toISOString() }, ...s.orders] }))
-    return id
-  },
+  addEnquiry: (e: Omit<SentEnquiry, 'at'>) => local.set((s) => ({ enquiries: [{ ...e, at: new Date().toISOString() }, ...s.enquiries] })),
+  addOrder: (o: PlacedOrder) => local.set((s) => ({ orders: [o, ...s.orders] })),
   countGuestUpload: (eventId: ID, n: number) => local.set((s) => ({ guestUploads: { ...s.guestUploads, [eventId]: (s.guestUploads[eventId] ?? 0) + n } })),
 }
 

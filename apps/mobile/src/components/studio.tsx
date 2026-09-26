@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, View } from 'react-native'
-import { fmt, type PhotoEvent } from '@frameline/shared'
+import { EVENT_TYPE_LABELS, fmt, type PhotoEvent } from '@frameline/shared'
 import { font, radius, useTheme } from '@/theme'
 import { Icon, type IconName } from './Icon'
 import { ToneView } from './photo'
@@ -26,7 +26,7 @@ export function EventRow({ event, onPress, first }: { event: PhotoEvent; onPress
       <ToneView tone={event.coverTones[0]} style={{ width: 52, height: 52, borderRadius: radius.control }} />
       <View style={{ flex: 1, gap: 3 }}>
         <Txt weight="bold" numberOfLines={1}>{event.name}</Txt>
-        <Txt v="small" numberOfLines={1}>{fmt.dayMonth(event.date)} · {event.city} · <Txt v="mono" color={c.ink2} style={{ fontSize: 12 }}>{fmt.count(event.photoCount)}</Txt></Txt>
+        <Txt v="small" numberOfLines={1}>{EVENT_TYPE_LABELS[event.type]} · {fmt.dayMonth(event.date)} · {event.city} · <Txt v="mono" color={c.ink2} style={{ fontSize: 12 }}>{fmt.count(event.photoCount)}</Txt></Txt>
       </View>
       <EventStatusChip status={event.status} />
     </Pressable>

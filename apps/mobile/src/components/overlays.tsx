@@ -3,6 +3,7 @@ import { Animated, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet,
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, { Circle, G, Rect } from 'react-native-svg'
 import { FlashList } from '@shopify/flash-list'
+import { encode } from 'uqr'
 import type { Photo } from '@frameline/shared'
 import { dismiss, useToasts } from '@/lib/toast'
 import { font, radius, shadow, useTheme } from '@/theme'
@@ -69,34 +70,37 @@ function ToastRow({ id, kind, title, detail }: { id: number; kind: 'success' | '
   )
 }
 
-/* ---------------- QR code (decorative; same deterministic pattern as packages/ui QRCode) ---------------- */
+/* ---------------- QR code (real, scannable: uqr matrix drawn with react-native-svg) ---------------- */
 
-export function QRCode({ seed, size = 160, color = '#1B1712', rounded = false }: { seed: number; size?: number; color?: string; rounded?: boolean }) {
-  const cells = useMemo(() => {
-    let x = seed * 9301 + 49297
-    const r = () => (x = (x * 9301 + 49297) % 233280) / 233280
-    const out: [number, number][] = []
-    for (let i = 0; i < 21; i++) for (let j = 0; j < 21; j++) {
-      const inFinder = (i < 8 && j < 8) || (i > 12 && j < 8) || (i < 8 && j > 12)
-      if (!inFinder && r() > 0.52) out.push([i, j])
-    }
-    return out
-  }, [seed])
-  const c = size / 21
+/**
+ * Encodes `value` with error correction Q and a 1-module quiet zone. Finder patterns are drawn as rounded squares
+ * when `rounded`; data modules as dots — still well within what scanners accept at ECC Q.
+ */
+export function QRCode({ value, size = 160, color = '#1B1712', rounded = false }: { value: string; size?: number; color?: string; rounded?: boolean }) {
+  const matrix = useMemo(() => encode(value, { ecc: 'Q', border: 1 }).data, [value])
+  const n = matrix.length
+  const c = size / n
+  // Finder patterns sit at (1,1), (n-8,1), (1,n-8) with a 1-module border.
+  const isFinder = (x: number, y: number) => {
+    const inBox = (ox: number, oy: number) => x >= ox && x < ox + 7 && y >= oy && y < oy + 7
+    return inBox(1, 1) || inBox(n - 8, 1) || inBox(1, n - 8)
+  }
+  const cells: [number, number][] = []
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (matrix[y]![x] && !(rounded && isFinder(x, y))) cells.push([x, y])
   const finder = (a: number, b: number) => (
     <G key={`${a}-${b}`}>
-      <Rect x={a * c} y={b * c} width={7 * c} height={7 * c} rx={rounded ? c * 2 : 0} fill={color} />
-      <Rect x={(a + 1) * c} y={(b + 1) * c} width={5 * c} height={5 * c} rx={rounded ? c * 1.4 : 0} fill="#fff" />
-      <Rect x={(a + 2) * c} y={(b + 2) * c} width={3 * c} height={3 * c} rx={rounded ? c : 0} fill={color} />
+      <Rect x={a * c} y={b * c} width={7 * c} height={7 * c} rx={c * 2} fill={color} />
+      <Rect x={(a + 1) * c} y={(b + 1) * c} width={5 * c} height={5 * c} rx={c * 1.4} fill="#fff" />
+      <Rect x={(a + 2) * c} y={(b + 2) * c} width={3 * c} height={3 * c} rx={c} fill={color} />
     </G>
   )
   return (
-    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} accessibilityLabel="QR code" accessibilityRole="image">
+    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} accessibilityLabel={`QR code for ${value}`} accessibilityRole="image">
       <Rect width={size} height={size} fill="#fff" />
-      {cells.map(([i, j]) => rounded
-        ? <Circle key={`${i}-${j}`} cx={i * c + c / 2} cy={j * c + c / 2} r={c * 0.45} fill={color} />
-        : <Rect key={`${i}-${j}`} x={i * c} y={j * c} width={c} height={c} fill={color} />)}
-      {finder(0, 0)}{finder(14, 0)}{finder(0, 14)}
+      {cells.map(([x, y]) => rounded
+        ? <Circle key={`${x}-${y}`} cx={x * c + c / 2} cy={y * c + c / 2} r={c * 0.46} fill={color} />
+        : <Rect key={`${x}-${y}`} x={x * c} y={y * c} width={c + 0.25} height={c + 0.25} fill={color} />)}
+      {rounded ? <>{finder(1, 1)}{finder(n - 8, 1)}{finder(1, n - 8)}</> : null}
     </Svg>
   )
 }

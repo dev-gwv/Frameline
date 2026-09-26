@@ -1,12 +1,17 @@
 import { useMutation, useQuery, type UseMutationOptions } from '@tanstack/react-query'
-import { hash, type FramelineApi, type ID, type ListPhotosQuery, type Photo } from '@frameline/shared'
+import { createSeed, type FramelineApi, type ID, type ListPhotosQuery, type Photo, type Price, type PublicPhotosQuery } from '@frameline/shared'
 import { useApi } from './api'
+import { friendlyError } from './errors'
+import { useLocal, type SelfieMatch } from './local'
 import { toast } from './toast'
 
 /*
  * Query hooks. Keys start with a root listed in TOPIC_KEYS (lib/api.tsx) so live change events refresh them.
+ * Studio hooks use the studio session; guest hooks (usePublic…, useMyPhotos, useHighlights, useStudioProfile)
+ * use the public endpoints keyed by the event's short id.
  */
 
+// ── Studio ──────────────────────────────────────────────────────────────────
 export const useStudio = () => { const api = useApi(); return useQuery({ queryKey: ['studio'], queryFn: () => api.getStudio() }) }
 export const useUsage = () => { const api = useApi(); return useQuery({ queryKey: ['usage'], queryFn: () => api.getUsage() }) }
 export const useEvents = () => { const api = useApi(); return useQuery({ queryKey: ['events'], queryFn: () => api.listEvents() }) }
@@ -16,65 +21,79 @@ export const usePhotos = (eventId: ID | undefined, q: ListPhotosQuery = {}) => {
   const api = useApi()
   return useQuery({ queryKey: ['photos', eventId, q], queryFn: () => api.listPhotos(eventId!, q), enabled: !!eventId, placeholderData: (prev) => prev })
 }
-export const usePhoto = (id?: ID) => { const api = useApi(); return useQuery({ queryKey: ['photo', id], queryFn: () => api.getPhoto(id!), enabled: !!id }) }
-export const useFilms = (eventId?: ID) => { const api = useApi(); return useQuery({ queryKey: ['films', eventId], queryFn: () => api.listFilms(eventId!), enabled: !!eventId }) }
 export const useActivity = () => { const api = useApi(); return useQuery({ queryKey: ['activity'], queryFn: () => api.listActivity() }) }
 export const useOrders = () => { const api = useApi(); return useQuery({ queryKey: ['orders'], queryFn: () => api.listOrders() }) }
-export const usePrices = () => { const api = useApi(); return useQuery({ queryKey: ['orders', 'prices'], queryFn: () => api.listPrices() }) }
 export const useCameras = () => { const api = useApi(); return useQuery({ queryKey: ['cameras'], queryFn: () => api.listCameras() }) }
 
-/** Photos a guest may see: ready and not hidden by the studio. */
-export const guestVisible = (p: Photo) => !p.hidden && p.status === 'ready'
+// ── Guest ───────────────────────────────────────────────────────────────────
+const upper = (s?: string) => (s ? s.toUpperCase() : undefined)
 
-/** The guest persona the mock face matcher "finds" in every event. */
-export const DEMO_PERSON = 'p_g1'
-
-/**
- * Simulated face match: photos where the demo guest's face appears, thinned deterministically so the
- * sample wedding returns a believable few dozen (46 of 1,248). Replace with the server's
- * selfie-search endpoint when it exists.
- */
-export async function fetchMyPhotos(api: FramelineApi, eventId: ID): Promise<Photo[]> {
-  const { items } = await api.listPhotos(eventId, { personId: DEMO_PERSON })
-  let mine = items.filter(guestVisible).filter((p) => hash(p.id) % 7 === 0)
-  if (mine.length < 6) {
-    const all = (await api.listPhotos(eventId)).items.filter(guestVisible)
-    mine = all.filter((p) => hash(p.id) % 9 === 0).slice(0, 40)
-    if (mine.length < 6) mine = all.slice(0, 12)
-  }
-  return mine
+/** Gallery landing: event, settings (no PIN), albums, films and studio branding. */
+export const usePublicEvent = (shortId?: string) => {
+  const api = useApi()
+  const key = upper(shortId)
+  return useQuery({ queryKey: ['public-event', key], queryFn: () => api.getPublicEvent(key!), enabled: !!key })
 }
 
-export const myPhotosQuery = (api: FramelineApi, eventId: ID) => ({ queryKey: ['my-photos', eventId], queryFn: () => fetchMyPhotos(api, eventId) })
-
-export const useMyPhotos = (eventId: ID | undefined, enabled = true) => {
+/** Photos a guest may see (the server leaves out hidden, processing and pending-review photos). */
+export const usePublicPhotos = (shortId: string | undefined, q: PublicPhotosQuery = {}, enabled = true) => {
   const api = useApi()
-  return useQuery({ ...myPhotosQuery(api, eventId ?? ''), enabled: !!eventId && enabled })
+  const key = upper(shortId)
+  return useQuery({ queryKey: ['public-photos', key, q], queryFn: () => api.listPublicPhotos(key!, q), enabled: !!key && enabled, placeholderData: (prev) => prev })
 }
 
-/** Most-favourited photos of an event, shown to guests as the "Highlights" album. */
-export const useHighlights = (eventId: ID | undefined) => {
+/** Most-favourited photos, shown to guests as the "Highlights" album. */
+export const useHighlights = (shortId: string | undefined, enabled = true) => {
   const api = useApi()
+  const key = upper(shortId)
   return useQuery({
-    queryKey: ['highlights', eventId],
-    enabled: !!eventId,
-    queryFn: async () => {
-      const { items } = await api.listPhotos(eventId!, { filter: 'favourites' })
-      return items.filter(guestVisible).sort((a, b) => b.favourites - a.favourites).slice(0, 24)
-    },
+    queryKey: ['highlights', key],
+    enabled: !!key && enabled,
+    queryFn: async () => (await api.listPublicPhotos(key!, { highlights: true, limit: 24 })).items.filter((p) => p.favourites > 0),
   })
 }
 
-/** Fetches a set of photos by id (favourites across events). */
-export const usePhotosById = (ids: ID[]) => {
+/** Photos from the stored selfie match: by person when the server found one, else by the matched ids. */
+export async function fetchMatchedPhotos(api: FramelineApi, shortId: string, match: Pick<SelfieMatch, 'personId' | 'photoIds'>): Promise<Photo[]> {
+  if (match.personId) return (await api.listPublicPhotos(shortId, { personId: match.personId })).items
+  const ids = new Set(match.photoIds ?? [])
+  if (!ids.size) return []
+  return (await api.listPublicPhotos(shortId)).items.filter((p) => ids.has(p.id))
+}
+
+/** "My photos": the guest's selfie match for this gallery (empty until they take a selfie). */
+export const useMyPhotos = (shortId: string | undefined, eventId: ID | undefined) => {
+  const api = useApi()
+  const key = upper(shortId)
+  const match = useLocal((s) => (eventId ? s.selfie[eventId] : undefined))
+  return useQuery({
+    queryKey: ['my-photos', key, match?.personId ?? null, match?.photoIds?.length ?? 0, match?.at],
+    enabled: !!key && !!match,
+    queryFn: () => fetchMatchedPhotos(api, key!, match!),
+  })
+}
+
+export const useStudioProfile = (code?: string) => {
+  const api = useApi()
+  const key = upper(code)
+  return useQuery({ queryKey: ['studio-profile', key], queryFn: () => api.getStudioProfile(key!), enabled: !!key })
+}
+
+let fallbackPrices: Price[] | null = null
+/**
+ * Store prices. `listPrices` is a studio endpoint (GET /v1/prices needs an editor session), so guests on the real API
+ * get 401: fall back to the standard price list. The server prices the order from the studio's own list either way.
+ */
+export const usePrices = () => {
   const api = useApi()
   return useQuery({
-    queryKey: ['photos', 'by-id', ids],
-    queryFn: async () => {
-      const out = await Promise.all(ids.map((id) => api.getPhoto(id).catch(() => null)))
-      return out.filter((p): p is Photo => !!p)
+    queryKey: ['orders', 'prices'],
+    queryFn: async (): Promise<{ prices: Price[]; standard: boolean }> => {
+      try { return { prices: await api.listPrices(), standard: false } } catch {
+        fallbackPrices ??= createSeed().prices
+        return { prices: fallbackPrices, standard: true }
+      }
     },
-    placeholderData: (prev) => prev,
   })
 }
 
@@ -94,7 +113,8 @@ export function useAction<TVars, TData = unknown>(
       return onSuccess?.(...args)
     },
     onError: (...args) => {
-      toast.error(error ?? 'That didn’t work', args[0].message)
+      const f = friendlyError(args[0])
+      toast.error(error ?? f.title, f.detail)
       return onError?.(...args)
     },
     ...rest,

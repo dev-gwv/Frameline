@@ -4,27 +4,35 @@ import { router, useLocalSearchParams } from 'expo-router'
 import * as ImagePicker from 'expo-image-picker'
 import { Image } from 'expo-image'
 import { Button, Card, EmptyState, Icon, LoadingList, Screen, Txt } from '@/components'
-import { useApi } from '@/lib/api'
-import { actions, useLocal } from '@/lib/local'
-import { useAlbums, useEvent } from '@/lib/queries'
+import { ApiError } from '@frameline/shared'
+import { API_MODE, useApi } from '@/lib/api'
+import { friendlyError } from '@/lib/errors'
+import { actions, lastRegistration, useLocal } from '@/lib/local'
+import { usePublicEvent } from '@/lib/queries'
 import { toast } from '@/lib/toast'
 import { useTheme } from '@/theme'
 
-/** Guest upload: pick photos → api.uploadPhotos into the event's Guest uploads album. */
+/**
+ * Guest upload: pick photos → uploadPhotos({ source: 'guest', uploadedBy }) into the Guest uploads album (goes to
+ * review when the event asks for it). The per-phone limit is counted locally.
+ *
+ * NOTE: on the real API POST /v1/events/:id/uploads needs a studio session (uploader role); there is no public
+ * guest-upload endpoint yet, so guests without a studio session get a plain-words 401 message.
+ */
 export default function GuestUpload() {
   const { c } = useTheme()
   const api = useApi()
   const { width } = useWindowDimensions()
-  const { eventId } = useLocalSearchParams<{ eventId: string }>()
-  const { data: event } = useEvent(eventId)
-  const { data: albums } = useAlbums(eventId)
-  const sentBefore = useLocal((s) => s.guestUploads[eventId] ?? 0)
+  const { shortId } = useLocalSearchParams<{ shortId: string }>()
+  const { data: event } = usePublicEvent(shortId)
+  const reg = useLocal(lastRegistration)
+  const sentBefore = useLocal((s) => (event ? s.guestUploads[event.id] ?? 0 : 0))
   const [assets, setAssets] = useState<ImagePicker.ImagePickerAsset[]>([])
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState(0)
 
-  if (!event || !albums) return <LoadingList />
-  const album = albums.find((a) => a.kind === 'guest')
+  if (!event) return <LoadingList />
+  const album = event.albums.find((a) => a.kind === 'guest')
   const s = event.settings
   const remaining = Math.max(0, s.guestUploadLimit - sentBefore)
   if (!s.guestUploads || !album) return <Screen><EmptyState icon="upload-cloud" title="Guest uploads are off" body="The host isn’t collecting guest photos for this event." /></Screen>
@@ -39,12 +47,17 @@ export default function GuestUpload() {
     try {
       await api.uploadPhotos(event.id, album.id, assets.map((a, i) => ({
         filename: a.fileName ?? `guest_${Date.now()}_${i}.jpg`, size: a.fileSize ?? 3_000_000, url: a.uri, width: a.width, height: a.height,
-      })), { quality: 'web' })
+      })), { quality: 'web', source: 'guest', uploadedBy: reg?.name ?? 'Guest', watermark: s.watermarkGuestUploads || undefined })
       actions.countGuestUpload(event.id, assets.length)
       setSent(assets.length)
       setAssets([])
     } catch (e) {
-      toast.error('Upload didn’t finish', e instanceof Error ? e.message : 'Check your connection and try again')
+      if (API_MODE === 'http' && e instanceof ApiError && e.status === 401) {
+        toast.error('Guest uploads aren’t open in the app yet', 'Share your photos from the gallery website, or send them to the studio')
+      } else {
+        const f = friendlyError(e)
+        toast.error(f.title, f.detail)
+      }
     } finally { setBusy(false) }
   }
 
