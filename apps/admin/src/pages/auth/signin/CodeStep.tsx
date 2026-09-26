@@ -7,7 +7,7 @@ import { clock, describeAuthError, useCountdown } from './authHelpers'
 export interface CodeSent { resendAfter: number; devCode?: string }
 
 /** Enter the 6-digit code sent to `email`. Used by sign-in and by forgot password. */
-export function CodeStep({ email, title, verifyLabel, sent, onVerify, onResend, onChangeEmail, extra }: {
+export function CodeStep({ email, title, verifyLabel, sent, onVerify, onResend, onChangeEmail, extra, initialError }: {
   email: string
   title: string
   verifyLabel: string
@@ -18,11 +18,13 @@ export function CodeStep({ email, title, verifyLabel, sent, onVerify, onResend, 
   onResend: () => Promise<CodeSent>
   onChangeEmail: () => void
   extra?: ReactNode
+  /** Shown when coming back to this step after the code was rejected later on. */
+  initialError?: string | null
 }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [resending, setResending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(initialError ?? null)
   const [locked, setLocked] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [devCode, setDevCode] = useState(sent.devCode)

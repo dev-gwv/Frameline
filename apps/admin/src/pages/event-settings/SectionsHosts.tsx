@@ -95,7 +95,7 @@ export function DangerSection({ event, set }: SectionProps) {
   const del = async () => {
     try {
       await api.deleteEvent(event.id)
-      toast.success('Event deleted', `${event.name} and its photos are gone.`)
+      toast.success('Moved to trash', `Restore ${event.name} from Events → Recently deleted within 30 days.`)
       navigate('/events', { replace: true })
     } catch (e) {
       toast.error('Couldn’t delete the event', e instanceof Error ? e.message : 'Try again.')
@@ -109,12 +109,12 @@ export function DangerSection({ event, set }: SectionProps) {
         control={<Toggle label="Disable this event" checked={event.settings.disabled} onCheckedChange={(v) => set({ disabled: v })} />}
       />
       <Row
-        icon={<Trash2 size={15} />} title="Delete this event" description="Removes every album, photo, guest list and link. This can’t be undone"
-        control={<Button size="sm" variant="danger" icon={<Trash2 size={12} />} onClick={() => setConfirm(true)}>Delete event</Button>}
+        icon={<Trash2 size={15} />} title="Delete this event" description="Moves it to trash: guests lose access now, and it’s removed for good after 30 days"
+        control={<Button size="sm" variant="danger" icon={<Trash2 size={12} />} onClick={() => setConfirm(true)}>Move to trash</Button>}
       />
       <ConfirmDialog
-        open={confirm} onOpenChange={setConfirm} danger title="Delete this event?" confirmLabel="Delete event" onConfirm={del}
-        body={<>This deletes <b className="text-ink">{event.name}</b> with its photos, albums, guests and share links. Guests lose access right away. You can’t undo this.</>}
+        open={confirm} onOpenChange={setConfirm} danger title="Move this event to trash?" confirmLabel="Move to trash" onConfirm={del}
+        body={<><b className="text-ink">{event.name}</b> goes to Events → Recently deleted with its photos, albums, guests and share links. Guests lose access right away. Restore it within 30 days; after that it’s deleted for good.</>}
       />
     </SectionCard>
   )

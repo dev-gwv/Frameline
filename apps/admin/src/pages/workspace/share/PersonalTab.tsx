@@ -150,9 +150,9 @@ function FaceLinkCard({ event, brand }: { event: PhotoEvent; brand: string }) {
     setPersonId(null)
     if (!face) return
     let live = true
-    api.searchFaces(event.shortId, { key: face.key }).then((r) => { if (live) setPersonId(r.personId) }).catch(() => { /* the link still works: they take one selfie */ })
+    api.matchFaceForLink(event.id, { key: face.key }).then((r) => { if (live) setPersonId(r.personId) }).catch(() => { /* the link still works: they take one selfie */ })
     return () => { live = false }
-  }, [api, event.shortId, face])
+  }, [api, event.id, face])
 
   const pick = (f?: File) => {
     if (!f) return

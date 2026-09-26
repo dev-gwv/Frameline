@@ -4,7 +4,6 @@ import { ArrowLeft } from 'lucide-react'
 import { ApiError, type NewEventInput, type Studio } from '@frameline/shared'
 import { Button, LogoMark, Skeleton, useToast } from '@frameline/ui'
 import { useApi } from '../../lib/api'
-import { useAuth } from '../../lib/auth'
 import { useAction, useStudio } from '../../lib/queries'
 import { draftFromStudio, isHex, useHandleCheck, type SetupDraft } from './setup/draft'
 import { PhonePreview } from './setup/PhonePreview'
@@ -33,7 +32,6 @@ export default function Setup() {
   const [errors, setErrors] = useState<Errors>({})
   const [takenHandle, setTakenHandle] = useState<string>()
   const handleStatus = useHandleCheck(draft?.handle ?? '', takenHandle)
-  const { mode } = useAuth()
 
   useEffect(() => { if (studio.data && !draft) setDraft(draftFromStudio(studio.data)) }, [studio.data, draft])
   useEffect(() => { if (studio.isError && !draft) setDraft(draftFromStudio()) }, [studio.isError, draft])
@@ -83,17 +81,12 @@ export default function Setup() {
       if (handleStatus === 'checking') { toast.toast({ kind: 'info', title: 'Still checking your gallery address', body: 'Try again in a second.' }); return }
       if (handleStatus !== 'available') { toast.error('Choose a different gallery address', 'The one you typed is taken or not allowed.'); return }
       if (!isHex(draft.brandColor)) { toast.error('Brand colour isn’t valid', 'Use a 6-digit hex colour, like #8C2F39.'); return }
-      // The API stores image addresses (https://…), not file contents; picked files stay in the preview until uploads exist.
-      const storable = (url?: string) => (url && (mode === 'demo' || /^https?:\/\//.test(url)) ? url : undefined)
-      const logoUrl = storable(draft.logoUrl), coverUrl = storable(draft.coverUrl)
+      // Logo and cover were uploaded with uploadAsset when picked; these are their addresses.
       await saveStudio.mutateAsync({
         brandColor: draft.brandColor, handle: draft.handle.trim(),
         phone: draft.phone.trim(), instagram: draft.instagram.trim() || undefined,
-        ...(logoUrl ? { logoUrl } : {}), ...(coverUrl ? { coverUrl } : {}),
+        ...(draft.logoUrl ? { logoUrl: draft.logoUrl } : {}), ...(draft.coverUrl ? { coverUrl: draft.coverUrl } : {}),
       })
-      if ((draft.logoUrl && !logoUrl) || (draft.coverUrl && !coverUrl)) {
-        toast.toast({ kind: 'info', title: 'Logo and cover not saved yet', body: 'Add them again in Settings → Studio profile once image uploads are available.' })
-      }
       next()
     } else {
       const ev = await createEvent.mutateAsync({

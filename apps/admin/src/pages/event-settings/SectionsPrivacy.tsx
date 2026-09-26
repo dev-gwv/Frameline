@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { EyeOff, KeyRound, Lock, RefreshCw, ScanFace, ShieldCheck, Smartphone, Users } from 'lucide-react'
+import { EyeOff, Images, KeyRound, Lock, RefreshCw, ScanFace, ShieldCheck, Smartphone, Users } from 'lucide-react'
 import type { AccessMode, PhotoEvent } from '@frameline/shared'
-import { fmt } from '@frameline/shared'
-import { Button, Chip, Field, Input, Segmented, Toggle } from '@frameline/ui'
-import { useAction, useEvents, useGuests } from '../../lib/queries'
+import { fmt, PACKS } from '@frameline/shared'
+import { Button, Chip, ConfirmDialog, Field, Input, Menu, Meter, Segmented, Toggle } from '@frameline/ui'
+import { useAction, useEvents, useGuests, useUsage } from '../../lib/queries'
 import { errorMessage, useApi } from '../../lib/api'
 import { GALLERY_URL, shortIdApiError } from '../events/lib'
 import { AutoField, Row, SectionCard, TextLink } from './parts'
@@ -45,6 +45,7 @@ export function GeneralSection({ event, update }: SectionProps) {
           />
         </Field>
       </div>
+      <PhotoLimitRow event={event} />
     </SectionCard>
   )
 }
@@ -130,5 +131,33 @@ export function FacesSection({ event, set }: SectionProps) {
         control={<Toggle label="Selfie search without signing in" disabled={!s.faceSearch} checked={s.faceSearch && s.anonymousSelfie} onCheckedChange={(v) => set({ anonymousSelfie: v })} />}
       />
     </SectionCard>
+  )
+}
+
+type Pack = (typeof PACKS)[number]
+
+/** This event's photo limit, with one-off packs paid from wallet credits (api.buyPack). */
+function PhotoLimitRow({ event }: { event: PhotoEvent }) {
+  const api = useApi()
+  const credits = useUsage().data?.walletCredits
+  const [pack, setPack] = useState<Pack | null>(null)
+  const buy = useAction((p: Pack) => api.buyPack(event.id, p.photos, { payWith: 'credits' }), {
+    success: (r, p) => `${fmt.count(p.photos)} photos added. ${event.name} can now hold ${fmt.count(r.event.photoLimit)}.`,
+    error: 'Couldn’t buy the pack',
+  })
+  const enough = (p: Pack) => credits === undefined || credits >= p.price
+  return (
+    <>
+      <Row
+        icon={<Images size={15} />} title="Photo limit for this event"
+        description={<span className="flex flex-col gap-1"><span><span className="font-mono tnum">{fmt.count(event.photoCount)} / {fmt.count(event.photoLimit)}</span> photos used</span><Meter value={event.photoCount} max={event.photoLimit || 1} className="max-w-[240px]" /></span>}
+        control={<Menu align="end" width={260} trigger={<Button size="sm" loading={buy.isPending}>Buy more photos</Button>}
+          items={PACKS.map((p) => ({ label: `+${fmt.count(p.photos)} photos`, hint: `${fmt.rupees(p.price)}${enough(p) ? '' : ' · not enough credits'}`, onSelect: () => setPack(p) }))} />}
+      />
+      <ConfirmDialog open={!!pack} onOpenChange={(v) => !v && setPack(null)} title={pack ? `Add ${fmt.count(pack.photos)} photos to ${event.name}?` : ''}
+        confirmLabel={pack ? `Pay ${fmt.rupees(pack.price)} in credits` : 'Pay'}
+        body={pack && <>This pack is paid from your wallet credits{credits !== undefined ? <> (you have <b className="font-mono text-ink">{fmt.rupees(credits)}</b>)</> : null}. The limit goes up to <b className="font-mono text-ink">{fmt.count(event.photoLimit + pack.photos)}</b> straight away. {!enough(pack) && 'You don’t have enough credits: add some in Wallet first.'}</>}
+        onConfirm={() => { if (pack) buy.mutate(pack) }} />
+    </>
   )
 }

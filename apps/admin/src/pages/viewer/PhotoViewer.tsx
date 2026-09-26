@@ -121,15 +121,20 @@ export default function PhotoViewer() {
     if (!photo) return
     setDownloading(true)
     try {
-      // Originals: the real uploaded file when there is one. Web size (and tone placeholders) are drawn in the browser.
-      if (kind === 'original' && url) {
-        const res = await fetch(url).catch(() => null)
+      // Real file first: the API's download link (web size = 2048 px), then the uploaded file for originals.
+      // Tone placeholders (no file yet) are drawn in the browser.
+      const signed = await api.getPhotoDownloadUrl(photo.id, kind === 'web' ? { size: 2048 } : {}).catch(() => null)
+      const source = signed ?? (kind === 'original' ? url : undefined)
+      if (source) {
+        const res = await fetch(source).catch(() => null)
         if (res?.ok) {
           const file = await res.blob()
-          downloadBlob(file, photo.filename)
-          toast.success('Original downloaded', `${fmt.bytes(file.size)} · ${photo.filename}`)
+          const base = photo.filename.replace(/\.[^.]+$/, '')
+          downloadBlob(file, kind === 'web' && signed ? `${base}_2048.jpg` : photo.filename)
+          toast.success(kind === 'web' ? 'Web size downloaded' : 'Original downloaded', `${fmt.bytes(file.size)} · ${photo.filename}`)
           return
         }
+        if (signed) { window.open(signed, '_blank', 'noopener'); return }
       }
       const blob = await renderPhoto(photo, url, kind === 'web'
         ? { maxEdge: 2048, watermark: event?.settings.watermarkOff ? undefined : `© ${wm?.text || studio?.name || 'Studio'}` }
@@ -140,7 +145,7 @@ export default function PhotoViewer() {
     } catch (e) {
       toast.error('Download failed', (e as Error).message)
     } finally { setDownloading(false) }
-  }, [photo, url, event?.settings.watermarkOff, wm?.text, studio?.name, toast])
+  }, [api, photo, url, event?.settings.watermarkOff, wm?.text, studio?.name, toast])
 
   const askDelete = () => (event?.coverPhotoId === photoId ? setCoverGuard(true) : setConfirmDelete(true))
 

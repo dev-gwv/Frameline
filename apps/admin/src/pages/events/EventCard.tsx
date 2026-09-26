@@ -26,7 +26,7 @@ export function EventCard({ event: e, actions }: { event: PhotoEvent; actions: C
     archived
       ? { label: 'Restore', icon: <ArchiveRestore size={14} />, onSelect: () => actions.onArchive(e, false) }
       : { label: 'Archive', icon: <Archive size={14} />, onSelect: () => actions.onArchive(e, true) },
-    { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onSelect: () => actions.onDelete(e) },
+    { label: 'Move to trash', icon: <Trash2 size={14} />, danger: true, onSelect: () => actions.onDelete(e) },
   ]
 
   return (

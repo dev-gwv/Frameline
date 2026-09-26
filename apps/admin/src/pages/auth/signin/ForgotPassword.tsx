@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ArrowLeft, CheckCircle2, Eye, EyeOff, Lock, Mail } from 'lucide-react'
 import { Button, Field, Input, Tip } from '@frameline/ui'
+import { ApiError } from '@frameline/shared'
 import { useAuth, type VerifyResult } from '../../../lib/auth'
 import { CodeStep, type CodeSent } from './CodeStep'
 import { describeAuthError, isEmail } from './authHelpers'
@@ -9,8 +10,7 @@ type Step = 'email' | 'code' | 'password' | 'done'
 const MIN_PASSWORD = 8
 
 /**
- * Forgot password: email → 6-digit code (this signs you in) → new password → done.
- * `onDone` continues into the app with the session from the code.
+ * Forgot password: email → 6-digit code → new password (resetPassword checks the code and signs in) → done.
  */
 export function ForgotPassword({ initialEmail, onBack, onDone }: { initialEmail: string; onBack: (email: string) => void; onDone: (r: VerifyResult) => void }) {
   const auth = useAuth()
@@ -23,6 +23,7 @@ export function ForgotPassword({ initialEmail, onBack, onDone }: { initialEmail:
   const [pwError, setPwError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState<CodeSent | null>(null)
+  const [code, setCode] = useState('')
   const [session, setSession] = useState<VerifyResult | null>(null)
   const address = email.trim().toLowerCase()
 
@@ -35,15 +36,20 @@ export function ForgotPassword({ initialEmail, onBack, onDone }: { initialEmail:
     if (pw.length < MIN_PASSWORD) { setPwError(`Use at least ${MIN_PASSWORD} characters.`); return }
     if (pw !== pw2) { setPwError('The two passwords don’t match. Type the same password twice.'); return }
     setPwError(null); setBusy(true)
-    try { await auth.setPassword(pw); setStep('done') } catch (err) { setPwError(describeAuthError(err).message) } finally { setBusy(false) }
+    try { setSession(await auth.resetPassword(address, code, pw)); setStep('done') } catch (err) {
+      const f = describeAuthError(err)
+      // A wrong or expired code sends them back to enter a new one.
+      if (err instanceof ApiError && /otp|code/.test(err.code)) { setCode(''); setStep('code') }
+      setPwError(f.message)
+    } finally { setBusy(false) }
   }
 
   if (step === 'code' && sent) {
     return (
       <CodeStep email={address} title="Check your email" verifyLabel="Continue" sent={sent!}
-        onVerify={async (code) => { setSession(await auth.verifyCode(address, code)); setStep('password') }}
+        onVerify={async (c) => { setCode(c); setPwError(null); setStep('password') }}
         onResend={() => auth.requestCode(address)}
-        onChangeEmail={() => setStep('email')} />
+        onChangeEmail={() => setStep('email')} initialError={pwError} />
     )
   }
 
@@ -67,8 +73,8 @@ export function ForgotPassword({ initialEmail, onBack, onDone }: { initialEmail:
           <ArrowLeft size={14} /> Back to sign in
         </button>
       ) : (
-        <button type="button" onClick={() => session && onDone(session)} className="inline-flex w-fit items-center gap-1.5 text-[12px] font-bold text-ink-2 hover:text-ink">
-          Skip for now, keep using email codes
+        <button type="button" onClick={() => setStep('code')} className="inline-flex w-fit items-center gap-1.5 text-[12px] font-bold text-ink-2 hover:text-ink">
+          <ArrowLeft size={14} /> Back to the code
         </button>
       )}
       {step === 'email' ? (
@@ -86,7 +92,7 @@ export function ForgotPassword({ initialEmail, onBack, onDone }: { initialEmail:
         <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); void savePassword() }}>
           <div>
             <h1 className="font-display text-[28px] font-semibold leading-tight">Choose a new password</h1>
-            <p className="mt-1 text-[13px] text-ink-2">You’re signed in. Choose a password with at least {MIN_PASSWORD} characters. Email codes keep working too.</p>
+            <p className="mt-1 text-[13px] text-ink-2">At least {MIN_PASSWORD} characters. Saving it signs you in. Email codes keep working too.</p>
           </div>
           <Field label="New password" htmlFor="fp-pw" hint={`${MIN_PASSWORD} or more characters`}>
             <Input id="fp-pw" type={show ? 'text' : 'password'} autoComplete="new-password" autoFocus icon={<Lock size={14} />} value={pw} onChange={(e) => setPw(e.target.value)}

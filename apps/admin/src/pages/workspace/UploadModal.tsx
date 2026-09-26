@@ -211,7 +211,9 @@ export function UploadModal({ open, onOpenChange, event, albums, albumId, files,
             {(overEvent || overPlan) && (
               <div className="rounded-card bg-bad-soft p-3 text-[12px] text-bad">
                 {overEvent ? `This goes ${fmt.count(eventAfter - event.photoLimit)} photos over the event limit.` : 'Your plan doesn’t have enough photos left.'}{' '}
-                <Link to="/plan" className="font-bold underline">Increase photo limit</Link>
+                {overEvent
+                  ? <Link to={`/events/${event.id}/settings`} className="font-bold underline">Buy more photos for this event</Link>
+                  : <Link to="/plan" className="font-bold underline">Increase photo limit</Link>}
               </div>
             )}
             <Card className={cn('flex gap-2 text-[12px] text-ink-2', files.length > 2000 && 'border-accent')}>

@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { AtSign, ImagePlus, Loader2, Phone, Upload, X } from 'lucide-react'
-import { tone, toneCss } from '@frameline/shared'
+import { ApiError, ASSET_RULES, fmt, tone, toneCss } from '@frameline/shared'
 import { Card, Chip, cn, Field, Input, Tip } from '@frameline/ui'
 import { BRAND_SWATCHES, isHex, type HandleStatus, type Patch, type SetupDraft } from './draft'
+import { errorMessage, useApi } from '../../../lib/api'
 import { PhonePreview } from './PhonePreview'
 
-const MAX_LOGO_BYTES = 1_500_000
-const MAX_COVER_BYTES = 3_000_000
 
 function HandleChip({ status }: { status: HandleStatus }) {
   switch (status) {
@@ -29,32 +28,36 @@ const handleHint: Record<HandleStatus, string | undefined> = {
 export function StepBrand({ draft, patch, handleStatus, onError }: {
   draft: SetupDraft; patch: Patch; handleStatus: HandleStatus; onError: (msg: string) => void
 }) {
+  const api = useApi()
   const logoRef = useRef<HTMLInputElement>(null)
   const coverRef = useRef<HTMLInputElement>(null)
   const [hexText, setHexText] = useState(draft.brandColor)
   useEffect(() => setHexText(draft.brandColor), [draft.brandColor])
 
-  const pickLogo = (e: ChangeEvent<HTMLInputElement>) => {
+  // Files go to the asset store straight away; the returned address is saved with the studio on Continue.
+  const [uploading, setUploading] = useState<'logo' | 'cover' | null>(null)
+  const [assetError, setAssetError] = useState<{ logo?: string; cover?: string }>({})
+  const upload = async (which: 'logo' | 'cover', e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    if (!file.type.startsWith('image/')) { onError('That file isn’t an image. Choose a PNG, SVG or JPG.'); return }
-    if (file.size > MAX_LOGO_BYTES) { onError('That logo is over 1.5 MB. Export a smaller PNG or SVG and try again.'); return }
-    const reader = new FileReader()
-    reader.onload = () => patch({ logoUrl: String(reader.result) })
-    reader.onerror = () => onError('Couldn’t read that file. Try another one.')
-    reader.readAsDataURL(file)
-  }
-  const pickCover = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    if (!file.type.startsWith('image/')) { onError('That file isn’t an image. Choose a JPG or PNG.'); return }
-    if (file.size > MAX_COVER_BYTES) { onError('That cover is over 3 MB. Export a smaller JPG (about 1920 px wide) and try again.'); return }
-    const reader = new FileReader()
-    reader.onload = () => patch({ coverUrl: String(reader.result) })
-    reader.onerror = () => onError('Couldn’t read that file. Try another one.')
-    reader.readAsDataURL(file)
+    const kind = which === 'logo' ? 'studio-logo' : 'studio-cover'
+    const rule = ASSET_RULES[kind]
+    const fail = (msg: string) => setAssetError((x) => ({ ...x, [which]: msg }))
+    if (!rule.types.includes(file.type)) return fail(`That file type can’t be used. Choose a ${rule.types.map((t) => t.split('/')[1].toUpperCase()).join(', ')} file.`)
+    if (file.size > rule.maxBytes) return fail(`That file is ${fmt.bytes(file.size)}. Files can be up to ${fmt.bytes(rule.maxBytes)}: export a smaller one.`)
+    setAssetError((x) => ({ ...x, [which]: undefined }))
+    setUploading(which)
+    try {
+      const asset = await api.uploadAsset(kind, { filename: file.name, blob: file, contentType: file.type, size: file.size })
+      patch(which === 'logo' ? { logoUrl: asset.url } : { coverUrl: asset.url })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 413) fail(`That file is too large. Files can be up to ${fmt.bytes(rule.maxBytes)}.`)
+      else if (err instanceof ApiError && err.status === 415) fail('That file type can’t be used. Choose a JPG, PNG or WebP image.')
+      else onError(errorMessage(err))
+    } finally {
+      setUploading(null)
+    }
   }
   const hexInvalid = hexText.length > 0 && !isHex(hexText)
 
@@ -74,11 +77,13 @@ export function StepBrand({ draft, patch, handleStatus, onError }: {
                   className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line bg-surface text-ink-2 hover:text-bad"><X size={11} /></button>
               </Tip>
             )}
-            <input ref={logoRef} type="file" accept="image/png,image/svg+xml,image/jpeg,image/webp" className="hidden" onChange={pickLogo} />
+            <input ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => void upload('logo', e)} />
           </div>
           <div className="min-w-[140px] flex-1">
             <b className="text-[13px]">Logo</b>
-            <div className="text-[12px] text-ink-2">PNG or SVG, transparent background</div>
+            <div className={cn('text-[12px]', assetError.logo || assetError.cover ? 'font-semibold text-bad' : 'text-ink-2')} role={assetError.logo || assetError.cover ? 'alert' : undefined}>
+              {uploading ? `Uploading ${uploading}…` : assetError.logo ? `Logo: ${assetError.logo}` : assetError.cover ? `Cover: ${assetError.cover}` : 'PNG or WebP, transparent background'}
+            </div>
           </div>
           <button type="button" onClick={() => coverRef.current?.click()}
             className="relative grid h-[70px] w-[130px] place-items-center overflow-hidden rounded-[10px] bg-cover bg-center text-[11px] font-bold text-white"
@@ -86,7 +91,7 @@ export function StepBrand({ draft, patch, handleStatus, onError }: {
             aria-label={draft.coverUrl ? 'Change cover photo' : 'Upload cover photo'}>
             <span className="flex items-center gap-1 rounded bg-black/40 px-1.5 py-0.5"><ImagePlus size={12} />{draft.coverUrl ? 'Change cover' : 'Cover · 16:9'}</span>
           </button>
-          <input ref={coverRef} type="file" accept="image/*" className="hidden" onChange={pickCover} />
+          <input ref={coverRef} type="file" accept="image/*" className="hidden" onChange={(e) => void upload('cover', e)} />
         </div>
 
         <Field label="Brand colour" htmlFor="st-hex" error={hexInvalid ? 'Use a 6-digit hex colour, like #8C2F39.' : undefined}>
