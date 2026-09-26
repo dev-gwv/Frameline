@@ -1,14 +1,14 @@
-import { and, eq, or, sql } from 'drizzle-orm'
+import { and, eq, isNull, or, sql } from 'drizzle-orm'
 import type { DB } from '../db/client'
 import { schema } from '../db/client'
 import { NotFound } from '../lib/errors'
 import { assertEventVisible, type Membership } from './access'
 
-/** Loads an event by id or short id, scoped to the caller's studio (uploaders: assigned events only). */
-export async function eventForMember(db: DB, m: Membership, idOrShort: string) {
+/** Loads an event by id or short id, scoped to the caller's studio (uploaders: assigned events only). Trashed events 404 unless asked for. */
+export async function eventForMember(db: DB, m: Membership, idOrShort: string, opts: { includeDeleted?: boolean } = {}) {
   const e = schema.events
   const [row] = await db.select().from(e)
-    .where(and(eq(e.studioId, m.studioId), or(eq(e.id, idOrShort), eq(e.shortId, idOrShort.toUpperCase()))))
+    .where(and(eq(e.studioId, m.studioId), or(eq(e.id, idOrShort), eq(e.shortId, idOrShort.toUpperCase())), opts.includeDeleted ? undefined : isNull(e.deletedAt)))
     .limit(1)
   if (!row) throw new NotFound('Event', idOrShort)
   assertEventVisible(m, row.id)

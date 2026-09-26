@@ -19,7 +19,7 @@ export function studioOut(r: Row<typeof s.studios>): Studio {
     coverUrl: opt(r.coverUrl), studioType: opt(r.studioType), referralSource: opt(r.referralSource),
     services: r.profile?.services ?? [], testimonials: r.profile?.testimonials ?? [], faq: r.profile?.faq ?? [],
     socialLinks: r.profile?.socialLinks ?? [], portfolioLinks: r.profile?.portfolioLinks ?? [],
-    app: appConfig(r.app), followers: r.followers,
+    app: appConfig(r.app), followers: r.followers, billing: opt(r.billing),
   }
 }
 
@@ -51,7 +51,7 @@ export function eventOut(r: Row<typeof s.events>): PhotoEvent {
     id: r.id, shortId: r.shortId, name: r.name, type: r.type as PhotoEvent['type'], date: r.date, endDate: opt(r.endDate), city: r.city,
     status: r.status, photoCount: r.photoCount, photoLimit: r.photoLimit, visits: r.visits, faceMatches: r.faceMatches,
     expiresAt: r.expiresAt, createdAt: r.createdAt, coverTones: r.coverTones, settings: r.settings, hosts: r.hosts,
-    highlights: r.highlights, plan: r.plan, coverPhotoId: opt(r.coverPhotoId),
+    highlights: r.highlights, plan: r.plan, coverPhotoId: opt(r.coverPhotoId), deletedAt: opt(r.deletedAt),
   }
 }
 
@@ -90,7 +90,7 @@ export const activityOut = (r: Row<typeof s.activity>): ActivityItem => ({ id: r
 export const orderOut = (r: Row<typeof s.orders>): Order => ({
   id: r.id, number: r.number, buyer: r.buyer, eventId: r.eventId, eventName: r.eventName, items: r.items,
   paid: toMajor(r.paidPaise), currency: r.currency, share: toMajor(r.sharePaise), status: r.status, at: r.at,
-  photoIds: opt(r.photoIds), buyerEmail: opt(r.buyerEmail), method: opt(r.method),
+  photoIds: opt(r.photoIds), buyerEmail: opt(r.buyerEmail), method: opt(r.method), shipping: opt(r.shipping),
 })
 export const ledgerOut = (r: Row<typeof s.ledgerEntries>): LedgerEntry => ({
   id: r.id, at: r.at, description: r.description, type: r.type, amount: toMajor(r.amountPaise), balance: toMajor(r.balancePaise),

@@ -1,6 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { and, asc, desc, eq, inArray, isNotNull } from 'drizzle-orm'
-import { BASE_RENEWAL, PRESETS, RENEWAL_CREDIT_DISCOUNT, defaultSettings, hash, tone } from '@frameline/shared'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt } from 'drizzle-orm'
+import { BASE_RENEWAL, PACKS, PRESETS, RENEWAL_CREDIT_DISCOUNT, defaultSettings, hash, tone } from '@frameline/shared'
 import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
 import { accessRequestOut, eventOut, filmOut, guestOut, personOut } from '../db/mappers'
@@ -11,14 +11,16 @@ import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
 import { membershipOf, requireStudio } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
 import {
-  AccessRequest, EventPatch, EventSettingsPatch, EventStatus, Film, Guest, GuestLinkPayload, NewEventInput, Person, PhotoEvent,
+  AccessRequest, EventPatch, EventSettingsPatch, EventStatus, Film, Guest, GuestLinkPayload, NewEventInput, Person, PhotoEvent, Purchase,
 } from '../schemas/domain'
 import { debitWallet, recordPurchase } from '../services/billing'
+import { matchFaces } from '../services/faces'
+import { purchaseOut } from '../db/mappers'
+import { sql } from 'drizzle-orm'
 import { createSignedLink } from '../services/guest-links'
 import { toMinor } from '../lib/money'
 import { audit } from '../services/audit'
 import { eventForMember, newPin } from '../services/events'
-import { background } from '../lib/http'
 import { emit } from '../services/realtime'
 import { vectorIndex } from '../services/vectors'
 
@@ -41,6 +43,7 @@ eventRoutes.openapi(createRoute({
     status ? eq(e.status, status) : undefined,
     m.role === 'uploader' ? inArray(e.id, m.eventIds) : undefined,
     afterCursor(e.createdAt, e.id, 'desc', cursor),
+    isNull(e.deletedAt),
   )).orderBy(desc(e.createdAt), desc(e.id)).limit(limit + 1)
   return c.json(toPage(rows, limit, (r) => [r.createdAt, r.id], eventOut), 200)
 })
@@ -93,12 +96,16 @@ eventRoutes.openapi(createRoute({
   method: 'patch', path: '/events/{id}', tags: ['Events'], summary: 'Update event details', security,
   middleware: [requireStudio('editor', 'edit events')] as const,
   request: { params: IdParam, body: body(EventPatch) },
-  responses: { 200: json(PhotoEvent), ...problems(401, 403, 404, 422) },
+  responses: { 200: json(PhotoEvent), ...problems(401, 403, 404, 409, 422) },
 }), async (c) => {
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
   const ev = await eventForMember(db, m, c.req.valid('param').id)
   const patch = c.req.valid('json')
+  if (patch.shortId && patch.shortId !== ev.shortId) {
+    const [taken] = await db.select({ id: schema.events.id }).from(schema.events).where(eq(schema.events.shortId, patch.shortId)).limit(1)
+    if (taken) throw new Conflict(`The gallery code ${patch.shortId} is already used. Try another.`, 'short_id_taken')
+  }
   const norm = { ...patch }
   for (const k of ['date', 'endDate', 'expiresAt'] as const) if (norm[k]) norm[k] = new Date(norm[k]!).toISOString()
   if (Object.keys(norm).length) await db.update(schema.events).set(norm).where(eq(schema.events.id, ev.id)).run()
@@ -139,6 +146,18 @@ eventRoutes.openapi(createRoute({
   return c.json({ pin }, 200)
 })
 
+/** Hard-deletes a trashed event: rows (cascade), cameras, QR codes, R2 files and face vectors. */
+export async function purgeEvent(env: Env, studioId: string, eventId: string) {
+  const db = getDb(env.DB)
+  const vectors = await db.select({ v: schema.faces.vectorId }).from(schema.faces).where(and(eq(schema.faces.eventId, eventId), isNotNull(schema.faces.vectorId)))
+  await db.batch([
+    db.delete(schema.cameras).where(eq(schema.cameras.eventId, eventId)),
+    db.delete(schema.smartQrs).where(eq(schema.smartQrs.eventId, eventId)),
+    db.delete(schema.events).where(eq(schema.events.id, eventId)),
+  ])
+  await purgeEventStorage(env, studioId, eventId, vectors.map((r) => r.v!).filter(Boolean))
+}
+
 /** Deletes an event's R2 objects and face vectors after the DB rows are gone. */
 async function purgeEventStorage(env: Env, studioId: string, eventId: string, vectorIds: string[]) {
   const prefix = `studios/${studioId}/events/${eventId}/`
@@ -155,7 +174,8 @@ async function purgeEventStorage(env: Env, studioId: string, eventId: string, ve
 }
 
 eventRoutes.openapi(createRoute({
-  method: 'delete', path: '/events/{id}', tags: ['Events'], summary: 'Delete an event and everything in it', security,
+  method: 'delete', path: '/events/{id}', tags: ['Events'], summary: 'Move an event to the trash', security,
+  description: 'The event disappears from lists and its gallery closes. Restore it within 30 days; after that a daily job deletes it with its photos, files and face data.',
   middleware: [requireStudio('editor', 'delete events')] as const,
   request: { params: IdParam },
   responses: { 204: NoContent, ...problems(401, 403, 404) },
@@ -163,14 +183,8 @@ eventRoutes.openapi(createRoute({
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
   const ev = await eventForMember(db, m, c.req.valid('param').id)
-  const vectors = await db.select({ v: schema.faces.vectorId }).from(schema.faces).where(and(eq(schema.faces.eventId, ev.id), isNotNull(schema.faces.vectorId)))
-  await db.batch([
-    db.delete(schema.cameras).where(eq(schema.cameras.eventId, ev.id)),
-    db.delete(schema.smartQrs).where(eq(schema.smartQrs.eventId, ev.id)),
-    db.delete(schema.events).where(eq(schema.events.id, ev.id)),
-  ])
-  background(c, purgeEventStorage(c.env, m.studioId, ev.id, vectors.map((r) => r.v!).filter(Boolean)))
-  audit(c, 'event.delete', { type: 'event', id: ev.id }, { name: ev.name })
+  await db.update(schema.events).set({ deletedAt: nowIso() }).where(eq(schema.events.id, ev.id)).run()
+  audit(c, 'event.trash', { type: 'event', id: ev.id }, { name: ev.name })
   emit(c, m.studioId, 'events', 'albums', 'photos', 'misc')
   return c.body(null, 204)
 })
@@ -375,4 +389,83 @@ eventRoutes.openapi(createRoute({
   const path = `/${link.kind}/${link.code}`
   audit(c, 'event.guest_link', { type: 'event', id: ev.id }, { kind: link.kind })
   return c.json({ ...link, path, url: `${c.env.GALLERY_URL.replace(/\/$/, '')}${path}` }, 201)
+})
+
+// ── Trash, packs, studio-side face match ───────────────────────────────────
+export const TRASH_DAYS = 30
+
+eventRoutes.openapi(createRoute({
+  method: 'get', path: '/trash/events', tags: ['Events'], summary: 'Events in the trash (deleted in the last 30 days)', security,
+  middleware: [requireStudio('editor', 'view the trash')] as const,
+  request: { query: PageQuery },
+  responses: { 200: json(pageOf(PhotoEvent, 'TrashPage')), ...problems(401, 403) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const { limit, cursor } = c.req.valid('query')
+  const e = schema.events
+  const rows = await getDb(c.env.DB).select().from(e).where(and(eq(e.studioId, m.studioId), isNotNull(e.deletedAt), afterCursor(e.createdAt, e.id, 'desc', cursor)))
+    .orderBy(desc(e.createdAt), desc(e.id)).limit(limit + 1)
+  return c.json(toPage(rows, limit, (r) => [r.createdAt, r.id], eventOut), 200)
+})
+
+eventRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{id}/restore', tags: ['Events'], summary: 'Restore an event from the trash', security,
+  middleware: [requireStudio('editor', 'restore events')] as const,
+  request: { params: IdParam },
+  responses: { 200: json(PhotoEvent), ...problems(401, 403, 404, 409) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id, { includeDeleted: true })
+  if (!ev.deletedAt) throw new Conflict('This event isn’t in the trash.', 'not_deleted')
+  await db.update(schema.events).set({ deletedAt: null }).where(eq(schema.events.id, ev.id)).run()
+  audit(c, 'event.restore', { type: 'event', id: ev.id })
+  emit(c, m.studioId, 'events', 'albums', 'photos')
+  return c.json(eventOut(await eventForMember(db, m, ev.id)), 200)
+})
+
+/** Daily job: permanently delete events that have been in the trash longer than TRASH_DAYS. */
+export async function purgeTrash(env: Env): Promise<number> {
+  const cutoff = new Date(Date.now() - TRASH_DAYS * 86_400_000).toISOString()
+  const due = await getDb(env.DB).select({ id: schema.events.id, studioId: schema.events.studioId }).from(schema.events)
+    .where(and(isNotNull(schema.events.deletedAt), lt(schema.events.deletedAt, cutoff))).limit(50)
+  for (const e of due) await purgeEvent(env, e.studioId, e.id)
+  return due.length
+}
+
+eventRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{id}/packs', tags: ['Billing'], summary: 'Buy a photo pack for one event — owner', security,
+  description: `Raises the event’s photo limit and records a 'pack' purchase. Packs: ${PACKS.map((p) => `${p.photos} photos ₹${p.price}`).join(', ')}.`,
+  middleware: [requireStudio('owner', 'buy packs'), idempotent] as const,
+  request: {
+    params: IdParam, headers: IdempotencyHeader,
+    body: body(z.object({ photos: z.number().int().refine((n) => PACKS.some((p) => p.photos === n), `Packs come in ${PACKS.map((p) => p.photos).join(', ')} photos`), payWith: z.enum(['credits', 'card']) })),
+  },
+  responses: { 200: json(z.object({ event: PhotoEvent, charged: z.number(), purchase: Purchase })), ...problems(401, 402, 403, 404, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id)
+  const { photos, payWith } = c.req.valid('json')
+  const pack = PACKS.find((p) => p.photos === photos)!
+  const label = `${pack.photos.toLocaleString('en-IN')}-photo pack · ${ev.name}`
+  if (payWith === 'credits') await debitWallet(db, m.studioId, toMinor(pack.price), label)
+  const purchase = await recordPurchase(db, m.studioId, { description: label, kind: 'pack', amountPaise: toMinor(pack.price), method: payWith === 'credits' ? 'credits' : 'card' })
+  await db.update(schema.events).set({ photoLimit: sql`${schema.events.photoLimit} + ${pack.photos}` }).where(eq(schema.events.id, ev.id)).run()
+  audit(c, 'billing.pack', { type: 'event', id: ev.id }, { photos, payWith })
+  emit(c, m.studioId, 'events', 'usage', 'misc')
+  return c.json({ event: eventOut(await eventForMember(db, m, ev.id)), charged: pack.price, purchase: purchaseOut(purchase) }, 200)
+})
+
+eventRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{id}/faces/match', tags: ['People'], summary: 'Find the person in a photo (for face personal links)', security,
+  description: 'Same matching as the guest selfie search, without a guest token.',
+  middleware: [requireStudio('editor', 'create personal links')] as const,
+  request: { params: IdParam, body: body(z.object({ key: z.string().min(1).max(512), embedding: z.array(z.number().finite()).min(64).max(2048).optional(), minScore: z.number().min(0).max(1).default(0.5) })) },
+  responses: { 200: json(z.object({ personId: z.string().nullable(), photoIds: z.array(z.string()) })), ...problems(401, 403, 404, 422, 503) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const ev = await eventForMember(getDb(c.env.DB), m, c.req.valid('param').id)
+  const { key, embedding, minScore } = c.req.valid('json')
+  return c.json(await matchFaces(c.env, ev.id, key, embedding, minScore), 200)
 })

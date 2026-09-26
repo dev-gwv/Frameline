@@ -44,7 +44,11 @@ export interface Studio {
   /** Studio app / public profile configuration. */
   app: StudioAppConfig
   followers: number
+  /** Billing & GST details printed on Frameline invoices. */
+  billing?: StudioBilling
 }
+
+export interface StudioBilling { name: string; gstin?: string; address: string; state: string; invoiceEmail: string }
 
 export interface StudioService { id: ID; name: string; /** Display price, e.g. "From ₹1,50,000". */ price: string; description: string }
 export interface StudioTestimonial { id: ID; quote: string; name: string; photoUrl?: string; /** e.g. "Udaipur, 2026" */ detail?: string }
@@ -118,6 +122,8 @@ export interface PhotoEvent {
   plan: 'subscription' | 'pack' | 'trial'
   /** Photo chosen as the event cover (setCover scope 'event'). */
   coverPhotoId?: ID
+  /** Set while the event is in the trash (listDeletedEvents); purged 30 days later. */
+  deletedAt?: string
 }
 
 export interface Album {
@@ -207,11 +213,21 @@ export interface Order {
   photoIds?: ID[]
   buyerEmail?: string
   method?: PaymentMethod
+  /** Delivery address for print orders. */
+  shipping?: ShippingAddress
   /** Present while payment is pending with a provider (real API with Razorpay keys). */
   checkout?: { provider: 'razorpay'; orderId: string; keyId: string; amount: number; currency: 'INR' }
 }
 
 export type PaymentMethod = 'upi' | 'card' | 'netbanking' | 'international'
+
+export interface ShippingAddress { name: string; phone: string; line1: string; line2?: string; city: string; state: string; postal: string; country?: string }
+
+/** A guest checkout that was started but not paid (pending for more than 30 minutes). */
+export interface AbandonedCart {
+  orderId: ID; number: number; buyer: string; buyerEmail?: string; eventId: ID; eventName: string; items: string
+  amount: number; startedAt: string; reminders: number; remindedAt?: string
+}
 
 export interface LedgerEntry {
   id: ID
@@ -317,7 +333,11 @@ export interface Purchase {
 }
 
 export type KycDocKind = 'pan' | 'id' | 'gst' | 'cheque'
-export interface KycDocument { kind: KycDocKind; status: 'verified' | 'review' | 'needed'; fileName: string }
+export interface KycDocument { kind: KycDocKind; status: 'verified' | 'review' | 'needed'; fileName: string; /** From uploadAsset('kyc-document', …). */ assetId?: ID }
+
+export type AssetKind = 'studio-logo' | 'studio-cover' | 'event-cover' | 'watermark-logo' | 'broadcast-image' | 'qr-logo' | 'testimonial-photo' | 'kyc-document'
+/** A file uploaded with uploadAsset; `url` can be stored in the matching field (logoUrl, coverUrl, imageUrl…). */
+export interface Asset { id: ID; kind: AssetKind; url: string; contentType: string; size: number; fileName: string; createdAt: string }
 
 export interface StoreSettings {
   kyc: {
@@ -406,4 +426,16 @@ export interface OrderItemInput {
   priceId: string
   photoIds: ID[]
   quantity?: number
+}
+
+/** The watermark guests' downloads must carry (enabled = false when the event has watermarkOff). */
+export interface PublicWatermark { enabled: boolean; settings: WatermarkSettings }
+
+/** "Download all" uses left for this guest (5 per guest per gallery). */
+export interface DownloadAllowance { remaining: number; limit: number }
+
+/** A gallery this guest/device has opened. */
+export interface PublicEventSummary {
+  id: ID; shortId: string; name: string; type: EventType; date: string; city: string; coverTones: [Tone, Tone, Tone]
+  photoCount: number; studioName: string; lastOpenedAt: string
 }

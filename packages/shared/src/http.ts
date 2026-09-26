@@ -1,7 +1,9 @@
 import type {
+  AssetFile, PackPurchase,
   ChangeTopic, FramelineApi, GuestLinkResult, ListPhotosQuery, PlanChange, RenewalLink, RenewalResult, ResolvedGuestLink, UploadFile, UploadOptions,
 } from './api'
 import type {
+  AbandonedCart, Asset, DownloadAllowance, PublicEventSummary, PublicStudio, PublicWatermark,
   Album, Broadcast, Camera, CameraUpload, Enquiry, EventSettings, Guest, GuestSession, LedgerEntry, NotificationPrefs, Order, Photo, PhotoEvent,
   Price, PublicEvent, Purchase, SmartQR, StoreSettings, Studio, StudioProfile, TeamMember, Ticket, Usage, UsageBreakdown, UsageReport,
   WatermarkSettings, Website, ZipRequest,
@@ -149,6 +151,11 @@ export interface HttpApiOptions {
   uploadConcurrency?: number
   /** Where guest (gallery) session tokens are kept, per event short id. Defaults to memory. */
   guestTokens?: GuestTokenStore
+  /**
+   * Stable per-install id sent as `X-Guest-Device` on guest calls, so follows and "my galleries"
+   * survive across events (e.g. a UUID kept in localStorage / SecureStore).
+   */
+  guestDeviceId?: string | (() => string | undefined)
 }
 
 /** Guest sessions per gallery (key = upper-case event short id). Sync so it can wrap localStorage / MMKV. */
@@ -190,6 +197,8 @@ export interface FramelineHttpApi extends FramelineApi {
     verifyOtp(email: string, code: string, extra?: { name?: string; studioName?: string }): Promise<SessionResponse>
     loginWithPassword(email: string, password: string): Promise<SessionResponse>
     setPassword(newPassword: string, currentPassword?: string): Promise<void>
+    /** Forgot password: request a code with requestOtp(email), then set a new password with it (signs in). */
+    resetPassword(email: string, code: string, newPassword: string): Promise<SessionResponse>
     /** Stores tokens from the Google redirect fragment (`#access_token=…&refresh_token=…&expires_in=…`). */
     acceptOAuthFragment(fragment: string): Promise<boolean>
     googleStartUrl(redirectPath?: string): string
@@ -211,6 +220,8 @@ interface RequestOptions {
   auth?: boolean
   /** Guest call for this gallery short id: sends its guest token instead of the studio session. */
   guest?: string
+  /** Raw (non-JSON) body, e.g. a file for uploadAsset. */
+  raw?: { body: Blob; contentType: string }
 }
 
 interface Page<T> { items: T[]; nextCursor: string | null }
@@ -228,9 +239,9 @@ const enc = encodeURIComponent
 const LOCAL_URL = /^(blob|file|content|ph|assets-library|data):/i
 
 const STUDIO_KEYS = ['name', 'handle', 'logoUrl', 'brandColor', 'phone', 'email', 'website', 'instagram', 'city', 'about'] as const
-const EVENT_KEYS = ['name', 'type', 'date', 'endDate', 'city', 'status', 'photoLimit', 'expiresAt', 'coverTones', 'hosts', 'highlights', 'plan'] as const
+const EVENT_KEYS = ['shortId', 'name', 'type', 'date', 'endDate', 'city', 'status', 'photoLimit', 'expiresAt', 'coverTones', 'hosts', 'highlights', 'plan'] as const
 const QR_KEYS = ['name', 'slug', 'eventId', 'target', 'color', 'scheduledEventId', 'scheduledAt', 'dotStyle', 'logoUrl'] as const
-const STUDIO_PROFILE_KEYS = ['coverUrl', 'studioType', 'referralSource', 'services', 'testimonials', 'faq', 'socialLinks', 'portfolioLinks', 'app'] as const
+const STUDIO_PROFILE_KEYS = ['coverUrl', 'studioType', 'referralSource', 'services', 'testimonials', 'faq', 'socialLinks', 'portfolioLinks', 'app', 'billing'] as const
 const WATERMARK_KEYS = ['mode', 'text', 'subtitle', 'position', 'size', 'opacity', 'font', 'applyTo', 'logoUrl', 'edgeOffset'] as const
 const WEBSITE_KEYS = ['published', 'template', 'headline', 'sections', 'customDomain'] as const
 
@@ -242,6 +253,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
   const tokens = options.tokens
   const studioId = () => (typeof options.studioId === 'function' ? options.studioId() : options.studioId)
   const guestTokens = options.guestTokens ?? memoryGuestTokenStore()
+  const deviceId = () => (typeof options.guestDeviceId === 'function' ? options.guestDeviceId() : options.guestDeviceId)
   /** Last gallery a guest call went to (for calls that only carry a photo id). */
   let lastGallery: string | undefined
   const rememberSession = (session: GuestSession) => {
@@ -307,7 +319,10 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     let refreshed = false
     for (;;) {
       const headers: Record<string, string> = { Accept: 'application/json' }
-      if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
+      if (opts.raw) headers['Content-Type'] = opts.raw.contentType
+      else if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
+      const device = deviceId()
+      if (device && (guestKey !== undefined || path.startsWith('/v1/public/'))) headers['X-Guest-Device'] = device
       if (idemKey) headers['Idempotency-Key'] = idemKey
       const sid = studioId()
       if (sid) headers['X-Studio-Id'] = sid
@@ -320,7 +335,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
       }
       let res: Response
       try {
-        res = await fetchImpl(url(path, opts.query), { method, headers, body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined })
+        res = await fetchImpl(url(path, opts.query), { method, headers, body: opts.raw ? opts.raw.body : opts.body !== undefined ? JSON.stringify(opts.body) : undefined })
       } catch (err) {
         if (retryable && attempt < maxRetries) { await sleep(backoff(attempt++)); continue }
         throw new ApiError({ status: 0, code: 'network_error', detail: 'Could not reach Frameline. Check your connection and try again.', problem: { detail: String(err) } })
@@ -404,11 +419,14 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     files: { photoId: string; filename: string; key: string | null; parts: { partNumber: number; url: string }[] }[]
   }
 
-  async function uploadBatch(eventId: string, albumId: string, files: HttpUploadFile[], opts: UploadOptions): Promise<Photo[]> {
+  interface UploadTarget { start: string; complete: (uploadId: string) => string; guest?: string }
+
+  async function uploadBatch(eventId: string, albumId: string, files: HttpUploadFile[], opts: UploadOptions, target?: UploadTarget): Promise<Photo[]> {
     const quality = opts.quality
+    const t: UploadTarget = target ?? { start: `/v1/events/${enc(eventId)}/uploads`, complete: (id) => `/v1/events/${enc(eventId)}/uploads/${enc(id)}/complete` }
     const blobs = await Promise.all(files.map(fileBytes))
-    const session = await request<UploadSession>('POST', `/v1/events/${enc(eventId)}/uploads`, {
-      idempotent: true,
+    const session = await request<UploadSession>('POST', t.start, {
+      idempotent: true, guest: t.guest,
       body: {
         albumId, quality, source: opts.source, uploadedBy: opts.uploadedBy, watermark: opts.watermark, fast: opts.fast,
         files: files.map((f, i) => ({
@@ -439,8 +457,8 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     await Promise.all(Array.from({ length: Math.max(1, options.uploadConcurrency ?? 3) }, worker))
     const order = new Map(session.files.map((f, i) => [f.photoId, i]))
     results.sort((a, b) => order.get(a.photoId)! - order.get(b.photoId)!)
-    const done = await request<{ items: Photo[] }>('POST', `/v1/events/${enc(eventId)}/uploads/${enc(session.uploadId)}/complete`, {
-      idempotent: true, body: { files: results },
+    const done = await request<{ items: Photo[] }>('POST', t.complete(session.uploadId), {
+      idempotent: true, guest: t.guest, body: { files: results },
     })
     return done.items
   }
@@ -707,6 +725,56 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
       return r
     },
 
+    // ── Contract v3 ─────────────────────────────────────────────────────────
+    listDeletedEvents: () => listAll<PhotoEvent>('/v1/trash/events'),
+    restoreEvent: (id) => request<PhotoEvent>('POST', `/v1/events/${enc(id)}/restore`, { idempotent: true }),
+    buyPack: (eventId, photos, opts) => request<PackPurchase>('POST', `/v1/events/${enc(eventId)}/packs`, { body: { photos, payWith: opts.payWith }, idempotent: true }),
+    matchFaceForLink: (eventId, selfie) => request('POST', `/v1/events/${enc(eventId)}/faces/match`, { body: selfie }),
+    async uploadAsset(kind, file: AssetFile) {
+      const blob = file.blob ?? (file.uri ? await (await fetchImpl(file.uri)).blob() : null)
+      if (!blob) throw new ApiError({ status: 0, code: 'file_unreadable', detail: `Could not read ${file.filename}.` })
+      const contentType = file.contentType ?? (blob.type || 'application/octet-stream')
+      return request<Asset>('POST', '/v1/assets', { query: { kind, filename: file.filename }, raw: { body: blob, contentType }, idempotent: true })
+    },
+    listCarts: () => listAll<AbandonedCart>('/v1/carts'),
+    remindCarts: (orderIds) => request<{ reminded: number }>('POST', '/v1/carts/remind', { body: { orderIds }, idempotent: true }),
+
+    listPublicPrices: async (shortId) => (await request<{ items: Price[] }>('GET', `/v1/public/events/${enc(shortId)}/prices`, { guest: g(shortId) })).items,
+    getPublicWatermark: (shortId) => request<PublicWatermark>('GET', `/v1/public/events/${enc(shortId)}/watermark`, { guest: g(shortId) }),
+    async uploadGuestPhotos(shortId, files, o = {}) {
+      const key = g(shortId)
+      const created: Photo[] = []
+      for (const batch of chunks(files as HttpUploadFile[], 100)) {
+        created.push(...await uploadBatch('', '', batch, { quality: 'web', source: 'guest', uploadedBy: o.uploadedBy }, {
+          start: `/v1/public/events/${enc(shortId)}/uploads`,
+          complete: (id) => `/v1/public/events/${enc(shortId)}/uploads/${enc(id)}/complete`,
+          guest: key,
+        }))
+      }
+      return created
+    },
+    requestPublicZip: (shortId, email, o = {}) => request<ZipRequest>('POST', `/v1/public/events/${enc(shortId)}/zips`, { body: { email, ...o }, guest: g(shortId), idempotent: true }),
+    verifyDownloadPin: (shortId, pin) => request<DownloadAllowance>('POST', `/v1/public/events/${enc(shortId)}/download-pin`, { body: pin ? { pin } : {}, guest: g(shortId) }),
+    listMyFavourites: async (shortId) => (await request<{ items: Photo[] }>('GET', `/v1/public/events/${enc(shortId)}/me/favourites`, { guest: g(shortId) })).items,
+    listMyOrders: async (shortId) => (await request<{ items: Order[] }>('GET', `/v1/public/events/${enc(shortId)}/me/orders`, { guest: g(shortId) })).items,
+    confirmOrder: (orderId, payment) => request<Order>('POST', `/v1/public/orders/${enc(orderId)}/confirm`, { body: payment, guest: lastGallery ?? '' }),
+    requestAccess: (shortId, input) => request<{ received: true }>('POST', `/v1/public/events/${enc(shortId)}/access-requests`, { body: { note: '', ...input }, guest: g(shortId) }),
+    unfollowStudio: (followCode) => request<{ followers: number }>('DELETE', `/v1/public/studios/${enc(followCode)}/follow`, { guest: lastGallery ?? '' }),
+    listFollowedStudios: async () => (await request<{ items: PublicStudio[] }>('GET', '/v1/public/me/follows', { guest: lastGallery ?? '' })).items,
+    listMyGalleries: async () => (await request<{ items: PublicEventSummary[] }>('GET', '/v1/public/me/galleries', { guest: lastGallery ?? '' })).items,
+    async getPhotoDownloadUrl(photoId, o = {}) {
+      const key = o.shortId ? g(o.shortId) : lastGallery
+      const token = key ? guestTokens.get(key) : null
+      const u = url(`/v1/public/photos/${enc(photoId)}/download`, { size: o.size ?? 2048, token: token ?? undefined })
+      try {
+        const res = await fetchImpl(u, { method: 'HEAD' })
+        return res.ok ? u : null
+      } catch {
+        return null
+      }
+    },
+
+
 
     auth: {
       requestOtp: (email) => request('POST', '/v1/auth/otp/request', { body: { email }, auth: false }),
@@ -721,6 +789,11 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
         return s
       },
       setPassword: (newPassword, currentPassword) => request<void>('POST', '/v1/auth/password', { body: { newPassword, currentPassword } }),
+      async resetPassword(email, code, newPassword) {
+        const s = await request<SessionResponse>('POST', '/v1/auth/password/reset', { body: { email, code, newPassword }, auth: false })
+        await saveTokens(s)
+        return s
+      },
       async acceptOAuthFragment(fragment) {
         const p = new URLSearchParams(fragment.replace(/^#/, ''))
         const at = p.get('access_token')

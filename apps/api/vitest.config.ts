@@ -15,6 +15,8 @@ export default defineConfig(async () => {
             ENVIRONMENT: 'test',
             JWT_SECRET: 'test-jwt-secret-0123456789-0123456789-abcdef',
             OTP_PEPPER: 'test-otp-pepper',
+            RAZORPAY_KEY_SECRET: 'test-razorpay-key-secret',
+            RAZORPAY_WEBHOOK_SECRET: 'test-razorpay-webhook-secret',
             TEST_MIGRATIONS: migrations,
           },
         },

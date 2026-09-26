@@ -73,7 +73,7 @@ export function requireStudio(min: Role = 'uploader', action?: string) {
 
 /** Guest token (from PIN check / registration) for /v1/public endpoints. Optional unless `required`. */
 export async function guestFromRequest(c: Context<AppEnv>): Promise<GuestClaims | null> {
-  const token = bearer(c) ?? c.req.header('x-guest-token') ?? null
+  const token = bearer(c) ?? c.req.header('x-guest-token') ?? c.req.query('token') ?? null
   if (!token) return null
   const r = await verifyJwt(c.env.JWT_SECRET, token, 'guest')
   if (!r.ok) {
@@ -81,7 +81,7 @@ export async function guestFromRequest(c: Context<AppEnv>): Promise<GuestClaims 
       ? new Unauthorized('Your gallery session has expired. Enter the PIN again.', 'guest_token_expired')
       : new Unauthorized('The gallery token is invalid.', 'invalid_guest_token')
   }
-  return { eventId: String(r.claims.sub), guestId: r.claims.gid as string | undefined, studioId: String(r.claims.sid), all: r.claims.all === true }
+  return { eventId: String(r.claims.sub), guestId: r.claims.gid as string | undefined, studioId: String(r.claims.sid), all: r.claims.all === true, vp: r.claims.vp === true }
 }
 
 /** Handlers call these after middleware has run; they narrow the optional context vars. */

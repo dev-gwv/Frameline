@@ -39,6 +39,7 @@ export const Studio = z.object({
   portfolioLinks: z.array(z.string()),
   app: z.object({ featuredEventIds: z.array(z.string()), showServices: z.boolean(), showFaq: z.boolean(), showPrivate: z.boolean() }),
   followers: z.number().int(),
+  billing: z.object({ name: z.string(), gstin: z.string().optional(), address: z.string(), state: z.string(), invoiceEmail: z.string() }).optional(),
 }).openapi('Studio')
 
 const ItemId = z.string().trim().min(1).max(64)
@@ -63,6 +64,11 @@ export const StudioPatch = z.object({
   socialLinks: z.array(z.object({ platform: z.string().max(30), url: z.string().max(2048) })).max(20),
   portfolioLinks: z.array(z.string().max(2048)).max(20),
   app: z.object({ featuredEventIds: z.array(z.string().max(128)).max(24), showServices: z.boolean(), showFaq: z.boolean(), showPrivate: z.boolean() }).partial(),
+  billing: z.object({
+    name: z.string().trim().min(1).max(200),
+    gstin: z.string().regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, 'GSTIN is 15 characters, e.g. 27AAKFN4521Q1Z8').optional(),
+    address: z.string().trim().min(1).max(500), state: z.string().trim().min(1).max(120), invoiceEmail: z.email().max(254),
+  }).strict(),
 }).partial().strict().openapi('StudioPatch')
 
 export const Usage = z.object({
@@ -124,6 +130,7 @@ export const PhotoEvent = z.object({
   highlights: z.boolean(),
   plan: z.enum(['subscription', 'pack', 'trial']),
   coverPhotoId: z.string().optional(),
+  deletedAt: z.string().optional(),
 }).openapi('PhotoEvent')
 
 export const NewEventInput = z.object({
@@ -137,6 +144,7 @@ export const NewEventInput = z.object({
 }).strict().openapi('NewEventInput')
 
 export const EventPatch = z.object({
+  shortId: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{7}$/, 'The gallery code is 7 letters or digits'),
   name: z.string().trim().min(1).max(160),
   type: EventType,
   date: IsoDate,
@@ -195,7 +203,18 @@ export const Order = z.object({
   share: z.number(), status: z.enum(['paid', 'printing', 'refunded', 'pending', 'paid-direct']), at: z.string(),
   photoIds: z.array(z.string()).optional(), buyerEmail: z.string().optional(), method: z.enum(['upi', 'card', 'netbanking', 'international']).optional(),
   checkout: z.object({ provider: z.literal('razorpay'), orderId: z.string(), keyId: z.string(), amount: z.number(), currency: z.literal('INR') }).optional(),
+  shipping: z.object({ name: z.string(), phone: z.string(), line1: z.string(), line2: z.string().optional(), city: z.string(), state: z.string(), postal: z.string(), country: z.string().optional() }).optional(),
 }).openapi('Order')
+
+export const ShippingAddressInput = z.object({
+  name: z.string().trim().min(1).max(120), phone: z.string().trim().min(6).max(40), line1: z.string().trim().min(1).max(200), line2: z.string().max(200).optional(),
+  city: z.string().trim().min(1).max(120), state: z.string().trim().min(1).max(120), postal: z.string().trim().min(3).max(12), country: z.string().max(60).optional(),
+}).openapi('ShippingAddress')
+
+export const AbandonedCart = z.object({
+  orderId: Id, number: z.number().int(), buyer: z.string(), buyerEmail: z.string().optional(), eventId: Id, eventName: z.string(), items: z.string(),
+  amount: z.number(), startedAt: z.string(), reminders: z.number().int(), remindedAt: z.string().optional(),
+}).openapi('AbandonedCart')
 
 export const LedgerEntry = z.object({
   id: Id, at: z.string(), description: z.string(),
@@ -289,7 +308,7 @@ export const Purchase = z.object({
 }).openapi('Purchase')
 
 const Address = z.object({ street: z.string().max(200), city: z.string().max(120), state: z.string().max(120), postal: z.string().max(12) })
-const KycDocument = z.object({ kind: z.enum(['pan', 'id', 'gst', 'cheque']), status: z.enum(['verified', 'review', 'needed']), fileName: z.string().max(255) })
+const KycDocument = z.object({ kind: z.enum(['pan', 'id', 'gst', 'cheque']), status: z.enum(['verified', 'review', 'needed']), fileName: z.string().max(255), assetId: z.string().max(64).optional() })
 const SaleWatermark = z.object({
   template: z.enum(['forsale', 'centre']), text: z.string().max(80), orientation: z.enum(['diagonal', 'vertical', 'horizontal']),
   size: z.number().min(0).max(10), opacity: z.number().int().min(0).max(100), color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a hex colour like #FFFFFF'),
@@ -382,3 +401,16 @@ export const GuestLinkPayload = z.object({
 }).openapi('GuestLinkPayload')
 
 export const LedgerEntrySchema = LedgerEntry
+
+// ── Added with contract v3 ──────────────────────────────────────────────────
+export const AssetKind = z.enum(['studio-logo', 'studio-cover', 'event-cover', 'watermark-logo', 'broadcast-image', 'qr-logo', 'testimonial-photo', 'kyc-document'])
+export const Asset = z.object({
+  id: Id, kind: AssetKind, url: z.string(), contentType: z.string(), size: z.number().int(), fileName: z.string(), createdAt: z.string(),
+}).openapi('Asset')
+
+export const PublicWatermark = z.object({ enabled: z.boolean(), settings: WatermarkSettings }).openapi('PublicWatermark')
+export const DownloadAllowance = z.object({ remaining: z.number().int(), limit: z.number().int() }).openapi('DownloadAllowance')
+export const PublicEventSummary = z.object({
+  id: Id, shortId: z.string(), name: z.string(), type: EventType, date: z.string(), city: z.string(), coverTones: z.tuple([Tone, Tone, Tone]),
+  photoCount: z.number().int(), studioName: z.string(), lastOpenedAt: z.string(),
+}).openapi('PublicEventSummary')

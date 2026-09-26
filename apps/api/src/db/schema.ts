@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import type {
-  EventHost, EventSettings, Exif, GuestLinkPayload, NotificationPrefs, StoreSettings, StudioAppConfig, StudioFaq, StudioService,
+  EventHost, EventSettings, Exif, GuestLinkPayload, ShippingAddress, StudioBilling, NotificationPrefs, StoreSettings, StudioAppConfig, StudioFaq, StudioService,
   StudioTestimonial, SocialLink, Tone, WatermarkSettings, WebsiteSection,
 } from '@frameline/shared'
 
@@ -93,6 +93,7 @@ export const studios = sqliteTable('studios', {
   followers: integer('followers').notNull().default(0),
   couponsRedeemed: json<string[]>('coupons_redeemed').notNull().default(sql`'[]'`),
   storeSettings: json<StoreSettings>('store_settings'),
+  billing: json<StudioBilling>('billing'),
 }, (t) => [uniqueIndex('studios_handle_uq').on(t.handle), uniqueIndex('studios_follow_uq').on(t.followCode)])
 
 export const memberships = sqliteTable('memberships', {
@@ -142,6 +143,7 @@ export const events = sqliteTable('events', {
   hosts: json<EventHost[]>('hosts').notNull().default(sql`'[]'`),
   highlights: bool('highlights').notNull().default(true),
   plan: text('plan', { enum: ['subscription', 'pack', 'trial'] }).notNull().default('subscription'),
+  deletedAt: ts('deleted_at'),
 }, (t) => [uniqueIndex('events_short_uq').on(t.shortId), index('events_studio_idx').on(t.studioId, t.createdAt)])
 
 export const albums = sqliteTable('albums', {
@@ -301,6 +303,10 @@ export const orders = sqliteTable('orders', {
   photoIds: json<string[]>('photo_ids'),
   buyerEmail: text('buyer_email'),
   method: text('method', { enum: ['upi', 'card', 'netbanking', 'international'] }),
+  guestId: text('guest_id'),
+  shipping: json<ShippingAddress>('shipping'),
+  remindedAt: ts('reminded_at'),
+  reminderCount: integer('reminder_count').notNull().default(0),
   at: ts('at').notNull(),
 }, (t) => [index('orders_studio_idx').on(t.studioId, t.at), uniqueIndex('orders_number_uq').on(t.studioId, t.number)])
 
@@ -504,7 +510,7 @@ export const studioFollows = sqliteTable('studio_follows', {
   studioId: text('studio_id').notNull(),
   followerKey: text('follower_key').notNull(),
   at: ts('at').notNull(),
-}, (t) => [primaryKey({ columns: [t.studioId, t.followerKey] })])
+}, (t) => [primaryKey({ columns: [t.studioId, t.followerKey] }), index('follows_key_idx').on(t.followerKey)])
 
 export const renewalLinks = sqliteTable('renewal_links', {
   id: text('id').primaryKey(),
@@ -515,3 +521,31 @@ export const renewalLinks = sqliteTable('renewal_links', {
   expiresAt: ts('expires_at').notNull(),
   paidAt: ts('paid_at'),
 })
+
+// ── Added in 0002 ───────────────────────────────────────────────────────────
+export const assets = sqliteTable('assets', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  kind: text('kind').notNull(),
+  key: text('key').notNull(),
+  contentType: text('content_type').notNull(),
+  size: integer('size').notNull(),
+  fileName: text('file_name').notNull(),
+  createdBy: text('created_by'),
+  createdAt: ts('created_at').notNull(),
+}, (t) => [index('assets_studio_idx').on(t.studioId, t.kind)])
+
+/** "Download all" uses per guest identity per event. */
+export const downloadUses = sqliteTable('download_uses', {
+  eventId: text('event_id').notNull(),
+  guestKey: text('guest_key').notNull(),
+  count: integer('count').notNull().default(0),
+  updatedAt: ts('updated_at').notNull(),
+}, (t) => [primaryKey({ columns: [t.eventId, t.guestKey] })])
+
+/** Galleries a guest identity (device id or guest id) has opened. */
+export const guestGalleries = sqliteTable('guest_galleries', {
+  guestKey: text('guest_key').notNull(),
+  eventId: text('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  lastOpenedAt: ts('last_opened_at').notNull(),
+}, (t) => [primaryKey({ columns: [t.guestKey, t.eventId] }), index('guest_galleries_key_idx').on(t.guestKey, t.lastOpenedAt)])

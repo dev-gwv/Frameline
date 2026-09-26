@@ -153,3 +153,34 @@ describe('createHttpApi guest side', () => {
     expect((await api.getStudioProfile('FA-KCGWHY')).studio.name).toBe('Northlight Studio')
   })
 })
+
+describe('createHttpApi contract v3', () => {
+  it('uploads guest photos and assets, counts downloads per device, and restores trashed events', async () => {
+    const device = `dev-${crypto.randomUUID()}`
+    const tokens = memoryTokenStore({ accessToken: await tokenFor('editor'), refreshToken: 'x'.repeat(43) })
+    const ip = freshIp()
+    const api = createHttpApi({
+      baseUrl: BASE, tokens, guestDeviceId: () => device,
+      fetch: (input, init) => { const req = new Request(input as RequestInfo, init); req.headers.set('cf-connecting-ip', ip); return SELF.fetch(req) },
+    })
+    await api.verifyPin('6402F9F', '5211')
+    const file = { filename: 'guest.jpg', size: 64, blob: new Blob([new Uint8Array(64).fill(1)], { type: 'image/jpeg' }) } as HttpUploadFile
+    const [p] = await api.uploadGuestPhotos('6402F9F', [file], { uploadedBy: 'Cousin' })
+    expect(p).toMatchObject({ source: 'guest', reviewStatus: 'pending', uploadedBy: 'Cousin' })
+    expect(await api.verifyDownloadPin('3F9E21D', '5211')).toEqual({ remaining: 4, limit: 5 })
+    await api.getPublicEvent('3f9e21d')
+    expect((await api.listMyGalleries()).map((g) => g.shortId)).toContain('3F9E21D')
+    expect((await api.listPublicPrices('6402F9F')).length).toBeGreaterThan(0)
+    expect((await api.getPublicWatermark('6402F9F')).enabled).toBe(true)
+    expect(await api.getPhotoDownloadUrl(p.id, { shortId: '6402F9F' })).toBeNull()
+
+    const asset = await api.uploadAsset('qr-logo', { filename: 'qr.png', blob: new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }) })
+    expect(asset.url).toContain('/v1/media/studios/st_northlight/assets/qr-logo/')
+
+    const ev = await api.createEvent({ name: 'Client trash', date: '2026-12-01', city: 'Goa', type: 'other', preset: 'open-corporate', guestUploadLimit: 0 })
+    await api.deleteEvent(ev.id)
+    expect((await api.listDeletedEvents()).map((e) => e.id)).toContain(ev.id)
+    expect((await api.restoreEvent(ev.id)).id).toBe(ev.id)
+    expect((await api.matchFaceForLink('ev_riya', { key: 'k' })).personId).toEqual(expect.any(String))
+  })
+})

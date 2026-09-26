@@ -39,6 +39,8 @@ export interface Env {
   RESEND_API_KEY?: string
   GOOGLE_CLIENT_ID?: string
   GOOGLE_CLIENT_SECRET?: string
+  /** Comma-separated absolute redirect URIs native apps may use for Google sign-in (default frameline://sign-in). */
+  GOOGLE_NATIVE_REDIRECTS?: string
   R2_ACCESS_KEY_ID?: string
   R2_SECRET_ACCESS_KEY?: string
   PROCESSOR_TOKEN?: string
@@ -49,7 +51,7 @@ export interface Env {
 
 export interface AuthUser { id: string; email: string; name: string; familyId?: string }
 
-export interface GuestClaims { eventId: string; guestId?: string; studioId: string; /** May browse every photo (typed PIN / VIP). */ all?: boolean }
+export interface GuestClaims { eventId: string; guestId?: string; studioId: string; /** May browse every photo (typed PIN / VIP). */ all?: boolean; /** PIN embedded in a VIP link. */ vp?: boolean }
 
 /** Per-request context variables. */
 export interface Variables {

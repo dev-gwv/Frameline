@@ -1,8 +1,9 @@
 import {
-  BASE_RENEWAL, COUPONS, ENHANCE_COST, PERIOD_DAYS, PLANS, PRESETS, RENEWAL_CREDIT_DISCOUNT, STORE_COMMISSION,
+  BASE_RENEWAL, COUPONS, ENHANCE_COST, PACKS, PERIOD_DAYS, PLANS, PRESETS, RENEWAL_CREDIT_DISCOUNT, STORE_COMMISSION,
   createSeed, defaultSettings, generatePhotos, hash, planPrice, tone, type SeedState,
 } from './seed'
 import type {
+  AbandonedCart, Asset, AssetKind, DownloadAllowance, PublicEventSummary, PublicWatermark, ShippingAddress,
   Album, Broadcast, Camera, CameraUpload, Enquiry, EventSettings, EventType, Film, Guest, GuestSession, ID, LedgerEntry,
   NotificationPrefs, Order, OrderItemInput, PaymentMethod, Photo, PhotoEvent, Plan, PresetId, Price, PublicEvent, PublicStudio,
   Purchase, SmartQR, StoreSettings, StoreSettingsPatch, Studio, StudioProfile, TeamMember, Ticket, Usage, UsageBreakdown,
@@ -85,7 +86,33 @@ export interface EnquiryInput { name: string; phone: string; email: string; mess
 /** Where an enquiry goes: from an event gallery, or straight to a studio (handle or follow code). */
 export type EnquiryTarget = { shortId: string } | { studio: string }
 
-export interface OrderInput { items: OrderItemInput[]; method: PaymentMethod; buyer: { name: string; email: string; phone?: string } }
+export interface OrderInput {
+  items: OrderItemInput[]
+  method: PaymentMethod
+  buyer: { name: string; email: string; phone?: string }
+  /** Required when any item is a print (price id starting with "print"). */
+  shipping?: ShippingAddress
+}
+
+/** Razorpay Checkout's success payload (razorpay_order_id, razorpay_payment_id, razorpay_signature). */
+export interface OrderPayment { providerOrderId: string; paymentId: string; signature: string }
+
+export interface PackPurchase { event: PhotoEvent; charged: number; purchase: Purchase }
+
+/** A file for uploadAsset: web passes a Blob/File, React Native a file uri. */
+export interface AssetFile { filename: string; contentType?: string; size?: number; blob?: Blob; uri?: string }
+
+/** Allowed types and sizes per asset kind (the server enforces the same). */
+export const ASSET_RULES: Record<AssetKind, { types: string[]; maxBytes: number }> = (() => {
+  const images = { types: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], maxBytes: 10 * 1024 * 1024 }
+  return {
+    'studio-logo': images, 'studio-cover': images, 'event-cover': images, 'watermark-logo': { types: ['image/png', 'image/webp', 'image/jpeg'], maxBytes: images.maxBytes },
+    'broadcast-image': images, 'qr-logo': images, 'testimonial-photo': images,
+    'kyc-document': { types: ['application/pdf', 'image/jpeg', 'image/png'], maxBytes: 10 * 1024 * 1024 },
+  }
+})()
+
+export const DOWNLOAD_ALL_LIMIT = 5
 
 export type MemberPatch = { role?: TeamMember['role']; eventIds?: ID[] }
 export type CameraPatch = Partial<Pick<Camera, 'label' | 'eventId' | 'albumId' | 'mode'>>
@@ -219,6 +246,38 @@ export interface FramelineApi {
   getStudioProfile(followCode: string): Promise<StudioProfile>
   followStudio(followCode: string): Promise<{ followers: number }>
   resolveGuestLink(code: string): Promise<ResolvedGuestLink>
+
+  // ── Added in contract v3 ─────────────────────────────────────────────────
+  /** Events in the trash (deleteEvent soft-deletes; purged after 30 days). */
+  listDeletedEvents(): Promise<PhotoEvent[]>
+  restoreEvent(id: ID): Promise<PhotoEvent>
+  /** Adds a photo pack (see PACKS) to one event: raises its photoLimit and records a 'pack' purchase. */
+  buyPack(eventId: ID, photos: number, opts: { payWith: 'credits' | 'card' }): Promise<PackPurchase>
+  /** Studio-side face lookup (e.g. building a personal link from an uploaded photo). */
+  matchFaceForLink(eventId: ID, selfie: FaceSearchInput): Promise<FaceSearchResult>
+  /** Uploads a logo / cover / broadcast image / QR logo / KYC document; returns a URL for the matching field. */
+  uploadAsset(kind: AssetKind, file: AssetFile): Promise<Asset>
+  listCarts(): Promise<AbandonedCart[]>
+  remindCarts(orderIds: ID[]): Promise<{ reminded: number }>
+
+  listPublicPrices(shortId: string): Promise<Price[]>
+  getPublicWatermark(shortId: string): Promise<PublicWatermark>
+  /** Guest uploads into the event's "Guest uploads" album (needs settings.guestUploads; counts against guestUploadLimit). */
+  uploadGuestPhotos(shortId: string, files: UploadFile[], opts?: { uploadedBy?: string }): Promise<Photo[]>
+  /** Emailed ZIP for a guest, following the event's download policy. */
+  requestPublicZip(shortId: string, email: string, opts?: { photoIds?: ID[]; albumId?: ID; personId?: ID }): Promise<ZipRequest>
+  /** Checks the download PIN (works on galleries without a PIN gate) and uses one of the guest's DOWNLOAD_ALL_LIMIT "Download all" uses. */
+  verifyDownloadPin(shortId: string, pin?: string): Promise<DownloadAllowance>
+  listMyFavourites(shortId: string): Promise<Photo[]>
+  listMyOrders(shortId: string): Promise<Order[]>
+  /** Completes a pending order after Razorpay Checkout succeeds. */
+  confirmOrder(orderId: ID, payment: OrderPayment): Promise<Order>
+  requestAccess(shortId: string, input: { name: string; email: string; note?: string }): Promise<{ received: true }>
+  unfollowStudio(followCode: string): Promise<{ followers: number }>
+  listFollowedStudios(): Promise<PublicStudio[]>
+  listMyGalleries(): Promise<PublicEventSummary[]>
+  /** A downloadable (watermarked) rendition, or null when none exists yet. */
+  getPhotoDownloadUrl(photoId: ID, opts?: { size?: 2048 | 3072; shortId?: string }): Promise<string | null>
 }
 
 export interface Persistence { load(): string | null; save(data: string): void }
@@ -229,7 +288,22 @@ interface MockExtra {
   usageReport: UsageReport | null
   /** eventId → guest id registered on this device. */
   guestIds: Record<ID, ID>
+  /** Events whose PIN this device typed (or got from a VIP link). */
+  pinVerified: ID[]
+  /** Events whose PIN came embedded in a VIP link (Download all needs no PIN). */
+  vipPin: ID[]
+  downloadUses: Record<ID, number>
+  followed: ID[]
+  /** eventId → last opened. */
+  recent: Record<ID, string>
+  myOrders: ID[]
+  cartReminders: Record<ID, { count: number; at: string }>
+  assets: Asset[]
 }
+
+const EXTRA_DEFAULTS = (): MockExtra => ({
+  coupons: [], usageReport: null, guestIds: {}, pinVerified: [], vipPin: [], downloadUses: {}, followed: [], recent: {}, myOrders: [], cartReminders: {}, assets: [],
+})
 
 interface Stored { seed: SeedState; photoPatches: Record<ID, Partial<Photo>>; deleted: ID[]; added: Photo[]; extra: MockExtra }
 
@@ -258,7 +332,7 @@ function upgrade(stored: Partial<Stored>): Stored {
     photoPatches: stored.photoPatches ?? {},
     deleted: stored.deleted ?? [],
     added: stored.added ?? [],
-    extra: { coupons: [], usageReport: null, guestIds: {}, ...(stored.extra ?? {}) },
+    extra: { ...EXTRA_DEFAULTS(), ...(stored.extra ?? {}) },
   }
 }
 
@@ -288,10 +362,33 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
   const save = () => { try { persist?.save(JSON.stringify(state, dropBlobUrls)) } catch { /* storage full or unavailable */ } }
   const emit = (...topics: ChangeTopic[]) => { invalidate(); save(); new Set(topics).forEach((t) => listeners.forEach((l) => l(t))) }
   const s = () => state.seed
-  const findEvent = (id: ID) => {
-    const e = s().events.find((x) => x.id === id || x.shortId.toLowerCase() === id.toLowerCase())
+  const findEvent = (id: ID, opts: { includeDeleted?: boolean } = {}) => {
+    const e = s().events.find((x) => (x.id === id || x.shortId.toLowerCase() === id.toLowerCase()) && (opts.includeDeleted || !x.deletedAt))
     if (!e) fail(404, 'not_found', `Event ${id} was not found.`)
     return e!
+  }
+  // Empty the trash of anything deleted more than 30 days ago.
+  {
+    const cutoff = Date.now() - 30 * DAY
+    const purged = new Set(s().events.filter((e) => e.deletedAt && Date.parse(e.deletedAt) < cutoff).map((e) => e.id))
+    if (purged.size) {
+      s().events = s().events.filter((e) => !purged.has(e.id))
+      s().albums = s().albums.filter((a) => !purged.has(a.eventId))
+      state.added = state.added.filter((p) => !purged.has(p.eventId))
+    }
+  }
+  /** Due Smart QR switches (the real API runs these from a Cron Trigger). */
+  const applyQrSchedules = () => {
+    let changed = false
+    for (const q of s().qrs) {
+      if (q.scheduledEventId && q.scheduledAt && Date.parse(q.scheduledAt) <= Date.now()) {
+        q.eventId = q.scheduledEventId
+        delete q.scheduledEventId
+        delete q.scheduledAt
+        changed = true
+      }
+    }
+    if (changed) emit('misc')
   }
   const findAlbum = (id: ID) => { const a = s().albums.find((x) => x.id === id); if (!a) fail(404, 'not_found', `Album ${id} was not found.`); return a! }
   const byId = <T extends { id: ID }>(list: T[], id: ID, what: string): T => { const x = list.find((i) => i.id === id); if (!x) fail(404, 'not_found', `${what} ${id} was not found.`); return x! }
@@ -480,7 +577,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     async getUsageReport() { await wait(latency / 2); return clone(state.extra.usageReport) },
 
     // ── Events ──────────────────────────────────────────────────────────────
-    async listEvents() { await wait(latency); return clone(s().events) },
+    async listEvents() { await wait(latency); return clone(s().events.filter((e) => !e.deletedAt)) },
     async getEvent(id) { await wait(latency); return clone(findEvent(id)) },
     async createEvent(input) {
       await wait(latency)
@@ -501,14 +598,24 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       emit('events', 'albums')
       return clone(event)
     },
-    async updateEvent(id, patch) { await wait(latency); Object.assign(findEvent(id), patch); emit('events'); return clone(findEvent(id)) },
+    async updateEvent(id, patch) {
+      await wait(latency)
+      const e = findEvent(id)
+      if (patch.shortId !== undefined && patch.shortId.toUpperCase() !== e.shortId) {
+        const next = patch.shortId.toUpperCase()
+        if (!/^[A-Z0-9]{7}$/.test(next)) fail(422, 'validation_failed', 'The gallery code is 7 letters or digits.', { errors: [{ field: 'shortId', in: 'body', message: 'Use 7 letters or digits', code: 'invalid_string' }] })
+        if (s().events.some((x) => x.id !== e.id && x.shortId === next)) fail(409, 'short_id_taken', `The gallery code ${next} is already used. Try another.`)
+        patch = { ...patch, shortId: next }
+      }
+      Object.assign(e, patch)
+      emit('events')
+      return clone(e)
+    },
     async updateEventSettings(id, patch) { await wait(latency / 2); Object.assign(findEvent(id).settings, patch); emit('events'); return clone(findEvent(id)) },
     async resetPin(id) { await wait(latency); const pin = String(1000 + Math.floor(Math.random() * 9000)); findEvent(id).settings.pin = pin; emit('events'); return pin },
     async deleteEvent(id) {
       await wait(latency)
-      s().events = s().events.filter((e) => e.id !== id)
-      s().albums = s().albums.filter((a) => a.eventId !== id)
-      state.added = state.added.filter((p) => p.eventId !== id)
+      findEvent(id).deletedAt = new Date().toISOString()
       emit('events', 'albums', 'photos')
     },
     async renewEvent(eventId, { payWith }) {
@@ -819,7 +926,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     async resetCameraPassword(id) { await wait(latency); const c = byId(s().cameras, id, 'Camera'); emit('misc'); return { ...clone(c), password: randomPassword() } },
     async listCameraUploads(cameraId) { await wait(latency); return clone(s().cameraUploads.filter((u) => u.cameraId === cameraId).sort((a, b) => b.at.localeCompare(a.at))) },
     async clearCameraUploads(cameraId) { await wait(latency); s().cameraUploads = s().cameraUploads.filter((u) => u.cameraId !== cameraId); emit('misc') },
-    async listQRs() { await wait(latency); return clone(s().qrs) },
+    async listQRs() { await wait(latency); applyQrSchedules(); return clone(s().qrs) },
     async updateQR(id, patch) { await wait(latency); const q = byId(s().qrs, id, 'QR code'); const { id: _id, scans: _sc, ...rest } = patch; Object.assign(q, rest); emit('misc'); return clone(q) },
     async createQR(name, eventId) {
       await wait(latency)
@@ -898,6 +1005,8 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     async getPublicEvent(shortId) {
       await wait(latency)
       const e = findEvent(shortId)
+      state.extra.recent[e.id] = new Date().toISOString()
+      save()
       const { pin: _pin, ...settings } = e.settings
       const cover = e.coverPhotoId ? getPhotoMerged(e.coverPhotoId) : undefined
       return clone({
@@ -921,6 +1030,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
         fail(401, 'invalid_pin', `That PIN is wrong. ${5 - t.count} ${5 - t.count === 1 ? 'try' : 'tries'} left.`, { attemptsRemaining: 5 - t.count })
       }
       pinTries.delete(e.id)
+      if (!state.extra.pinVerified.includes(e.id)) { state.extra.pinVerified.push(e.id); save() }
       return session(e, true, state.extra.guestIds[e.id])
     },
     async registerGuest(shortId, input) {
@@ -938,7 +1048,9 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       }
       state.extra.guestIds[e.id] = g.id
       emit('guests', 'activity')
-      return { ...session(e, e.settings.access !== 'link-pin' && !e.settings.facePrivacy, g.id), guest: clone(g) }
+      // Same rule as the server: a typed PIN keeps "see all"; otherwise only galleries without face privacy.
+      const seeAll = state.extra.pinVerified.includes(e.id) || !e.settings.facePrivacy || !e.settings.faceSearch
+      return { ...session(e, seeAll, g.id), guest: clone(g) }
     },
     async listPublicPhotos(shortId, q = {}) {
       await wait(latency)
@@ -1001,6 +1113,9 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       const e = findEvent(shortId)
       if (!e.settings.storeEnabled) fail(409, 'store_disabled', 'This gallery isn’t selling photos.')
       if (!input.items.length) fail(422, 'validation_failed', 'Add something to buy.')
+      if (input.items.some((i) => i.priceId.startsWith('print')) && !input.shipping) {
+        fail(422, 'validation_failed', 'Add a delivery address for prints.', { errors: [{ field: 'shipping', in: 'body', message: 'Add a delivery address for prints', code: 'required' }] })
+      }
       let paid = 0
       const labels: string[] = []
       const photoIds = new Set<ID>()
@@ -1018,9 +1133,10 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       const order: Order = {
         id: uid('o'), number, buyer: input.buyer.name, eventId: e.id, eventName: e.name, items: labels.join(', '), paid: round2(paid),
         currency: 'INR', share, status: input.method === 'international' ? 'paid-direct' : 'paid', at,
-        photoIds: [...photoIds], buyerEmail: input.buyer.email, method: input.method,
+        photoIds: [...photoIds], buyerEmail: input.buyer.email, method: input.method, ...(input.shipping ? { shipping: input.shipping } : {}),
       }
       s().orders.unshift(order)
+      state.extra.myOrders.push(order.id)
       ledger('sale', `Order #${number} · ${e.name}`, share, true)
       s().activity.unshift({ id: uid('a'), kind: 'order', title: `Order #${number} · ₹${order.paid.toLocaleString('en-IN')}`, detail: e.name, at })
       emit('misc', 'activity')
@@ -1047,7 +1163,12 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
         featured,
       })
     },
-    async followStudio(followCode) { await wait(latency); const st = studioFor(followCode); st.followers++; emit('studio'); return { followers: st.followers } },
+    async followStudio(followCode) {
+      await wait(latency)
+      const st = studioFor(followCode)
+      if (!state.extra.followed.includes(st.id)) { state.extra.followed.push(st.id); st.followers++; emit('studio') }
+      return { followers: st.followers }
+    },
     async resolveGuestLink(code) {
       await wait(latency / 2)
       const payload = decodeGuestLink(code)
@@ -1055,8 +1176,175 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       const kind = guestLinkKind(payload!)
       const e = findEvent(payload!.e)
       const vip = kind === 'v' ? payload!.vip : undefined
+      if (vip?.pin) {
+        if (!state.extra.pinVerified.includes(e.id)) state.extra.pinVerified.push(e.id)
+        if (!state.extra.vipPin.includes(e.id)) state.extra.vipPin.push(e.id)
+        save()
+      }
       return { kind, payload: payload!, ...(vip?.pin || vip?.all ? { session: session(e, !!vip.all || !e.settings.facePrivacy, state.extra.guestIds[e.id]) } : {}) }
     },
+
+    // ── Contract v3 ─────────────────────────────────────────────────────────
+    async listDeletedEvents() { await wait(latency); return clone(s().events.filter((e) => e.deletedAt)) },
+    async restoreEvent(id) {
+      await wait(latency)
+      const e = findEvent(id, { includeDeleted: true })
+      delete e.deletedAt
+      emit('events', 'albums', 'photos')
+      return clone(e)
+    },
+    async buyPack(eventId, photos, { payWith }) {
+      await wait(latency)
+      const e = findEvent(eventId)
+      const pack = PACKS.find((p) => p.photos === photos)
+      if (!pack) fail(422, 'validation_failed', `Packs come in ${PACKS.map((p) => p.photos).join(', ')} photos.`)
+      if (payWith === 'credits') debitWallet(pack!.price, `${pack!.photos.toLocaleString('en-IN')}-photo pack · ${e.name}`)
+      const p = purchase({ description: `${pack!.photos.toLocaleString('en-IN')}-photo pack · ${e.name}`, kind: 'pack', amount: pack!.price, method: payWith === 'credits' ? 'credits' : 'card' })
+      e.photoLimit += pack!.photos
+      emit('events', 'usage', 'misc')
+      return { event: clone(e), charged: pack!.price, purchase: clone(p) }
+    },
+    async matchFaceForLink(eventId, selfie) {
+      const e = findEvent(eventId)
+      return api.searchFaces(e.shortId, selfie)
+    },
+    async uploadAsset(kind, file) {
+      await wait(latency)
+      const rule = ASSET_RULES[kind]
+      if (!rule) fail(422, 'validation_failed', `Unknown asset kind ${kind}.`)
+      const type = file.contentType ?? file.blob?.type ?? ''
+      const size = file.size ?? file.blob?.size ?? 0
+      if (!rule.types.includes(type)) fail(415, 'unsupported_media_type', `Upload a ${rule.types.map((t) => t.split('/')[1].toUpperCase()).join(', ')} file.`)
+      if (size > rule.maxBytes) fail(413, 'payload_too_large', `Files can be up to ${Math.round(rule.maxBytes / 1024 / 1024)} MB.`)
+      let url = file.uri ?? ''
+      if (file.blob) {
+        // Small files become data URLs so they survive a reload; big ones stay session-only object URLs.
+        if (file.blob.size <= 1024 * 1024) {
+          const bytes = new Uint8Array(await file.blob.arrayBuffer())
+          let bin = ''
+          bytes.forEach((b) => { bin += String.fromCharCode(b) })
+          url = `data:${type};base64,${btoa(bin)}`
+        } else if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+          url = URL.createObjectURL(file.blob)
+        }
+      }
+      const asset: Asset = { id: uid('as'), kind, url, contentType: type, size, fileName: file.filename, createdAt: new Date().toISOString() }
+      state.extra.assets.push({ ...asset, url: url.startsWith('blob:') ? '' : url })
+      save()
+      return asset
+    },
+    async listCarts() {
+      await wait(latency)
+      const cutoff = Date.now() - 30 * 60_000
+      return clone(s().orders.filter((o) => o.status === 'pending' && Date.parse(o.at) < cutoff).map((o): AbandonedCart => {
+        const r = state.extra.cartReminders[o.id]
+        return {
+          orderId: o.id, number: o.number, buyer: o.buyer, buyerEmail: o.buyerEmail, eventId: o.eventId, eventName: o.eventName, items: o.items,
+          amount: o.paid, startedAt: o.at, reminders: r?.count ?? 0, ...(r ? { remindedAt: r.at } : {}),
+        }
+      }))
+    },
+    async remindCarts(orderIds) {
+      await wait(latency)
+      let reminded = 0
+      for (const id of orderIds) {
+        const o = s().orders.find((x) => x.id === id && x.status === 'pending')
+        if (!o) continue
+        const r = state.extra.cartReminders[id] ?? { count: 0, at: '' }
+        state.extra.cartReminders[id] = { count: r.count + 1, at: new Date().toISOString() }
+        reminded++
+      }
+      emit('misc')
+      return { reminded }
+    },
+
+    async listPublicPrices(shortId) { await wait(latency); findEvent(shortId); return clone(s().prices) },
+    async getPublicWatermark(shortId) { await wait(latency); const e = findEvent(shortId); return { enabled: !e.settings.watermarkOff, settings: clone(s().watermark) } },
+    async uploadGuestPhotos(shortId, files, o = {}) {
+      const e = findEvent(shortId)
+      if (!e.settings.guestUploads) fail(403, 'guest_uploads_disabled', 'This gallery doesn’t take guest uploads.')
+      const album = s().albums.find((a) => a.eventId === e.id && a.kind === 'guest')
+      if (!album) fail(409, 'no_guest_album', 'This gallery has no guest uploads album.')
+      const used = albumPhotos(album!).length
+      if (used + files.length > e.settings.guestUploadLimit) {
+        fail(409, 'guest_upload_limit', `This gallery takes ${e.settings.guestUploadLimit} guest photos and has room for ${Math.max(0, e.settings.guestUploadLimit - used)} more.`, { remaining: Math.max(0, e.settings.guestUploadLimit - used) })
+      }
+      const g = s().guests.find((x) => x.id === state.extra.guestIds[e.id])
+      return api.uploadPhotos(e.id, album!.id, files, { quality: 'web', source: 'guest', uploadedBy: o.uploadedBy ?? g?.name ?? 'Guest', watermark: e.settings.watermarkGuestUploads })
+    },
+    async requestPublicZip(shortId, email, o = {}) {
+      await wait(latency)
+      const e = findEvent(shortId)
+      if (e.settings.downloads === 'none') fail(403, 'downloads_disabled', 'Downloads are turned off for this gallery.')
+      if (e.settings.downloads === 'own' && !o.photoIds?.length) fail(403, 'downloads_own_only', 'You can download only the photos you’re in. Find yours with a selfie first.')
+      return api.requestZip(e.id, email, { albumId: o.albumId, photoIds: o.photoIds })
+    },
+    async verifyDownloadPin(shortId, pin) {
+      await wait(latency)
+      const e = findEvent(shortId)
+      if (pin === undefined || pin === '') {
+        if (!state.extra.vipPin.includes(e.id)) fail(401, 'pin_required', 'Enter the gallery PIN to download everything.')
+      } else if (pin.trim() !== e.settings.pin) fail(401, 'invalid_pin', 'That PIN is wrong.')
+      const used = state.extra.downloadUses[e.id] ?? 0
+      if (used >= DOWNLOAD_ALL_LIMIT) fail(429, 'download_limit', `“Download all” can be used ${DOWNLOAD_ALL_LIMIT} times per guest. Download single photos instead.`, { remaining: 0 })
+      state.extra.downloadUses[e.id] = used + 1
+      save()
+      return { remaining: DOWNLOAD_ALL_LIMIT - used - 1, limit: DOWNLOAD_ALL_LIMIT }
+    },
+    async listMyFavourites(shortId) {
+      await wait(latency)
+      const e = findEvent(shortId)
+      const g = s().guests.find((x) => x.id === state.extra.guestIds[e.id])
+      if (!g) fail(401, 'registration_required', 'Register with your name and email to keep favourites.')
+      return clone(g!.favourites.map(getPhotoMerged).filter((p): p is Photo => !!p && visibleToGuests(p)))
+    },
+    async listMyOrders(shortId) {
+      await wait(latency)
+      const e = findEvent(shortId)
+      const g = s().guests.find((x) => x.id === state.extra.guestIds[e.id])
+      return clone(s().orders.filter((o) => o.eventId === e.id && (state.extra.myOrders.includes(o.id) || (!!g && o.buyerEmail?.toLowerCase() === g.email.toLowerCase()))))
+    },
+    async confirmOrder(orderId) {
+      await wait(latency)
+      const o = byId(s().orders, orderId, 'Order')
+      if (o.status === 'pending') {
+        o.status = 'paid'
+        delete o.checkout
+        ledger('sale', `Order #${o.number} · ${o.eventName}`, o.share, true)
+        s().activity.unshift({ id: uid('a'), kind: 'order', title: `Order #${o.number} · ₹${o.paid.toLocaleString('en-IN')}`, detail: o.eventName, at: new Date().toISOString() })
+        emit('misc', 'activity')
+      }
+      return clone(o)
+    },
+    async requestAccess(shortId, input) {
+      await wait(latency)
+      const e = findEvent(shortId)
+      if (!input.name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) fail(422, 'validation_failed', 'Enter your name and a valid email.')
+      s().accessRequests.unshift({ id: uid('ar'), eventId: e.id, name: input.name.trim(), email: input.email.trim().toLowerCase(), note: input.note ?? '', createdAt: new Date().toISOString() })
+      emit('guests')
+      return { received: true as const }
+    },
+    async unfollowStudio(followCode) {
+      await wait(latency)
+      const st = studioFor(followCode)
+      if (state.extra.followed.includes(st.id)) {
+        state.extra.followed = state.extra.followed.filter((id) => id !== st.id)
+        st.followers = Math.max(0, st.followers - 1)
+        emit('studio')
+      }
+      return { followers: st.followers }
+    },
+    async listFollowedStudios() { await wait(latency); return state.extra.followed.includes(s().studio.id) ? [clone(publicStudio())] : [] },
+    async listMyGalleries() {
+      await wait(latency)
+      return Object.entries(state.extra.recent)
+        .map(([id, at]) => ({ e: s().events.find((x) => x.id === id && !x.deletedAt), at }))
+        .filter((x): x is { e: PhotoEvent; at: string } => !!x.e)
+        .sort((a, b) => b.at.localeCompare(a.at))
+        .map(({ e, at }) => ({ id: e.id, shortId: e.shortId, name: e.name, type: e.type, date: e.date, city: e.city, coverTones: clone(e.coverTones), photoCount: e.photoCount, studioName: s().studio.name, lastOpenedAt: at }))
+    },
+    async getPhotoDownloadUrl(photoId) { await wait(latency / 2); return getPhotoMerged(photoId)?.url ?? null },
+
   }
   return api
 }

@@ -1,12 +1,12 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import type { Context } from 'hono'
-import { and, asc, count, desc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
-import { STORE_COMMISSION, hash } from '@frameline/shared'
+import { and, asc, count, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { DOWNLOAD_ALL_LIMIT, STORE_COMMISSION } from '@frameline/shared'
 import type { AppEnv, GuestClaims } from '../env'
 import { getDb, schema } from '../db/client'
-import { albumOut, enquiryOut, filmOut, orderOut, photoOut, publicStudioOut, studioOut } from '../db/mappers'
+import { albumOut, enquiryOut, filmOut, orderOut, photoOut, priceOut, publicStudioOut, studioOut, watermarkOut, zipOut } from '../db/mappers'
 import { sha256Hex, timingSafeEqual } from '../lib/crypto'
-import { AppError, Forbidden, NotFound, RateLimited, ServiceUnavailable, Unauthorized, ValidationFailed } from '../lib/errors'
+import { AppError, Forbidden, NotConfigured, NotFound, RateLimited, ServiceUnavailable, Unauthorized, ValidationFailed } from '../lib/errors'
 import { background, clientIp } from '../lib/http'
 import { newId, nowIso } from '../lib/ids'
 import { signJwt } from '../lib/jwt'
@@ -16,18 +16,24 @@ import { afterCursor, encodeCursor } from '../lib/pagination'
 import { guestFromRequest } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
 import { limits, storeFor } from '../middleware/rate-limit'
-import { Enquiry, GuestLinkPayload, GuestSession, Order, Photo, PublicEvent, StudioProfile } from '../schemas/domain'
+import {
+  DownloadAllowance, Enquiry, GuestLinkPayload, GuestSession, Order, Photo, Price, PublicEvent, PublicEventSummary, PublicStudio,
+  PublicWatermark, ShippingAddressInput, StudioProfile, ZipRequest,
+} from '../schemas/domain'
 import { addLedger } from '../services/billing'
+import { matchFaces, visiblePhotos as visible } from '../services/faces'
 import { resolveLink } from '../services/guest-links'
+import { markOrderPaid, verifyCheckoutSignature } from '../services/orders'
 import { emit } from '../services/realtime'
-import { vectorIndex } from '../services/vectors'
 import { chunk } from './photos'
+import { UploadFileInput, completeUploadSession, createUploadSession } from './uploads'
 
 /**
  * Guest-facing API. Guest tokens (JWT aud=guest) come from POST …/pin, …/register or a VIP link and carry
- * { sub: eventId, sid: studioId, gid?: guestId, all?: true }. Rules:
+ * { sub: eventId, sid: studioId, gid?: guestId, all?: true, vp?: true (PIN embedded in a VIP link) }. Rules:
  * - access 'link': no token needed; 'link-pin': a token for this event; 'registered': a token with a guest id
  * - face privacy on: browsing every photo needs `all` (typed PIN or VIP "all"); otherwise only your matched person
+ * Guest identity for follows / "my galleries" / download counts: X-Guest-Device (stable install id), else the guest id.
  */
 export const publicRoutes = createRouter()
 publicRoutes.use('*', limits.publicGallery)
@@ -36,16 +42,18 @@ const GUEST_TTL_SEC = 12 * 3600
 const PIN_MAX_TRIES = 5
 const PIN_LOCK_SEC = 900
 
-const ShortIdParam = z.object({ shortId: z.string().regex(/^[0-9A-Fa-f]{7}$/, 'Gallery codes are 7 characters').openapi({ param: { name: 'shortId', in: 'path' }, example: '6402F9F' }) })
+const ShortIdParam = z.object({ shortId: z.string().regex(/^[0-9A-Za-z]{7}$/, 'Gallery codes are 7 characters').openapi({ param: { name: 'shortId', in: 'path' }, example: '6402F9F' }) })
 const CodeParam = z.object({ code: z.string().min(3).max(64).openapi({ param: { name: 'code', in: 'path' }, example: 'FA-KCGWHY' }) })
+const PhotoIdParam = z.object({ photoId: z.string().max(128).openapi({ param: { name: 'photoId', in: 'path' } }) })
 
 type EventRow = typeof schema.events.$inferSelect
 type StudioRow = typeof schema.studios.$inferSelect
+type Claims = GuestClaims
 
 async function eventByShortId(c: Context<AppEnv>, shortId: string): Promise<{ e: EventRow; s: StudioRow }> {
   const [row] = await getDb(c.env.DB).select({ e: schema.events, s: schema.studios }).from(schema.events)
     .innerJoin(schema.studios, eq(schema.studios.id, schema.events.studioId))
-    .where(eq(schema.events.shortId, shortId.toUpperCase())).limit(1)
+    .where(and(eq(schema.events.shortId, shortId.toUpperCase()), isNull(schema.events.deletedAt))).limit(1)
   if (!row) throw new NotFound('Gallery', shortId.toUpperCase())
   return row
 }
@@ -61,9 +69,11 @@ async function openEvent(c: Context<AppEnv>, shortId: string) {
   return row
 }
 
+const readGuest = (c: Context<AppEnv>): Promise<Claims | null> => guestFromRequest(c)
+
 /** Checks the event's access rule against the (optional) guest token. */
-async function guestAccess(c: Context<AppEnv>, e: EventRow): Promise<GuestClaims | null> {
-  const g = await guestFromRequest(c)
+async function guestAccess(c: Context<AppEnv>, e: EventRow): Promise<Claims | null> {
+  const g = await readGuest(c)
   if (g && g.eventId !== e.id) throw new Forbidden('This gallery token belongs to a different event.', 'wrong_event')
   if (e.settings.access === 'link-pin' && !g) throw new Unauthorized('Enter the gallery PIN first.', 'pin_required')
   if (e.settings.access === 'registered' && !g?.guestId) throw new Unauthorized('Register with your name and email first.', 'registration_required')
@@ -71,17 +81,31 @@ async function guestAccess(c: Context<AppEnv>, e: EventRow): Promise<GuestClaims
   return g
 }
 
-async function issueGuestSession(c: Context<AppEnv>, e: EventRow, opts: { guestId?: string; seeAll: boolean }) {
-  const token = await signJwt(c.env.JWT_SECRET, { sub: e.id, aud: 'guest', sid: e.studioId, ...(opts.guestId ? { gid: opts.guestId } : {}), ...(opts.seeAll ? { all: true } : {}) }, GUEST_TTL_SEC)
+const DEVICE_RE = /^[A-Za-z0-9_-]{8,128}$/
+/** Stable guest identity: device id header, else registered guest id, else null. */
+function guestIdentity(c: Context<AppEnv>, g?: GuestClaims | null): string | null {
+  const device = c.req.header('x-guest-device')
+  if (device && DEVICE_RE.test(device)) return `device:${device}`
+  return g?.guestId ? `guest:${g.guestId}` : null
+}
+
+async function issueGuestSession(c: Context<AppEnv>, e: EventRow, opts: { guestId?: string; seeAll: boolean; vipPin?: boolean }) {
+  const token = await signJwt(c.env.JWT_SECRET, {
+    sub: e.id, aud: 'guest', sid: e.studioId, ...(opts.guestId ? { gid: opts.guestId } : {}), ...(opts.seeAll ? { all: true } : {}), ...(opts.vipPin ? { vp: true } : {}),
+  }, GUEST_TTL_SEC)
   return { token, expiresIn: GUEST_TTL_SEC, eventId: e.id, shortId: e.shortId, ...(opts.guestId ? { guestId: opts.guestId } : {}), seeAll: opts.seeAll }
 }
 
-const visible = (p = schema.photos): SQL => and(eq(p.hidden, false), eq(p.status, 'ready'), or(isNull(p.reviewStatus), eq(p.reviewStatus, 'approved')))!
+function rememberGallery(c: Context<AppEnv>, e: EventRow, key: string | null) {
+  if (!key) return
+  background(c, getDb(c.env.DB).insert(schema.guestGalleries).values({ guestKey: key, eventId: e.id, lastOpenedAt: nowIso() })
+    .onConflictDoUpdate({ target: [schema.guestGalleries.guestKey, schema.guestGalleries.eventId], set: { lastOpenedAt: nowIso() } }).run())
+}
 
 // ── Event landing ──────────────────────────────────────────────────────────
 publicRoutes.openapi(createRoute({
   method: 'get', path: '/events/{shortId}', tags: ['Public gallery'], summary: 'Gallery landing: event, albums, films, studio branding',
-  description: 'Always answers for a known code; `blocked` explains galleries that are turned off, archived, expired or still empty. The PIN is never included.',
+  description: 'Always answers for a known code; `blocked` explains galleries that are turned off, archived, expired or still empty. The PIN is never included. Records the gallery in the guest’s "my galleries" when an X-Guest-Device header (or guest token) is sent.',
   request: { params: ShortIdParam, query: z.object({ platform: z.enum(['web', 'android', 'ios']).default('web') }) },
   responses: { 200: json(PublicEvent), ...problems(404) },
 }), async (c) => {
@@ -89,6 +113,8 @@ publicRoutes.openapi(createRoute({
   const db = getDb(c.env.DB)
   const platform = c.req.valid('query').platform
   background(c, db.run(sql`UPDATE events SET visits = json_set(visits, ${'$.' + platform}, coalesce(json_extract(visits, ${'$.' + platform}), 0) + 1) WHERE id = ${e.id}`))
+  const g = await readGuest(c).catch(() => null)
+  rememberGallery(c, e, guestIdentity(c, g?.eventId === e.id ? g : null))
   const albums = await db.select().from(schema.albums).where(and(eq(schema.albums.eventId, e.id), sql`${schema.albums.kind} != 'store'`)).orderBy(asc(schema.albums.order))
   const films = await db.select().from(schema.films).where(eq(schema.films.eventId, e.id)).orderBy(asc(schema.films.createdAt))
   let coverUrl: string | undefined
@@ -106,6 +132,18 @@ publicRoutes.openapi(createRoute({
   }, 200)
 })
 
+async function checkPin(c: Context<AppEnv>, e: EventRow, pin: string) {
+  const key = `pin-fail:${clientIp(c)}:${e.id}`
+  const lock = await c.env.RATE_LIMITER.get(c.env.RATE_LIMITER.idFromName(key)).peek(PIN_MAX_TRIES, PIN_LOCK_SEC * 1000)
+  if (!lock.success) throw new RateLimited(lock.reset, 'Too many wrong PINs. Try again in 15 minutes, or ask the photographer.', 'pin_locked')
+  if (!timingSafeEqual(pin, e.settings.pin)) {
+    const d = await storeFor(c.env, { windowSec: PIN_LOCK_SEC }).hit(key, PIN_MAX_TRIES, PIN_LOCK_SEC)
+    const left = Math.max(0, d.remaining)
+    if (left === 0) throw new RateLimited(d.reset, 'Too many wrong PINs. Try again in 15 minutes, or ask the photographer.', 'pin_locked')
+    throw new Unauthorized(`That PIN is wrong. ${left} ${left === 1 ? 'try' : 'tries'} left.`, 'invalid_pin', { attemptsRemaining: left })
+  }
+}
+
 publicRoutes.openapi(createRoute({
   method: 'post', path: '/events/{shortId}/pin', tags: ['Public gallery'], summary: 'Check the gallery PIN and get a guest token',
   description: `${PIN_MAX_TRIES} wrong PINs lock this gallery for ${PIN_LOCK_SEC / 60} minutes (per device IP). A typed PIN lets the guest browse every photo.`,
@@ -113,19 +151,9 @@ publicRoutes.openapi(createRoute({
   responses: { 200: json(GuestSession), ...problems(401, 403, 404, 422) },
 }), async (c) => {
   const { e } = await openEvent(c, c.req.valid('param').shortId)
-  const existing = await guestFromRequest(c).catch(() => null)
+  const existing = await readGuest(c).catch(() => null)
   const guestId = existing?.eventId === e.id ? existing.guestId : undefined
-  if (e.settings.access !== 'link-pin') return c.json(await issueGuestSession(c, e, { guestId, seeAll: true }), 200)
-  const key = `pin-fail:${clientIp(c)}:${e.id}`
-  const store = storeFor(c.env, { windowSec: PIN_LOCK_SEC })
-  const lock = await c.env.RATE_LIMITER.get(c.env.RATE_LIMITER.idFromName(key)).peek(PIN_MAX_TRIES, PIN_LOCK_SEC * 1000)
-  if (!lock.success) throw new RateLimited(lock.reset, 'Too many wrong PINs. Try again in 15 minutes, or ask the photographer.', 'pin_locked')
-  if (!timingSafeEqual(c.req.valid('json').pin, e.settings.pin)) {
-    const d = await store.hit(key, PIN_MAX_TRIES, PIN_LOCK_SEC)
-    const left = Math.max(0, d.remaining)
-    if (left === 0) throw new RateLimited(d.reset, 'Too many wrong PINs. Try again in 15 minutes, or ask the photographer.', 'pin_locked')
-    throw new Unauthorized(`That PIN is wrong. ${left} ${left === 1 ? 'try' : 'tries'} left.`, 'invalid_pin', { attemptsRemaining: left })
-  }
+  if (e.settings.access === 'link-pin') await checkPin(c, e, c.req.valid('json').pin)
   return c.json(await issueGuestSession(c, e, { guestId, seeAll: true }), 200)
 })
 
@@ -141,7 +169,7 @@ publicRoutes.openapi(createRoute({
   responses: { 200: json(GuestSession.extend({ guest: GuestOut })), ...problems(401, 403, 404, 422) },
 }), async (c) => {
   const { e } = await openEvent(c, c.req.valid('param').shortId)
-  const prior = await guestFromRequest(c).catch(() => null)
+  const prior = await readGuest(c).catch(() => null)
   if (prior && prior.eventId !== e.id) throw new Forbidden('This gallery token belongs to a different event.', 'wrong_event')
   if (e.settings.access === 'link-pin' && !prior) throw new Unauthorized('Enter the gallery PIN first.', 'pin_required')
   const input = c.req.valid('json')
@@ -161,7 +189,32 @@ publicRoutes.openapi(createRoute({
     emit(c, e.studioId, 'guests', 'activity')
   }
   const seeAll = prior?.all === true || !e.settings.facePrivacy || !e.settings.faceSearch
-  return c.json({ ...(await issueGuestSession(c, e, { guestId: g.id, seeAll })), guest: g }, 200)
+  rememberGallery(c, e, guestIdentity(c, { eventId: e.id, studioId: e.studioId, guestId: g.id }))
+  return c.json({ ...(await issueGuestSession(c, e, { guestId: g.id, seeAll, vipPin: prior?.vp })), guest: g }, 200)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'get', path: '/events/{shortId}/prices', tags: ['Public gallery'], summary: 'The studio’s store prices for this gallery',
+  request: { params: ShortIdParam },
+  responses: { 200: json(z.object({ items: z.array(Price) })), ...problems(401, 403, 404) },
+}), async (c) => {
+  const { e } = await openEvent(c, c.req.valid('param').shortId)
+  await guestAccess(c, e)
+  const rows = await getDb(c.env.DB).select().from(schema.prices).where(eq(schema.prices.studioId, e.studioId)).orderBy(asc(schema.prices.sortOrder))
+  return c.json({ items: rows.map(priceOut) }, 200)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'get', path: '/events/{shortId}/watermark', tags: ['Public gallery'], summary: 'The watermark guests’ downloads must carry',
+  description: '`enabled` is false when the event turns watermarks off.',
+  request: { params: ShortIdParam },
+  responses: { 200: json(PublicWatermark), ...problems(401, 403, 404) },
+}), async (c) => {
+  const { e } = await openEvent(c, c.req.valid('param').shortId)
+  await guestAccess(c, e)
+  const [w] = await getDb(c.env.DB).select().from(schema.watermarks).where(eq(schema.watermarks.studioId, e.studioId)).limit(1)
+  if (!w) throw new NotFound('Watermark')
+  return c.json({ enabled: !e.settings.watermarkOff, settings: watermarkOut(w.settings) }, 200)
 })
 
 // ── Photos, faces, favourites, downloads ────────────────────────────────────
@@ -223,56 +276,22 @@ publicRoutes.openapi(createRoute({
   await guestAccess(c, e)
   if (!e.settings.faceSearch) throw new Forbidden('Face search is turned off for this gallery.', 'face_search_disabled')
   const { key, embedding, minScore } = c.req.valid('json')
-  const db = getDb(c.env.DB)
-  const index = vectorIndex(c.env)
-  let personId: string | null = null
-  let photoIds: string[] = []
-  if (index && embedding) {
-    let result: VectorizeMatches
-    try {
-      result = await index.query(embedding, { topK: 100, namespace: e.id, returnMetadata: 'none', returnValues: false })
-    } catch (err) {
-      if (/dimension/i.test(String(err))) throw new ValidationFailed([{ field: 'embedding', in: 'body', message: 'Embedding has the wrong number of dimensions for this index', code: 'dimension_mismatch' }])
-      throw new ServiceUnavailable('Face search is not available right now.', 'face_search_unavailable')
-    }
-    const ids = result.matches.filter((mt) => mt.score >= minScore).map((mt) => mt.id)
-    const faces: { photoId: string; personId: string | null }[] = []
-    for (const part of chunk(ids)) faces.push(...await db.select({ photoId: schema.faces.photoId, personId: schema.faces.personId }).from(schema.faces).where(and(eq(schema.faces.eventId, e.id), inArray(schema.faces.vectorId, part))))
-    const votes = new Map<string, number>()
-    for (const f of faces) if (f.personId) votes.set(f.personId, (votes.get(f.personId) ?? 0) + 1)
-    personId = [...votes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
-    photoIds = [...new Set(faces.map((f) => f.photoId))]
-  } else if (c.env.ENVIRONMENT === 'development' || c.env.ENVIRONMENT === 'test') {
-    const people = await db.select({ id: schema.people.id, name: schema.people.name }).from(schema.people).where(eq(schema.people.eventId, e.id)).orderBy(asc(schema.people.id))
-    const unnamed = people.filter((p) => !p.name)
-    const pool = unnamed.length ? unnamed : people
-    if (pool.length) personId = pool[hash(key) % pool.length].id
-  } else {
-    throw new ServiceUnavailable('Face search is not available right now.', 'face_search_unavailable')
-  }
-  const p = schema.photos
-  const albumsSql = sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${e.id} AND kind = 'album')`
-  if (personId) {
-    const rows = await db.select({ id: p.id }).from(p).where(and(eq(p.eventId, e.id), visible(p), albumsSql, sql`${p.id} IN (SELECT photo_id FROM faces WHERE person_id = ${personId})`)).orderBy(asc(p.capturedAt))
-    photoIds = rows.map((r) => r.id)
-  } else if (!photoIds.length && (c.env.ENVIRONMENT === 'development' || c.env.ENVIRONMENT === 'test')) {
-    const rows = await db.select({ id: p.id }).from(p).where(and(eq(p.eventId, e.id), visible(p), albumsSql)).orderBy(asc(p.capturedAt))
-    photoIds = rows.filter((r) => hash(`${r.id}:${key}`) % 8 === 0).map((r) => r.id)
-  }
-  if (photoIds.length) {
+  const result = await matchFaces(c.env, e.id, key, embedding, minScore)
+  if (result.photoIds.length) {
+    const db = getDb(c.env.DB)
     background(c, db.batch([
       db.update(schema.events).set({ faceMatches: sql`${schema.events.faceMatches} + 1` }).where(eq(schema.events.id, e.id)),
-      db.insert(schema.activity).values({ id: newId('act'), studioId: e.studioId, kind: 'face', title: `A guest found ${photoIds.length} photos of themselves`, detail: e.name, at: nowIso() }),
+      db.insert(schema.activity).values({ id: newId('act'), studioId: e.studioId, kind: 'face', title: `A guest found ${result.photoIds.length} photos of themselves`, detail: e.name, at: nowIso() }),
     ]))
     emit(c, e.studioId, 'activity', 'events')
   }
-  return c.json({ personId, photoIds }, 200)
+  return c.json(result, 200)
 })
 
 async function visiblePhoto(c: Context<AppEnv>, photoId: string) {
   const [row] = await getDb(c.env.DB).select({ p: schema.photos, e: schema.events }).from(schema.photos)
     .innerJoin(schema.events, eq(schema.events.id, schema.photos.eventId))
-    .where(and(eq(schema.photos.id, photoId), visible())).limit(1)
+    .where(and(eq(schema.photos.id, photoId), visible(), isNull(schema.events.deletedAt))).limit(1)
   if (!row || blockedReason(row.e)) throw new NotFound('Photo', photoId)
   return row
 }
@@ -280,7 +299,7 @@ async function visiblePhoto(c: Context<AppEnv>, photoId: string) {
 publicRoutes.openapi(createRoute({
   method: 'post', path: '/photos/{photoId}/favourite', tags: ['Public gallery'], summary: 'Favourite or unfavourite a photo',
   description: 'Registered guests’ favourites show in the studio’s Guests list; the photo’s favourite count always updates.',
-  request: { params: z.object({ photoId: z.string().max(128).openapi({ param: { name: 'photoId', in: 'path' } }) }), body: body(z.object({ on: z.boolean() })) },
+  request: { params: PhotoIdParam, body: body(z.object({ on: z.boolean() })) },
   responses: { 200: json(z.object({ favourites: z.number().int() })), ...problems(401, 403, 404, 422) },
 }), async (c) => {
   const { p, e } = await visiblePhoto(c, c.req.valid('param').photoId)
@@ -304,6 +323,24 @@ publicRoutes.openapi(createRoute({
 })
 
 publicRoutes.openapi(createRoute({
+  method: 'get', path: '/events/{shortId}/me/favourites', tags: ['Public gallery'], summary: 'My favourite photos (registered guests)',
+  request: { params: ShortIdParam },
+  responses: { 200: json(z.object({ items: z.array(Photo) })), ...problems(401, 403, 404) },
+}), async (c) => {
+  const { e } = await openEvent(c, c.req.valid('param').shortId)
+  const g = await guestAccess(c, e)
+  if (!g?.guestId) throw new Unauthorized('Register with your name and email to keep favourites.', 'registration_required')
+  const db = getDb(c.env.DB)
+  const [guest] = await db.select().from(schema.guests).where(eq(schema.guests.id, g.guestId)).limit(1)
+  const ids = guest?.favourites ?? []
+  const rows: (typeof schema.photos.$inferSelect)[] = []
+  for (const part of chunk(ids)) rows.push(...await db.select().from(schema.photos).where(and(inArray(schema.photos.id, part), eq(schema.photos.eventId, e.id), visible())))
+  const order = new Map(ids.map((id, i) => [id, i]))
+  rows.sort((a, b) => order.get(a.id)! - order.get(b.id)!)
+  return c.json({ items: rows.map((r) => photoOut(r, c.env.PUBLIC_MEDIA_BASE)) }, 200)
+})
+
+publicRoutes.openapi(createRoute({
   method: 'post', path: '/downloads', tags: ['Public gallery'], summary: 'Count downloads',
   request: { body: body(z.object({ photoIds: z.array(z.string().max(128)).min(1).max(500) })) },
   responses: { 204: NoContent, ...problems(422) },
@@ -317,6 +354,154 @@ publicRoutes.openapi(createRoute({
   }
   for (const s of studios) emit(c, s, 'photos')
   return c.body(null, 204)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{shortId}/download-pin', tags: ['Public gallery'], summary: 'Unlock "Download all" (PIN + use counter)',
+  description: `Checks the event PIN (works on galleries without a PIN gate; VIP links with an embedded PIN may omit it) and uses one of the guest’s ${DOWNLOAD_ALL_LIMIT} "Download all" uses. Counted per X-Guest-Device, else per registered guest, else per IP.`,
+  request: { params: ShortIdParam, body: body(z.object({ pin: z.string().trim().min(1).max(10).optional() })) },
+  responses: { 200: json(DownloadAllowance), ...problems(401, 403, 404, 422) },
+}), async (c) => {
+  const { e } = await openEvent(c, c.req.valid('param').shortId)
+  const g = await guestAccess(c, e)
+  if (e.settings.downloads === 'none') throw new Forbidden('Downloads are turned off for this gallery.', 'downloads_disabled')
+  const { pin } = c.req.valid('json')
+  if (pin) await checkPin(c, e, pin)
+  else if (!g?.vp) throw new Unauthorized('Enter the gallery PIN to download everything.', 'pin_required')
+  const key = guestIdentity(c, g) ?? `ip:${await sha256Hex(clientIp(c))}`
+  const db = getDb(c.env.DB)
+  const t = schema.downloadUses
+  const res = await db.insert(t).values({ eventId: e.id, guestKey: key, count: 1, updatedAt: nowIso() })
+    .onConflictDoUpdate({ target: [t.eventId, t.guestKey], set: { count: sql`${t.count} + 1`, updatedAt: nowIso() }, setWhere: sql`${t.count} < ${DOWNLOAD_ALL_LIMIT}` }).run()
+  if (res.meta.changes === 0) {
+    throw new AppError(429, 'download_limit', 'Download limit reached', `“Download all” can be used ${DOWNLOAD_ALL_LIMIT} times per guest. Download single photos instead.`, { extensions: { remaining: 0 } })
+  }
+  const [row] = await db.select({ n: t.count }).from(t).where(and(eq(t.eventId, e.id), eq(t.guestKey, key))).limit(1)
+  return c.json({ remaining: Math.max(0, DOWNLOAD_ALL_LIMIT - (row?.n ?? 1)), limit: DOWNLOAD_ALL_LIMIT }, 200)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{shortId}/zips', tags: ['Public gallery'], summary: 'Email a ZIP of photos (follows the download policy)',
+  description: '`downloads: none` → 403. `own` → only `photoIds` that show `personId`. `all` → an album, a selection, or everything visible (face privacy needs a "see all" session or a `personId`).',
+  middleware: [idempotent] as const,
+  request: {
+    params: ShortIdParam, headers: IdempotencyHeader,
+    body: body(z.object({ email: z.email().max(254), photoIds: z.array(z.string().max(128)).max(500).optional(), albumId: z.string().max(128).optional(), personId: z.string().max(128).optional() })),
+  },
+  responses: { 202: json(ZipRequest, 'Queued'), ...problems(401, 403, 404, 422) },
+}), async (c) => {
+  const { e } = await openEvent(c, c.req.valid('param').shortId)
+  const g = await guestAccess(c, e)
+  const input = c.req.valid('json')
+  const st = e.settings
+  if (st.downloads === 'none') throw new Forbidden('Downloads are turned off for this gallery.', 'downloads_disabled')
+  const needOwn = st.downloads === 'own' || (st.facePrivacy && st.faceSearch && g?.all !== true)
+  if (needOwn && (!input.personId || !input.photoIds?.length)) {
+    throw new Forbidden('You can download only the photos you’re in. Find yours with a selfie first.', 'downloads_own_only')
+  }
+  const db = getDb(c.env.DB)
+  const p = schema.photos
+  let ids = input.photoIds
+  if (ids) {
+    const ok: string[] = []
+    for (const part of chunk([...new Set(ids)])) {
+      ok.push(...(await db.select({ id: p.id }).from(p).where(and(eq(p.eventId, e.id), inArray(p.id, part), visible(p),
+        needOwn ? sql`${p.id} IN (SELECT photo_id FROM faces WHERE person_id = ${input.personId!})` : undefined))).map((r) => r.id))
+    }
+    if (ok.length !== new Set(ids).size) throw new Forbidden('Some of these photos aren’t available for you to download.', 'downloads_own_only')
+    ids = ok
+  }
+  let photoCount = ids?.length ?? 0
+  if (!ids) {
+    const [{ n }] = await db.select({ n: count() }).from(p).where(and(eq(p.eventId, e.id), visible(p),
+      input.albumId ? eq(p.albumId, input.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${e.id} AND kind = 'album')`))
+    photoCount = n
+  }
+  const row = {
+    id: newId('zip'), studioId: e.studioId, eventId: e.id, albumId: input.albumId ?? null, photoIds: ids ?? null, email: input.email,
+    photoCount, status: 'queued' as const, requestedAt: nowIso(), readyAt: null, url: null,
+  }
+  await db.insert(schema.zipRequests).values(row).run()
+  await c.env.PHOTO_QUEUE.send({ kind: 'build-zip', zipId: row.id, studioId: e.studioId })
+  emit(c, e.studioId, 'misc')
+  return c.json(zipOut(row), 202)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'get', path: '/photos/{photoId}/download', tags: ['Public gallery'], summary: 'Download a web-size rendition (watermarked when required)',
+  description: 'Streams `…/renditions/<size>.jpg` written by the image processor. Without processing (dev) there is no rendition: 404 `rendition_unavailable` (use the photo `url` instead). Guest token may be passed as `?token=` for plain links.',
+  request: { params: PhotoIdParam, query: z.object({ size: z.enum(['2048', '3072']).default('2048'), token: z.string().max(2048).optional() }) },
+  responses: { 200: { description: 'JPEG rendition' }, ...problems(401, 403, 404) },
+}), async (c) => {
+  const { p, e } = await visiblePhoto(c, c.req.valid('param').photoId)
+  await guestAccess(c, e)
+  if (e.settings.downloads === 'none') throw new Forbidden('Downloads are turned off for this gallery.', 'downloads_disabled')
+  const size = c.req.valid('query').size
+  if (size === '3072' && !e.settings.originalDownloads) throw new Forbidden('High-resolution downloads are off for this gallery.', 'originals_disabled')
+  const key = p.r2Key ? p.r2Key.replace(/\/[^/]+$/, `/renditions/${size}.jpg`) : null
+  const obj = key && c.env.PROCESSOR_URL ? await c.env.MEDIA.get(key) : null
+  if (!obj) throw new AppError(404, 'rendition_unavailable', 'Not found', 'No download rendition exists for this photo yet. Use the photo URL instead.')
+  background(c, getDb(c.env.DB).update(schema.photos).set({ downloads: sql`${schema.photos.downloads} + 1` }).where(eq(schema.photos.id, p.id)).run())
+  return new Response(obj.body, {
+    headers: { 'Content-Type': 'image/jpeg', 'Content-Disposition': `attachment; filename="${p.filename.replace(/"/g, '')}"`, 'Cache-Control': 'private, max-age=3600' },
+  })
+})
+
+// ── Guest uploads ──────────────────────────────────────────────────────────
+async function guestUploadTarget(c: Context<AppEnv>, shortId: string) {
+  const { e } = await openEvent(c, shortId)
+  const g = await guestAccess(c, e)
+  if (!e.settings.guestUploads) throw new Forbidden('This gallery doesn’t take guest uploads.', 'guest_uploads_disabled')
+  const [album] = await getDb(c.env.DB).select().from(schema.albums).where(and(eq(schema.albums.eventId, e.id), eq(schema.albums.kind, 'guest'))).limit(1)
+  if (!album) throw new AppError(409, 'no_guest_album', 'Conflict', 'This gallery has no guest uploads album.')
+  return { e, g, album }
+}
+
+publicRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{shortId}/uploads', tags: ['Public gallery'], summary: 'Guest upload: start (same multipart flow as the studio)',
+  description: 'Needs settings.guestUploads. Photos go to the "Guest uploads" album, are counted against guestUploadLimit, are watermarked when watermarkGuestUploads is on, and wait for review when reviewGuestUploads is on.',
+  middleware: [idempotent] as const,
+  request: {
+    params: ShortIdParam, headers: IdempotencyHeader,
+    body: body(z.object({ files: z.array(UploadFileInput).min(1).max(50), uploadedBy: z.string().trim().min(1).max(120).optional(), albumId: z.string().max(128).optional() }).passthrough()),
+  },
+  responses: { 201: json(z.object({ uploadId: z.string(), mode: z.enum(['s3', 'proxy']), partSize: z.number(), expiresAt: z.string(), files: z.array(z.object({ photoId: z.string(), filename: z.string(), key: z.string().nullable(), parts: z.array(z.object({ partNumber: z.number(), url: z.string() })) })) }), 'Upload started'), ...problems(401, 403, 404, 409, 422) },
+}), async (c) => {
+  const { e, g, album } = await guestUploadTarget(c, c.req.valid('param').shortId)
+  const input = c.req.valid('json')
+  const [{ n }] = await getDb(c.env.DB).select({ n: count() }).from(schema.photos).where(eq(schema.photos.albumId, album.id))
+  const room = Math.max(0, e.settings.guestUploadLimit - n)
+  if (input.files.length > room) {
+    throw new AppError(409, 'guest_upload_limit', 'Upload limit reached', `This gallery takes ${e.settings.guestUploadLimit} guest photos and has room for ${room} more.`, { extensions: { remaining: room } })
+  }
+  let uploadedBy = input.uploadedBy
+  if (!uploadedBy && g?.guestId) uploadedBy = (await getDb(c.env.DB).select({ n: schema.guests.name }).from(schema.guests).where(eq(schema.guests.id, g.guestId)).limit(1))[0]?.n
+  const session = await createUploadSession(c, {
+    studioId: e.studioId, eventId: e.id, albumId: album.id, userId: `guest:${g?.guestId ?? 'anon'}`, quality: 'web',
+    files: input.files.map((f) => ({ ...f, url: undefined })),
+    options: { source: 'guest', uploadedBy: uploadedBy ?? 'Guest', watermark: e.settings.watermarkGuestUploads },
+  })
+  return c.json(session, 201)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{shortId}/uploads/{uploadId}/complete', tags: ['Public gallery'], summary: 'Guest upload: finish',
+  middleware: [idempotent] as const,
+  request: {
+    params: ShortIdParam.extend({ uploadId: z.string().max(64).openapi({ param: { name: 'uploadId', in: 'path' } }) }), headers: IdempotencyHeader,
+    body: body(z.object({ files: z.array(z.object({ photoId: z.string().max(64), parts: z.array(z.object({ partNumber: z.number().int().min(1).max(10_000), etag: z.string().min(1).max(200) })).max(10_000).default([]) })).min(1).max(50) })),
+  },
+  responses: { 201: json(z.object({ items: z.array(Photo) }), 'Photos created'), ...problems(401, 403, 404, 409, 422) },
+}), async (c) => {
+  const { e, g, album } = await guestUploadTarget(c, c.req.valid('param').shortId)
+  const [up] = await getDb(c.env.DB).select().from(schema.uploads).where(and(eq(schema.uploads.id, c.req.valid('param').uploadId), eq(schema.uploads.albumId, album.id))).limit(1)
+  if (!up || up.userId !== `guest:${g?.guestId ?? 'anon'}`) throw new NotFound('Upload', c.req.valid('param').uploadId)
+  const items = await completeUploadSession(c, { event: e, upload: up, files: c.req.valid('json').files, uploaderName: 'Guest' })
+  if (items.length) {
+    await getDb(c.env.DB).insert(schema.activity).values({ id: newId('act'), studioId: e.studioId, kind: 'guest-upload', title: `${items.length} guest upload${items.length === 1 ? '' : 's'}${e.settings.reviewGuestUploads ? ' to review' : ''}`, detail: e.name, at: nowIso() }).run()
+    emit(c, e.studioId, 'activity')
+  }
+  return c.json({ items }, 201)
 })
 
 // ── Enquiries, orders ──────────────────────────────────────────────────────
@@ -367,7 +552,7 @@ publicRoutes.openapi(createRoute({
 
 publicRoutes.openapi(createRoute({
   method: 'post', path: '/events/{shortId}/orders', tags: ['Public gallery'], summary: 'Buy photos or prints',
-  description: 'Prices come from the studio’s price list. With Razorpay keys the order is `pending` and includes `checkout` for Razorpay Checkout (capture webhook TODO); without keys payment is simulated and the order is `paid`, adding the studio’s share (minus Frameline’s commission) to the ledger. Supports `Idempotency-Key`.',
+  description: 'Prices come from the studio’s price list; print items need `shipping`. With Razorpay keys the order is `pending` and includes `checkout` for Razorpay Checkout — then call POST /v1/public/orders/:id/confirm (or let the webhook confirm it). Without keys payment is simulated and the order is `paid`. Supports `Idempotency-Key`.',
   middleware: [idempotent] as const,
   request: {
     params: ShortIdParam, headers: IdempotencyHeader,
@@ -375,14 +560,18 @@ publicRoutes.openapi(createRoute({
       items: z.array(z.object({ priceId: z.string().max(40), photoIds: z.array(z.string().max(128)).max(500), quantity: z.number().int().min(1).max(100).optional() })).min(1).max(20),
       method: z.enum(['upi', 'card', 'netbanking', 'international']),
       buyer: z.object({ name: z.string().trim().min(1).max(120), email: z.email().max(254), phone: z.string().max(40).optional() }),
+      shipping: ShippingAddressInput.optional(),
     })),
   },
   responses: { 201: json(Order, 'Order created'), ...problems(401, 403, 404, 409, 422) },
 }), async (c) => {
   const { e } = await openEvent(c, c.req.valid('param').shortId)
-  await guestAccess(c, e)
+  const g = await guestAccess(c, e)
   if (!e.settings.storeEnabled) throw new AppError(409, 'store_disabled', 'Store disabled', 'This gallery isn’t selling photos.')
   const input = c.req.valid('json')
+  if (input.items.some((i) => i.priceId.startsWith('print')) && !input.shipping) {
+    throw new ValidationFailed([{ field: 'shipping', in: 'body', message: 'Add a delivery address for prints', code: 'required' }])
+  }
   const db = getDb(c.env.DB)
   const priceRows = await db.select().from(schema.prices).where(eq(schema.prices.studioId, e.studioId))
   let paidPaise = 0
@@ -421,6 +610,7 @@ publicRoutes.openapi(createRoute({
   const row = {
     id, studioId: e.studioId, number, buyer: input.buyer.name, eventId: e.id, eventName: e.name, items: labels.join(', '), paidPaise, currency: 'INR' as const,
     sharePaise, status, providerRef: checkout?.orderId ?? null, at: nowIso(), photoIds: ids, buyerEmail: input.buyer.email.toLowerCase(), method: input.method,
+    guestId: g?.guestId ?? null, shipping: input.shipping ?? null, remindedAt: null, reminderCount: 0,
   }
   await db.insert(schema.orders).values(row).run()
   if (status !== 'pending') {
@@ -431,7 +621,46 @@ publicRoutes.openapi(createRoute({
   return c.json({ ...orderOut(row), ...(checkout ? { checkout } : {}) }, 201)
 })
 
-// ── Studio profile ─────────────────────────────────────────────────────────
+publicRoutes.openapi(createRoute({
+  method: 'post', path: '/orders/{id}/confirm', tags: ['Public gallery'], summary: 'Confirm a Razorpay payment for a pending order',
+  description: 'Verifies Razorpay Checkout’s signature (HMAC-SHA256 of `order_id|payment_id` with RAZORPAY_KEY_SECRET), then marks the order paid and books the studio’s share. Idempotent; the webhook does the same server-to-server.',
+  request: {
+    params: z.object({ id: z.string().max(64).openapi({ param: { name: 'id', in: 'path' } }) }),
+    body: body(z.object({ providerOrderId: z.string().max(128), paymentId: z.string().max(128), signature: z.string().max(256) })),
+  },
+  responses: { 200: json(Order), ...problems(401, 404, 409, 422, 501) },
+}), async (c) => {
+  if (!c.env.RAZORPAY_KEY_SECRET) throw new NotConfigured('Payments', 'Online payments are not configured (RAZORPAY_KEY_SECRET).')
+  const db = getDb(c.env.DB)
+  const [order] = await db.select().from(schema.orders).where(eq(schema.orders.id, c.req.valid('param').id)).limit(1)
+  if (!order) throw new NotFound('Order', c.req.valid('param').id)
+  const input = c.req.valid('json')
+  if (order.providerRef && order.providerRef !== input.providerOrderId && order.status === 'pending') throw new AppError(409, 'order_mismatch', 'Conflict', 'This payment belongs to a different order.')
+  if (!(await verifyCheckoutSignature(c.env.RAZORPAY_KEY_SECRET, input.providerOrderId, input.paymentId, input.signature))) {
+    throw new Unauthorized('The payment signature is invalid.', 'invalid_signature')
+  }
+  const { order: paid, changed } = await markOrderPaid(db, order)
+  if (changed) emit(c, order.studioId, 'misc', 'activity')
+  return c.json(orderOut(paid), 200)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'get', path: '/events/{shortId}/me/orders', tags: ['Public gallery'], summary: 'My orders in this gallery',
+  description: 'Orders placed with this guest session, or with the registered guest’s email.',
+  request: { params: ShortIdParam },
+  responses: { 200: json(z.object({ items: z.array(Order) })), ...problems(401, 403, 404) },
+}), async (c) => {
+  const { e } = await openEvent(c, c.req.valid('param').shortId)
+  const g = await guestAccess(c, e)
+  if (!g?.guestId) return c.json({ items: [] }, 200)
+  const db = getDb(c.env.DB)
+  const [guest] = await db.select({ email: schema.guests.email }).from(schema.guests).where(eq(schema.guests.id, g.guestId)).limit(1)
+  const o = schema.orders
+  const rows = await db.select().from(o).where(and(eq(o.eventId, e.id), or(eq(o.guestId, g.guestId), guest ? eq(o.buyerEmail, guest.email.toLowerCase()) : undefined))).orderBy(desc(o.at)).limit(100)
+  return c.json({ items: rows.map(orderOut) }, 200)
+})
+
+// ── Studio profile, follows, my galleries ──────────────────────────────────
 publicRoutes.openapi(createRoute({
   method: 'get', path: '/studios/{code}', tags: ['Public gallery'], summary: 'Studio profile (follow code or handle)',
   request: { params: CodeParam },
@@ -441,7 +670,7 @@ publicRoutes.openapi(createRoute({
   const full = studioOut(s)
   const db = getDb(c.env.DB)
   const ids = full.app.featuredEventIds.slice(0, 24)
-  const rows = ids.length ? await db.select().from(schema.events).where(and(eq(schema.events.studioId, s.id), inArray(schema.events.id, ids))) : []
+  const rows = ids.length ? await db.select().from(schema.events).where(and(eq(schema.events.studioId, s.id), inArray(schema.events.id, ids), isNull(schema.events.deletedAt))) : []
   const featured = ids.map((id) => rows.find((r) => r.id === id)).filter((e): e is EventRow => !!e && !blockedReason(e) && (full.app.showPrivate || e.settings.access === 'link'))
     .map((e) => ({ id: e.id, shortId: e.shortId, name: e.name, type: e.type as z.infer<typeof PublicEvent>['type'], date: e.date, city: e.city, coverTones: e.coverTones, photoCount: e.photoCount, ...(e.coverPhotoId ? { coverPhotoId: e.coverPhotoId } : {}) }))
   return c.json({
@@ -454,21 +683,76 @@ publicRoutes.openapi(createRoute({
   }, 200)
 })
 
+async function followerKey(c: Context<AppEnv>) {
+  const g = await readGuest(c).catch(() => null)
+  return guestIdentity(c, g) ?? `anon:${await sha256Hex(`${clientIp(c)}|${c.req.header('user-agent') ?? ''}`)}`
+}
+
 publicRoutes.openapi(createRoute({
   method: 'post', path: '/studios/{code}/follow', tags: ['Public gallery'], summary: 'Follow a studio',
-  description: 'Counted once per registered guest (or per device IP + browser when anonymous).',
+  description: 'Counted once per X-Guest-Device (else per registered guest, else per IP + browser).',
   request: { params: CodeParam },
   responses: { 200: json(z.object({ followers: z.number().int() })), ...problems(404) },
 }), async (c) => {
   const s = await studioByCode(c, c.req.valid('param').code)
-  const g = await guestFromRequest(c).catch(() => null)
-  const followerKey = g?.guestId ?? `anon:${await sha256Hex(`${clientIp(c)}|${c.req.header('user-agent') ?? ''}`)}`
+  const key = await followerKey(c)
   const db = getDb(c.env.DB)
-  const res = await db.insert(schema.studioFollows).values({ studioId: s.id, followerKey, at: nowIso() }).onConflictDoNothing().run()
+  const res = await db.insert(schema.studioFollows).values({ studioId: s.id, followerKey: key, at: nowIso() }).onConflictDoNothing().run()
   if (res.meta.changes) await db.update(schema.studios).set({ followers: sql`${schema.studios.followers} + 1` }).where(eq(schema.studios.id, s.id)).run()
   const [after] = await db.select({ f: schema.studios.followers }).from(schema.studios).where(eq(schema.studios.id, s.id)).limit(1)
   if (res.meta.changes) emit(c, s.id, 'studio')
   return c.json({ followers: after?.f ?? 0 }, 200)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'delete', path: '/studios/{code}/follow', tags: ['Public gallery'], summary: 'Unfollow a studio',
+  request: { params: CodeParam },
+  responses: { 200: json(z.object({ followers: z.number().int() })), ...problems(404) },
+}), async (c) => {
+  const s = await studioByCode(c, c.req.valid('param').code)
+  const key = await followerKey(c)
+  const db = getDb(c.env.DB)
+  const res = await db.delete(schema.studioFollows).where(and(eq(schema.studioFollows.studioId, s.id), eq(schema.studioFollows.followerKey, key))).run()
+  if (res.meta.changes) await db.update(schema.studios).set({ followers: sql`max(0, ${schema.studios.followers} - 1)` }).where(eq(schema.studios.id, s.id)).run()
+  const [after] = await db.select({ f: schema.studios.followers }).from(schema.studios).where(eq(schema.studios.id, s.id)).limit(1)
+  if (res.meta.changes) emit(c, s.id, 'studio')
+  return c.json({ followers: after?.f ?? 0 }, 200)
+})
+
+async function requireIdentity(c: Context<AppEnv>) {
+  const key = guestIdentity(c, await readGuest(c).catch(() => null))
+  if (!key) throw new Unauthorized('Send an X-Guest-Device id (or a registered guest token) to see your lists.', 'guest_identity_required')
+  return key
+}
+
+publicRoutes.openapi(createRoute({
+  method: 'get', path: '/me/follows', tags: ['Public gallery'], summary: 'Studios this guest follows',
+  request: {},
+  responses: { 200: json(z.object({ items: z.array(PublicStudio) })), ...problems(401) },
+}), async (c) => {
+  const key = await requireIdentity(c)
+  const rows = await getDb(c.env.DB).select({ s: schema.studios }).from(schema.studioFollows)
+    .innerJoin(schema.studios, eq(schema.studios.id, schema.studioFollows.studioId))
+    .where(eq(schema.studioFollows.followerKey, key)).orderBy(desc(schema.studioFollows.at)).limit(200)
+  return c.json({ items: rows.map((r) => publicStudioOut(r.s)) }, 200)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'get', path: '/me/galleries', tags: ['Public gallery'], summary: 'Galleries this guest opened (newest first)',
+  request: {},
+  responses: { 200: json(z.object({ items: z.array(PublicEventSummary) })), ...problems(401) },
+}), async (c) => {
+  const key = await requireIdentity(c)
+  const rows = await getDb(c.env.DB).select({ e: schema.events, s: schema.studios, at: schema.guestGalleries.lastOpenedAt }).from(schema.guestGalleries)
+    .innerJoin(schema.events, eq(schema.events.id, schema.guestGalleries.eventId))
+    .innerJoin(schema.studios, eq(schema.studios.id, schema.events.studioId))
+    .where(and(eq(schema.guestGalleries.guestKey, key), isNull(schema.events.deletedAt))).orderBy(desc(schema.guestGalleries.lastOpenedAt)).limit(100)
+  return c.json({
+    items: rows.map(({ e, s, at }) => ({
+      id: e.id, shortId: e.shortId, name: e.name, type: e.type as z.infer<typeof PublicEvent>['type'], date: e.date, city: e.city,
+      coverTones: e.coverTones, photoCount: e.photoCount, studioName: s.name, lastOpenedAt: at,
+    })),
+  }, 200)
 })
 
 // ── Personal links, ZIP manifests, access requests ─────────────────────────
@@ -482,7 +766,7 @@ publicRoutes.openapi(createRoute({
   if (!link) throw new NotFound('Link')
   const { e } = await eventByShortId(c, link.payload.e)
   const vip = link.signed && link.kind === 'v' ? link.payload.vip : undefined
-  const session = vip?.pin || vip?.all ? await issueGuestSession(c, e, { seeAll: !!vip.all || !e.settings.facePrivacy || !e.settings.faceSearch }) : undefined
+  const session = vip?.pin || vip?.all ? await issueGuestSession(c, e, { seeAll: !!vip.all || !e.settings.facePrivacy || !e.settings.faceSearch, vipPin: !!vip.pin }) : undefined
   return c.json({ kind: link.kind, payload: link.payload, ...(session ? { session } : {}) }, 200)
 })
 
@@ -496,8 +780,13 @@ publicRoutes.openapi(createRoute({
   if (!z0 || z0.status !== 'ready' || Date.parse(z0.readyAt ?? z0.requestedAt) < Date.now() - 7 * 86_400_000) throw new NotFound('Download')
   const [ev] = await db.select().from(schema.events).where(eq(schema.events.id, z0.eventId)).limit(1)
   const p = schema.photos
-  const where = z0.photoIds?.length ? inArray(p.id, z0.photoIds.slice(0, 90)) : and(eq(p.eventId, z0.eventId), z0.albumId ? eq(p.albumId, z0.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${z0.eventId} AND kind = 'album')`)
-  const rows = await db.select().from(p).where(and(where, eq(p.status, 'ready'))).orderBy(asc(p.capturedAt)).limit(5000)
+  const rows: (typeof p.$inferSelect)[] = []
+  if (z0.photoIds?.length) {
+    for (const part of chunk(z0.photoIds)) rows.push(...await db.select().from(p).where(and(inArray(p.id, part), eq(p.status, 'ready'))))
+  } else {
+    rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), eq(p.status, 'ready'),
+      z0.albumId ? eq(p.albumId, z0.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${z0.eventId} AND kind = 'album')`)).orderBy(asc(p.capturedAt)).limit(5000))
+  }
   return c.json({ eventName: ev?.name ?? '', photos: rows.map((r) => ({ id: r.id, filename: r.filename, url: photoOut(r, c.env.PUBLIC_MEDIA_BASE).url ?? null })) }, 200)
 })
 
@@ -512,4 +801,3 @@ publicRoutes.openapi(createRoute({
   emit(c, e.studioId, 'guests')
   return c.json({ received: true as const }, 202)
 })
-

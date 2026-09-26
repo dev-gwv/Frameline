@@ -31,6 +31,9 @@
 
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "frameline-media" }],
 
+  // Every minute: Smart QR schedule switches + due scheduled broadcasts. 03:00 UTC: empty the event trash (30 days).
+  "triggers": { "crons": ["* * * * *", "0 3 * * *"] },
+
   // OAuth state/PKCE verifiers (short TTL).
   "kv_namespaces": [{ "binding": "KV", "id": "00000000000000000000000000000000" }],
 
@@ -80,8 +83,10 @@
         "API_PUBLIC_URL": "https://api.frameline.in",
         "PUBLIC_MEDIA_BASE": "https://media.frameline.in",
         "MAIL_FROM": "Frameline <login@frameline.in>",
-        "R2_BUCKET_NAME": "frameline-media"
+        "R2_BUCKET_NAME": "frameline-media",
+        "GOOGLE_NATIVE_REDIRECTS": "frameline://sign-in"
       },
+      "triggers": { "crons": ["* * * * *", "0 3 * * *"] },
       "d1_databases": [{ "binding": "DB", "database_name": "frameline", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
       "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "frameline-media" }],
       "kv_namespaces": [{ "binding": "KV", "id": "00000000000000000000000000000000" }],

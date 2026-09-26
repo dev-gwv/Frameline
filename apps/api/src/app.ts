@@ -14,6 +14,8 @@ import { requestId } from './middleware/request-id'
 import { userFromToken } from './middleware/auth'
 import { apiVersionHeader } from './middleware/versioning'
 import { accountRoutes } from './routes/account'
+import { assetRoutes } from './routes/assets'
+import { webhookRoutes } from './routes/webhooks'
 import { authRoutes } from './routes/auth'
 import { businessRoutes } from './routes/business'
 import { eventRoutes } from './routes/events'
@@ -26,6 +28,7 @@ import { uploadRoutes } from './routes/uploads'
 export const API_MAJOR = 'v1'
 const JSON_LIMIT = 1024 * 1024 // 1 MiB for JSON bodies
 const PART_LIMIT = 16 * 1024 * 1024 // proxy part uploads (10 MiB parts + headroom)
+const ASSET_LIMIT = 11 * 1024 * 1024 // assets are ≤ 10 MB; the route returns the precise 413
 
 const ALLOWED_HEADERS = ['Authorization', 'Content-Type', 'Idempotency-Key', 'X-Request-Id', 'X-Studio-Id', 'X-Guest-Token']
 const EXPOSED_HEADERS = [
@@ -82,7 +85,8 @@ export function createApp() {
   v1.use('*', apiVersionHeader('1'))
   v1.use('*', async (c, next) => {
     const isPart = c.req.method === 'PUT' && c.req.path.includes('/uploads/') && c.req.path.includes('/parts/')
-    const max = isPart ? PART_LIMIT : JSON_LIMIT
+    const isAsset = c.req.method === 'POST' && c.req.path === '/v1/assets'
+    const max = isPart ? PART_LIMIT : isAsset ? ASSET_LIMIT : JSON_LIMIT
     return bodyLimit({ maxSize: max, onError: () => { throw new PayloadTooLarge(max) } })(c, next)
   })
   v1.use('*', peekUser)
@@ -110,6 +114,8 @@ export function createApp() {
   v1.route('/', businessRoutes)
   v1.route('/public', publicRoutes)
   v1.route('/', realtimeRoutes)
+  v1.route('/', assetRoutes)
+  v1.route('/', webhookRoutes)
 
   app.route('/v1', v1)
 

@@ -170,10 +170,10 @@ applied. The Workers binding only supports 10 s or 60 s periods, so longer windo
 
 ## Endpoints
 
-`GET /v1/openapi.json` is the full list (90 paths, 114 operations); `/v1/docs` renders it with Scalar.
+`GET /v1/openapi.json` is the full list; `/v1/docs` renders it with Scalar.
 
 - **Meta:** `GET /health`, `GET /v1/meta`, `GET /v1/openapi.json`, `GET /v1/docs`
-- **Auth:** `POST /v1/auth/otp/request|otp/verify|password/login|password|refresh|logout`, `GET /v1/auth/google/start|callback`
+- **Auth:** `POST /v1/auth/otp/request|otp/verify|password/login|password|password/reset|refresh|logout`, `GET /v1/auth/google/start|callback`
 - **Account:** `GET|PATCH /v1/me`, `GET|PUT /v1/me/notifications`
 - **Studio:** `GET|PATCH /v1/studio` (profile incl. services, testimonials, FAQ, social links, app config), `GET /v1/studio/usage`,
   `GET /v1/studio/usage/breakdown`, `POST|GET /v1/studio/usage/report`, `GET|PATCH /v1/watermark`, `GET|PATCH /v1/website`
@@ -182,26 +182,32 @@ applied. The Workers binding only supports 10 s or 60 s periods, so longer windo
 - **Team (owner):** `GET /v1/team` (editor+), `POST /v1/team/invites`, `PATCH|DELETE /v1/team/:id`
 - **Events:** `GET|POST /v1/events`, `GET|PATCH|DELETE /v1/events/:id`, `PATCH /v1/events/:id/settings`,
   `POST /v1/events/:id/pin/reset`, `PUT /v1/events/:id/cover`, `POST /v1/events/:id/renew` (owner),
-  `POST /v1/events/:id/renewal-link`, `POST /v1/events/:id/guest-links`
+  `POST /v1/events/:id/renewal-link`, `POST /v1/events/:id/guest-links`, `POST /v1/events/:id/packs` (owner),
+  `GET /v1/trash/events`, `POST /v1/events/:id/restore` (`DELETE /v1/events/:id` moves to the trash)
 - **Albums:** `GET|POST /v1/events/:id/albums`, `PUT /v1/events/:id/albums/order`, `PATCH|DELETE /v1/albums/:id`
 - **Photos:** `GET /v1/events/:id/photos`, `GET /v1/events/:id/photo-ids`, `GET /v1/photos/:id`, `PATCH /v1/photos`,
   `POST /v1/photos/bulk-delete`, `POST /v1/photos/copy`, `POST /v1/photos/review`, `POST /v1/photos/:id/enhance`,
-  `POST /v1/events/:id/faces/reindex`, `GET|POST /v1/events/:id/zips`
+  `POST /v1/events/:id/faces/reindex`, `POST /v1/events/:id/faces/match`, `GET|POST /v1/events/:id/zips`
 - **Uploads:** `POST /v1/events/:id/uploads` (options: `source`, `uploadedBy`, `watermark`, `fast`),
   `PUT /v1/uploads/:uploadId/files/:photoId/parts/:n`, `POST /v1/events/:id/uploads/:uploadId/complete`, `GET /v1/media/*`
 - **People/films/guests:** `GET /v1/events/:id/people`, `GET|POST /v1/events/:id/films`, `PATCH|DELETE /v1/films/:id`,
   `GET /v1/events/:id/guests`, `GET /v1/events/:id/access-requests`, `POST /v1/access-requests/:id/resolve`
 - **Business:** `GET /v1/activity`, `GET /v1/orders`, `GET /v1/ledger`, `GET|PUT /v1/prices`, `GET|PATCH /v1/store/settings`,
-  `POST /v1/payouts`
+  `POST /v1/payouts`, `GET /v1/carts`, `POST /v1/carts/remind`
+- **Assets:** `POST /v1/assets?kind=&filename=` (raw body)
+- **Webhooks:** `POST /v1/webhooks/razorpay`
 - **Tools:** `GET|POST /v1/cameras`, `PATCH|DELETE /v1/cameras/:id`, `POST /v1/cameras/:id/password`,
   `GET|DELETE /v1/cameras/:id/uploads`, `GET|POST /v1/qrs`, `PATCH|DELETE /v1/qrs/:id`, `GET|POST /v1/broadcasts`,
   `POST /v1/broadcasts/:id/cancel`, `DELETE /v1/broadcasts/:id`, `GET|POST /v1/tickets`, `POST /v1/tickets/:id/messages`,
   `GET /v1/enquiries`, `PATCH /v1/enquiries/:id`
 - **Realtime:** `GET /v1/realtime` (WebSocket)
-- **Public (guest):** `GET /v1/public/events/:shortId`, `POST …/pin`, `POST …/register`, `GET …/albums`, `GET …/photos`,
-  `POST …/faces/search`, `POST …/enquiries`, `POST …/orders`, `POST …/access-requests`, `POST /v1/public/photos/:id/favourite`,
-  `POST /v1/public/downloads`, `GET /v1/public/studios/:code`, `POST /v1/public/studios/:code/follow`,
-  `POST /v1/public/studios/:code/enquiries`, `GET /v1/public/links/:code`, `GET /v1/public/zips/:id`
+- **Public (guest):** `GET /v1/public/events/:shortId`, then under `/v1/public/events/:shortId/`: `POST pin`, `POST register`,
+  `GET prices`, `GET watermark`, `GET albums`, `GET photos`, `POST faces/search`, `POST download-pin`, `POST zips`,
+  `POST uploads` + `POST uploads/:uploadId/complete`, `GET me/favourites`, `GET me/orders`, `POST enquiries`, `POST orders`,
+  `POST access-requests`. Also `POST /v1/public/photos/:id/favourite`, `GET /v1/public/photos/:id/download`,
+  `POST /v1/public/downloads`, `POST /v1/public/orders/:id/confirm`, `GET /v1/public/studios/:code`,
+  `POST|DELETE /v1/public/studios/:code/follow`, `POST /v1/public/studios/:code/enquiries`, `GET /v1/public/me/follows`,
+  `GET /v1/public/me/galleries`, `GET /v1/public/links/:code`, `GET /v1/public/zips/:id`
 
 ## Guest side
 
@@ -225,6 +231,64 @@ applied. The Workers binding only supports 10 s or 60 s periods, so longer windo
   (`<id:8><hmac:6>`) for `/s/<code>` or `/v/<code>`. Unsigned tokens in the gallery README format still resolve, but
   their VIP flags are ignored because anyone could forge them.
 
+- **Guest identity:** clients send a stable install id as `X-Guest-Device` (`createHttpApi({ guestDeviceId })`).
+  Follows, "my galleries" (recorded when a gallery is opened) and the "Download all" counter are keyed by it, falling
+  back to the registered guest id (and to the IP for download counts).
+- **Download all:** `POST …/download-pin` checks the event PIN, even on galleries without a PIN gate. Tokens from VIP
+  links with an embedded PIN (`vp` claim) may skip the PIN. Each call uses one of 5 uses per guest (429
+  `download_limit`). `POST …/zips` follows the download policy: `none` returns 403; `own` (or face privacy without
+  "see all") only accepts `photoIds` that show the given `personId`.
+- **Guest uploads:** `POST …/uploads` uses the same multipart flow as the studio, into the event's guest album. It needs
+  `guestUploads` and is capped by `guestUploadLimit` (409 `guest_upload_limit` with `remaining`). Uploads are
+  watermarked when `watermarkGuestUploads` is on and `pending` when `reviewGuestUploads` is on. They don't use plan
+  capacity.
+- **Download renditions:** `GET /v1/public/photos/:id/download?size=2048|3072` streams `…/renditions/<size>.jpg`
+  written by the processor, watermarked when required. Without a processor (dev) it returns 404
+  `rendition_unavailable`; use the photo `url` instead. The guest token can be passed as `?token=` so plain links work.
+
+## Payments (Razorpay)
+
+- With `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET`, guest orders start as `pending` and include `checkout` params for
+  Razorpay Checkout. Print items need `shipping`.
+- `POST /v1/public/orders/:id/confirm { providerOrderId, paymentId, signature }` checks the signature: hex
+  HMAC-SHA256 of `order_id|payment_id` with the key secret. It then marks the order paid exactly once, books the
+  studio's share in the ledger, and adds an activity line.
+- `POST /v1/webhooks/razorpay` checks `X-Razorpay-Signature` (hex HMAC-SHA256 of the raw body with
+  `RAZORPAY_WEBHOOK_SECRET`) and handles `payment.captured` / `order.paid` the same way. Other events get 200 so
+  Razorpay doesn't retry. Point the Razorpay dashboard webhook at this URL.
+- Abandoned carts are orders still `pending` after 30 minutes (`GET /v1/carts`). `POST /v1/carts/remind` emails the
+  buyer and records `reminders` / `remindedAt`.
+
+## Scheduled jobs (Cron Triggers)
+
+- `* * * * *`: due Smart QR schedules switch the QR's event and clear the schedule. Due scheduled broadcasts get
+  `sentAt` (push/email delivery is TODO). Affected studios get a `misc` change event.
+- `0 3 * * *`: events in the trash for more than 30 days are purged: rows, cameras, QR codes, R2 files and face vectors.
+- To run them locally: `wrangler dev --test-scheduled`, then `curl "http://127.0.0.1:8787/__scheduled?cron=*+*+*+*+*"`.
+
+## Assets
+
+`POST /v1/assets?kind=<kind>&filename=<name>` takes the raw file as the body with its `Content-Type`.
+
+- **Image kinds** (`studio-logo`, `studio-cover`, `event-cover`, `watermark-logo`, `broadcast-image`, `qr-logo`,
+  `testimonial-photo`): JPG, PNG, WebP or GIF, up to 10 MB. SVG is rejected because it can carry script.
+- **`kyc-document`:** PDF, JPG or PNG, up to 10 MB.
+
+The response `url` (under `/v1/media`, or `PUBLIC_MEDIA_BASE`) goes into the matching field (`logoUrl`, `coverUrl`,
+`imageUrl`, …). KYC files attach with `updateStoreSettings({ kyc: { documents: [{ kind, assetId, … }] } })` and go
+to review.
+
+## Auth extras
+
+- **Forgot password:** call `POST /v1/auth/otp/request`, then `POST /v1/auth/password/reset { email, code, newPassword }`
+  (`api.auth.resetPassword`). The code is checked like a sign-in code. The call replaces the password, revokes every
+  other session, and returns a new session.
+- **Google sign-in for native apps:** call `/v1/auth/google/start?redirect=frameline://sign-in&mode=json`, open
+  `authorizationUrl` in the system browser, and the callback redirects to `frameline://sign-in#access_token=…&refresh_token=…&expires_in=…`.
+  Pass that fragment to `api.auth.acceptOAuthFragment`. Allowed native URIs come from `GOOGLE_NATIVE_REDIRECTS`
+  (comma-separated; default `frameline://sign-in`, which also covers query strings and sub-paths under it). Anything
+  else falls back to `APP_URL/auth/callback`.
+
 ## Money model
 
 Everything is stored in paise and returned in rupees.
@@ -235,6 +299,7 @@ Everything is stored in paise and returned in rupees.
 - **Ledger:** `ledger_entries` is the statement. `balance` is the payout balance: sales add to it, payouts subtract.
   Wallet movements appear as `credits-added` / `credits-used` lines without changing the payout balance.
 - **Purchases:** `purchases` records what the studio bought from Frameline (plans, credits, renewals, coupons).
+- **Packs:** `POST /v1/events/:id/packs` adds a pack (`PACKS`) to one event's `photoLimit`, paid by wallet or card.
 - **Plan changes:** the unused part of the current period is credited against the new plan's price
   (`planPrice`, `PERIOD_DAYS` in `@frameline/shared`).
 

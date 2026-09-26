@@ -39,6 +39,29 @@ const otpHash = (pepper: string, email: string, code: string) => pepperedHash(pe
 
 export const authRoutes = createRouter()
 
+/** Checks an emailed code: 5 wrong tries burn it; a right code is consumed (single use). */
+async function consumeOtp(c: Context<AppEnv>, email: string, code: string): Promise<void> {
+  const db = getDb(c.env.DB)
+  const t = schema.otpCodes
+  const [otp] = await db.select().from(t).where(and(eq(t.email, email), isNull(t.consumedAt))).orderBy(desc(t.createdAt)).limit(1)
+  if (!otp) throw new Unauthorized('That code is wrong or was already used. Request a new code.', 'otp_invalid')
+  if (otp.expiresAt < nowIso()) throw new Unauthorized('That code has expired. Request a new code.', 'otp_expired')
+  if (otp.attempts >= OTP_MAX_ATTEMPTS) throw new Forbidden('Too many wrong codes. Request a new code.', 'otp_locked')
+
+  const ok = timingSafeEqual(await otpHash(c.env.OTP_PEPPER, email, code), otp.codeHash)
+  if (!ok) {
+    await db.update(t).set({ attempts: sql`${t.attempts} + 1` }).where(eq(t.id, otp.id)).run()
+    const remaining = Math.max(0, OTP_MAX_ATTEMPTS - (otp.attempts + 1))
+    if (remaining === 0) {
+      await db.update(t).set({ consumedAt: nowIso() }).where(eq(t.id, otp.id)).run()
+      throw new Forbidden('Too many wrong codes. Request a new code.', 'otp_locked', { attemptsRemaining: 0 })
+    }
+    throw new Unauthorized(`That code is wrong. ${remaining} ${remaining === 1 ? 'try' : 'tries'} left.`, 'otp_invalid', { attemptsRemaining: remaining })
+  }
+  const consumed = await db.update(t).set({ consumedAt: nowIso() }).where(and(eq(t.id, otp.id), isNull(t.consumedAt))).run()
+  if (consumed.meta.changes === 0) throw new Unauthorized('That code was already used. Request a new code.', 'otp_invalid')
+}
+
 // ── OTP ─────────────────────────────────────────────────────────────────────
 authRoutes.openapi(createRoute({
   method: 'post', path: '/otp/request', tags: ['Auth'], summary: 'Email a 6-digit sign-in code',
@@ -94,24 +117,7 @@ authRoutes.openapi(createRoute({
 }), async (c) => {
   const { email, code, name, studioName } = c.req.valid('json')
   const db = getDb(c.env.DB)
-  const t = schema.otpCodes
-  const [otp] = await db.select().from(t).where(and(eq(t.email, email), isNull(t.consumedAt))).orderBy(desc(t.createdAt)).limit(1)
-  if (!otp) throw new Unauthorized('That code is wrong or was already used. Request a new code.', 'otp_invalid')
-  if (otp.expiresAt < nowIso()) throw new Unauthorized('That code has expired. Request a new code.', 'otp_expired')
-  if (otp.attempts >= OTP_MAX_ATTEMPTS) throw new Forbidden('Too many wrong codes. Request a new code.', 'otp_locked')
-
-  const ok = timingSafeEqual(await otpHash(c.env.OTP_PEPPER, email, code), otp.codeHash)
-  if (!ok) {
-    await db.update(t).set({ attempts: sql`${t.attempts} + 1` }).where(eq(t.id, otp.id)).run()
-    const remaining = Math.max(0, OTP_MAX_ATTEMPTS - (otp.attempts + 1))
-    if (remaining === 0) {
-      await db.update(t).set({ consumedAt: nowIso() }).where(eq(t.id, otp.id)).run()
-      throw new Forbidden('Too many wrong codes. Request a new code.', 'otp_locked', { attemptsRemaining: 0 })
-    }
-    throw new Unauthorized(`That code is wrong. ${remaining} ${remaining === 1 ? 'try' : 'tries'} left.`, 'otp_invalid', { attemptsRemaining: remaining })
-  }
-  const consumed = await db.update(t).set({ consumedAt: nowIso() }).where(and(eq(t.id, otp.id), isNull(t.consumedAt))).run()
-  if (consumed.meta.changes === 0) throw new Unauthorized('That code was already used. Request a new code.', 'otp_invalid')
+  await consumeOtp(c, email, code)
 
   const { user, isNew } = await ensureUser(db, email, { name, studioName })
   const { id: _id, ...tokens } = await issueSession(c, user)
@@ -164,6 +170,26 @@ authRoutes.openapi(createRoute({
   return c.body(null, 204)
 })
 
+authRoutes.openapi(createRoute({
+  method: 'post', path: '/password/reset', tags: ['Auth'], summary: 'Forgot password: set a new one with an emailed code',
+  description: 'Request a code with /otp/request first. The code is checked like a sign-in code (5 tries); on success the password is replaced, every other session is signed out, and a new session is returned.',
+  middleware: [limits.otpVerify] as const,
+  request: { body: body(z.object({ email: Email, code: z.string().regex(/^\d{6}$/, 'The code is 6 digits'), newPassword: Password })) },
+  responses: { 200: json(SessionResponse, 'Password reset, signed in'), ...problems(401, 403, 422) },
+}), async (c) => {
+  const { email, code, newPassword } = c.req.valid('json')
+  const db = getDb(c.env.DB)
+  await consumeOtp(c, email, code)
+  const [existing] = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1)
+  const { user } = existing ? { user: existing } : await ensureUser(db, email)
+  await db.update(schema.users).set({ passwordHash: await hashPassword(newPassword), emailVerifiedAt: user.emailVerifiedAt ?? nowIso() }).where(eq(schema.users.id, user.id)).run()
+  const rt = schema.refreshTokens
+  await db.update(rt).set({ revokedAt: nowIso(), revokedReason: 'password_reset' }).where(and(eq(rt.userId, user.id), isNull(rt.revokedAt))).run()
+  const { id: _id, ...tokens } = await issueSession(c, user)
+  audit(c, 'auth.password_reset', { type: 'user', id: user.id }, {}, user.id)
+  return c.json({ ...tokens, user: { ...userView(user), hasPassword: true }, isNewUser: !existing }, 200)
+})
+
 // ── Sessions ────────────────────────────────────────────────────────────────
 authRoutes.openapi(createRoute({
   method: 'post', path: '/refresh', tags: ['Auth'], summary: 'Rotate the refresh token and get a new access token',
@@ -207,11 +233,17 @@ const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token'
 const GOOGLE_USERINFO = 'https://openidconnect.googleapis.com/v1/userinfo'
 
 const callbackUrl = (c: Context<AppEnv>) => `${(c.env.API_PUBLIC_URL || new URL(c.req.url).origin).replace(/\/$/, '')}/v1/auth/google/callback`
-const safeRedirect = (p?: string) => (p && p.startsWith('/') && !p.startsWith('//') && !p.includes('\\') ? p : '/auth/callback')
+/** App paths are relative to APP_URL; native apps may use an allowlisted absolute URI (GOOGLE_NATIVE_REDIRECTS, default frameline://sign-in). */
+export function safeRedirect(env: AppEnv['Bindings'], p?: string): string {
+  if (p && p.startsWith('/') && !p.startsWith('//') && !p.includes('\\')) return p
+  const allowed = (env.GOOGLE_NATIVE_REDIRECTS ?? 'frameline://sign-in').split(',').map((s) => s.trim()).filter(Boolean)
+  if (p && allowed.some((a) => p === a || p.startsWith(`${a}?`) || p.startsWith(`${a}/`))) return p
+  return '/auth/callback'
+}
 
 authRoutes.openapi(createRoute({
   method: 'get', path: '/google/start', tags: ['Auth'], summary: 'Start Google sign-in',
-  description: 'Redirects to Google. Sets a short-lived state cookie; the PKCE verifier is kept in KV. `mode=json` returns the URL instead (for mobile).',
+  description: 'Redirects to Google. Sets a short-lived state cookie; the PKCE verifier is kept in KV. `mode=json` returns the URL instead (for mobile). `redirect` is an app path (`/auth/callback`) or, for native apps, an allowlisted URI such as `frameline://sign-in` (GOOGLE_NATIVE_REDIRECTS); tokens come back in the URL fragment for `acceptOAuthFragment`.',
   request: { query: z.object({ redirect: z.string().max(512).optional(), mode: z.enum(['redirect', 'json']).default('redirect') }) },
   responses: { 302: { description: 'Redirect to Google' }, 200: json(z.object({ authorizationUrl: z.url(), state: z.string() })), ...problems(501) },
 }), async (c) => {
@@ -220,7 +252,7 @@ authRoutes.openapi(createRoute({
   const state = randomToken(24)
   const verifier = randomToken(48)
   const challenge = toBase64Url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)))
-  await c.env.KV.put(`oauth:google:${state}`, JSON.stringify({ verifier, redirect: safeRedirect(redirect) }), { expirationTtl: 600 })
+  await c.env.KV.put(`oauth:google:${state}`, JSON.stringify({ verifier, redirect: safeRedirect(c.env, redirect) }), { expirationTtl: 600 })
   setCookie(c, STATE_COOKIE, state, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/v1/auth/google', maxAge: 600 })
   const url = new URL(GOOGLE_AUTH)
   url.search = new URLSearchParams({
@@ -271,6 +303,7 @@ authRoutes.openapi(createRoute({
   const { id: _id, ...tokens } = await issueSession(c, user)
   audit(c, 'auth.login', { type: 'user', id: user.id }, { method: 'google' }, user.id)
   const frag = new URLSearchParams({ access_token: tokens.accessToken, refresh_token: tokens.refreshToken, expires_in: String(tokens.expiresIn) })
-  return c.redirect(`${appUrl}${stored.redirect}#${frag}`, 302)
+  const target = stored.redirect.startsWith('/') ? `${appUrl}${stored.redirect}` : stored.redirect
+  return c.redirect(`${target}#${frag}`, 302)
 })
 

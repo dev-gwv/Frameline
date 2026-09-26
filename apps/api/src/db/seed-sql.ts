@@ -44,7 +44,7 @@ export const SEED_STUDIO_ID = 'st_northlight'
 export const SEED_USERS = { owner: 'u1', editor: 'u2', uploader: 'u3' } as const
 
 const TABLES_IN_DELETE_ORDER = [
-  'guest_links', 'renewal_links', 'zip_requests', 'camera_uploads', 'usage_reports', 'purchases', 'studio_follows',
+  'guest_galleries', 'download_uses', 'assets', 'guest_links', 'renewal_links', 'zip_requests', 'camera_uploads', 'usage_reports', 'purchases', 'studio_follows',
   'ticket_messages', 'tickets', 'faces', 'photos', 'people', 'films', 'guests', 'access_requests', 'uploads', 'albums',
   'cameras', 'smart_qrs', 'broadcasts', 'enquiries', 'activity', 'orders', 'ledger_entries', 'prices', 'watermarks', 'websites',
   'team_invites', 'memberships', 'events', 'refresh_tokens', 'otp_codes', 'idempotency_keys', 'audit_log', 'studios', 'users',

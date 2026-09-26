@@ -1,5 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { and, asc, desc, eq, inArray } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm'
+import { getMailer } from '../services/mailer'
 import { getDb, schema } from '../db/client'
 import {
   activityOut, broadcastOut, cameraOut, cameraUploadOut, enquiryOut, ledgerOut, orderOut, priceOut, qrOut, storeSettingsOut, ticketOut,
@@ -14,7 +15,7 @@ import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
 import { membershipOf, requireStudio } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
 import {
-  ActivityItem, Broadcast, Camera, CameraMode, CameraUpload, Enquiry, LedgerEntry, Order, Price, SmartQR, StoreSettings, StoreSettingsPatch, Ticket, TicketPlatform,
+  AbandonedCart, ActivityItem, Broadcast, Camera, CameraMode, CameraUpload, Enquiry, LedgerEntry, Order, Price, SmartQR, StoreSettings, StoreSettingsPatch, Ticket, TicketPlatform,
 } from '../schemas/domain'
 import { audit } from '../services/audit'
 import { eventForMember } from '../services/events'
@@ -541,7 +542,17 @@ businessRoutes.openapi(createRoute({
     const { address, documents, ...rest } = patch.kyc
     Object.assign(next.kyc, rest)
     if (address) next.kyc.address = { ...next.kyc.address, ...address }
-    if (documents) next.kyc.documents = documents.map((d) => ({ ...d, status: d.fileName && d.status === 'needed' ? 'review' : d.status }))
+    if (documents) {
+      const assetIds = documents.map((d) => d.assetId).filter((x): x is string => !!x)
+      const found = assetIds.length ? await db.select().from(schema.assets).where(and(eq(schema.assets.studioId, m.studioId), inArray(schema.assets.id, assetIds))) : []
+      next.kyc.documents = documents.map((d, i) => {
+        if (!d.assetId) return { ...d, status: d.fileName && d.status === 'needed' ? 'review' : d.status }
+        const a = found.find((x) => x.id === d.assetId)
+        if (!a || a.kind !== 'kyc-document') throw new ValidationFailed([{ field: `kyc.documents.${i}.assetId`, in: 'body', message: 'Upload the document with kind "kyc-document" first', code: 'unknown_asset' }])
+        // A newly attached file always goes to review.
+        return { kind: d.kind, assetId: a.id, fileName: a.fileName, status: 'review' as const }
+      })
+    }
     if (next.kyc.gstRegistered && next.kyc.gstin && next.kyc.pan && next.kyc.gstin.slice(2, 12) !== next.kyc.pan) {
       throw new ValidationFailed([{ field: 'kyc.gstin', in: 'body', message: 'Characters 3–12 of the GSTIN must match your PAN', code: 'gstin_pan_mismatch' }])
     }
@@ -586,4 +597,58 @@ businessRoutes.openapi(createRoute({
   audit(c, 'store.payout', { type: 'studio', id: m.studioId }, { amountPaise: toMinor(amount) })
   emit(c, m.studioId, 'misc')
   return c.json(entry, 201)
+})
+
+// ── Abandoned carts ────────────────────────────────────────────────────────
+const CART_AFTER_MS = 30 * 60_000
+
+const cartOut = (o: typeof schema.orders.$inferSelect) => ({
+  orderId: o.id, number: o.number, buyer: o.buyer, ...(o.buyerEmail ? { buyerEmail: o.buyerEmail } : {}), eventId: o.eventId, eventName: o.eventName,
+  items: o.items, amount: toMajor(o.paidPaise), startedAt: o.at, reminders: o.reminderCount, ...(o.remindedAt ? { remindedAt: o.remindedAt } : {}),
+})
+
+businessRoutes.openapi(createRoute({
+  method: 'get', path: '/carts', tags: ['Business'], summary: 'Abandoned carts (checkouts pending for more than 30 minutes)', security,
+  middleware: [requireStudio('editor', 'view carts')] as const,
+  request: { query: PageQuery },
+  responses: { 200: json(pageOf(AbandonedCart, 'CartPage')), ...problems(401, 403) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const { limit, cursor } = c.req.valid('query')
+  const t = schema.orders
+  const cutoff = new Date(Date.now() - CART_AFTER_MS).toISOString()
+  const rows = await getDb(c.env.DB).select().from(t)
+    .where(and(eq(t.studioId, m.studioId), eq(t.status, 'pending'), lt(t.at, cutoff), afterCursor(t.at, t.id, 'desc', cursor)))
+    .orderBy(desc(t.at), desc(t.id)).limit(limit + 1)
+  return c.json(toPage(rows, limit, (r) => [r.at, r.id], cartOut), 200)
+})
+
+businessRoutes.openapi(createRoute({
+  method: 'post', path: '/carts/remind', tags: ['Business'], summary: 'Email buyers a reminder to finish checkout', security,
+  description: 'Only pending carts with a buyer email are reminded; returns how many were sent.',
+  middleware: [requireStudio('editor', 'remind carts'), idempotent] as const,
+  request: { headers: IdempotencyHeader, body: body(z.object({ orderIds: z.array(z.string().max(64)).min(1).max(80) })) },
+  responses: { 200: json(z.object({ reminded: z.number().int() })), ...problems(401, 403, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const t = schema.orders
+  const rows = await db.select().from(t).where(and(eq(t.studioId, m.studioId), eq(t.status, 'pending'), inArray(t.id, c.req.valid('json').orderIds)))
+  const mailer = getMailer(c.env)
+  const gallery = c.env.GALLERY_URL.replace(/\/$/, '')
+  let reminded = 0
+  for (const o of rows) {
+    if (!o.buyerEmail) continue
+    const [ev] = await db.select({ shortId: schema.events.shortId }).from(schema.events).where(eq(schema.events.id, o.eventId)).limit(1)
+    await mailer.send({
+      to: o.buyerEmail,
+      subject: `Your photos from ${o.eventName} are waiting`,
+      text: `Hi ${o.buyer},\n\nYou started an order (${o.items}, ₹${toMajor(o.paidPaise)}) but didn’t finish paying. Complete it here: ${gallery}/${(ev?.shortId ?? '').toLowerCase()}?order=${o.id}\n`,
+    })
+    await db.update(t).set({ remindedAt: nowIso(), reminderCount: sql`${t.reminderCount} + 1` }).where(eq(t.id, o.id)).run()
+    reminded++
+  }
+  audit(c, 'store.carts_reminded', undefined, { reminded })
+  emit(c, m.studioId, 'misc')
+  return c.json({ reminded }, 200)
 })

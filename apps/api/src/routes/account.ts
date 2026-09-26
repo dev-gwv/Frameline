@@ -1,5 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { COUPONS, PERIOD_DAYS, PLANS, planPrice } from '@frameline/shared'
 import { getDb, schema } from '../db/client'
 import { defaultNotificationPrefs, purchaseOut, usageOut } from '../db/mappers'
@@ -48,7 +48,7 @@ accountRoutes.openapi(createRoute({
       coalesce(sum(CASE WHEN a.kind != 'guest' AND p.quality = 'original' THEN 1 ELSE 0 END), 0) AS originals,
       coalesce(sum(CASE WHEN a.kind = 'guest' THEN 1 ELSE 0 END), 0) AS guest
     FROM events e LEFT JOIN photos p ON p.event_id = e.id LEFT JOIN albums a ON a.id = p.album_id
-    WHERE e.studio_id = ${m.studioId} GROUP BY e.id ORDER BY e.created_at DESC`)
+    WHERE e.studio_id = ${m.studioId} AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`)
   return c.json({
     limit: st.photosLimit, used: st.photosUsed, guestReserved: st.guestReserved,
     available: Math.max(0, st.photosLimit - st.photosUsed - st.guestReserved), rules: CAPACITY_RULES,
@@ -65,7 +65,7 @@ accountRoutes.openapi(createRoute({
 }), async (c) => {
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
-  const events = await db.select().from(schema.events).where(eq(schema.events.studioId, m.studioId)).orderBy(desc(schema.events.createdAt))
+  const events = await db.select().from(schema.events).where(and(eq(schema.events.studioId, m.studioId), isNull(schema.events.deletedAt))).orderBy(desc(schema.events.createdAt))
   const csv = [['Event', 'Short code', 'Date', 'Photos', 'Photo limit', 'Status', 'Expires'], ...events.map((e) => [e.name, e.shortId, e.date.slice(0, 10), e.photoCount, e.photoLimit, e.status, e.expiresAt.slice(0, 10)])]
     .map((r) => r.map(csvCell).join(',')).join('\n')
   // Small enough to build inline; large studios would move this to the queue (status 'processing' until done).

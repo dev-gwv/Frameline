@@ -15,6 +15,8 @@ RESEND_API_KEY=
 # Authorised redirect URI: <API_PUBLIC_URL or http://localhost:8787>/v1/auth/google/callback
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
+# Native app redirects allowed for Google sign-in (comma-separated; tokens return in the URL fragment).
+GOOGLE_NATIVE_REDIRECTS=frameline://sign-in
 
 # ── Direct-to-R2 presigned uploads (optional; without them parts go through the Worker) ──
 R2_ACCOUNT_ID=
