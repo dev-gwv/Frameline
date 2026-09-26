@@ -40,6 +40,20 @@ pnpm dev:mobile       # Expo dev server; scan the QR with Expo Go or a dev build
 pnpm --filter @frameline/api dev       # http://localhost:8787/v1/docs — API reference
 ```
 
+### Against the real API (local Cloudflare stack)
+
+```bash
+pnpm --filter @frameline/api db:migrate:local
+pnpm --filter @frameline/api db:reset:local        # loads the sample studio into local D1
+pnpm dev:api                                        # http://localhost:8787 (docs at /v1/docs)
+VITE_API_URL=http://localhost:8787 pnpm dev:admin   # sign in as aarav@northlight.in; the dev code is shown on screen
+VITE_API_URL=http://localhost:8787 pnpm dev:gallery
+EXPO_PUBLIC_API_URL=http://<your-LAN-IP>:8787 pnpm dev:mobile
+```
+
+Secrets go in `apps/api/.dev.vars` (see `.dev.vars.example`). Without `RESEND_API_KEY` sign-in codes are shown
+in development instead of emailed; without Razorpay keys payments are simulated as paid.
+
 Useful checks:
 
 ```bash
