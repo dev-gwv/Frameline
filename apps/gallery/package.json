@@ -1,0 +1,33 @@
+{
+  "name": "@frameline/gallery",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "preview": "vite preview --port 4174",
+    "icons": "node scripts/gen-icons.mjs"
+  },
+  "dependencies": {
+    "@frameline/shared": "workspace:*",
+    "@frameline/ui": "workspace:*",
+    "@radix-ui/react-dialog": "^1.1.14",
+    "@tanstack/react-query": "^5.81.5",
+    "lucide-react": "^0.525.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-router-dom": "^7.6.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.11",
+    "@types/node": "^26.0.0",
+    "@types/react": "~19.2.2",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "tailwindcss": "^4.1.11",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.0"
+  }
+}

@@ -118,12 +118,12 @@ export function createSeed(): SeedState {
   const events: PhotoEvent[] = [
     ev('ev_riya', '6402F9F', 'Riya & Kabir Wedding', 'wedding', '2026-09-12', 'Udaipur', 'live', 1248, 2000, [1420, 640, 250], 412, '2027-09-14', [0, 3, 12]),
     ev('ev_mehta', '7A1C0B2', 'Mehta Sangeet Night', 'wedding', '2026-09-20', 'Jaipur', 'live', 412, 2000, [610, 190, 80], 190, '2027-09-20', [2, 6, 10], { storeEnabled: true }),
-    ev('ev_tessera', '3F9E21D', 'Tessera Labs Offsite', 'corporate', '2026-09-24', 'Goa', 'uploading', 146, 3000, [90, 20, 10], 12, '2027-09-24', [9, 13, 4], { access: 'link', facePrivacy: false, downloads: 'all' }),
+    ev('ev_tessera', '3F9E21D', 'Tessera Labs Offsite', 'corporate', '2026-09-24', 'Goa', 'uploading', 146, 3000, [90, 20, 10], 12, '2027-09-24', [9, 13, 4], { access: 'link', facePrivacy: false, downloads: 'all', requireRegistration: false }),
     ev('ev_greenfield', 'C0DE417', 'Greenfield School Annual Day', 'school', '2026-09-02', 'Pune', 'expiring', 2096, 3000, [3900, 1100, 402], 1210, '2026-10-02', [7, 1, 3], {}, 'pack'),
-    ev('ev_marathon', '91B7F3A', 'Coastal Half Marathon', 'sports', '2026-08-17', 'Mumbai', 'live', 5820, 10000, [8800, 2500, 740], 3302, '2027-08-17', [8, 5, 9], { access: 'link', facePrivacy: false, downloads: 'none', storeEnabled: true }),
+    ev('ev_marathon', '91B7F3A', 'Coastal Half Marathon', 'sports', '2026-08-17', 'Mumbai', 'live', 5820, 10000, [8800, 2500, 740], 3302, '2027-08-17', [8, 5, 9], { access: 'link', facePrivacy: false, downloads: 'none', storeEnabled: true, requireRegistration: false }),
     ev('ev_anaya', '5D22E80', 'Anaya’s First Birthday', 'baby', '2026-10-04', 'Bengaluru', 'draft', 0, 2000, [0, 0, 0], 0, '2027-10-04', [11, 2, 10]),
     ev('ev_kapoor', '2A6F1C9', 'Kapoor Engagement', 'engagement', '2026-07-19', 'Delhi', 'archived', 734, 2000, [1200, 360, 120], 540, '2027-07-19', [6, 0, 11]),
-    ev('ev_portfolio', 'E4B0937', 'Studio Portfolio 2026', 'other', '2026-01-01', 'Mumbai', 'live', 88, 1000, [500, 100, 40], 0, '2027-01-01', [3, 12, 7], { access: 'link', facePrivacy: false }),
+    ev('ev_portfolio', 'E4B0937', 'Studio Portfolio 2026', 'other', '2026-01-01', 'Mumbai', 'live', 88, 1000, [500, 100, 40], 0, '2027-01-01', [3, 12, 7], { access: 'link', facePrivacy: false, requireRegistration: false }),
   ]
   events[0].hosts = [
     { id: 'h1', name: 'Priya Rao', email: 'priya.rao@gmail.com', phone: '+91 99870 22113', role: 'client' },

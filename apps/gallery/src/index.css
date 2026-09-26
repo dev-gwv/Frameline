@@ -1,0 +1,39 @@
+@import "tailwindcss";
+@import "@frameline/ui/styles.css";
+
+/* Let Tailwind see classes used inside the shared UI package. */
+@source "../../../packages/ui/src";
+
+/*
+ * Studio brand colour. `--brand` is set per event from studio.brandColor (see BrandScope).
+ * On dark surfaces a deep brand colour is lifted towards white so text stays readable.
+ */
+:root { --brand: #8C2F39; --brand-ink: #FFFFFF; }
+.text-brand { color: var(--brand); }
+.bg-brand { background: var(--brand); color: var(--brand-ink); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .text-brand { color: color-mix(in oklab, var(--brand) 45%, white); }
+}
+:root[data-theme="dark"] .text-brand { color: color-mix(in oklab, var(--brand) 45%, white); }
+
+@layer base {
+  html { -webkit-tap-highlight-color: transparent; }
+  /* The window scrolls (not body), so scroll restoration and sticky bars behave. */
+  html, body, #root { height: auto; min-height: 100%; }
+  body { overflow-x: clip; }
+}
+
+@layer utilities {
+  .pb-safe { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+  .tile-auto { content-visibility: auto; contain-intrinsic-size: 120px; }
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .hero-fade { background: linear-gradient(180deg, rgba(0, 0, 0, .28) 0%, transparent 32%, transparent 45%, rgba(0, 0, 0, .62) 100%); }
+}
+
+@keyframes fl-shake { 0%, 100% { transform: none; } 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+@keyframes fl-scan { 0% { top: 8%; } 50% { top: 86%; } 100% { top: 8%; } }
+@keyframes fl-pulse-ring { 0% { transform: scale(.92); opacity: .7; } 100% { transform: scale(1.25); opacity: 0; } }
+@keyframes fl-sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+.animate-shake { animation: fl-shake 360ms ease-in-out; }
