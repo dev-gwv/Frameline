@@ -25,6 +25,7 @@ export default function EventPhotos() {
   const { photos, all, isLoading, error } = usePhotoList(scope, { shortId, eventId: event?.id, albumId })
   useGuestAccessGuard(event?.id, error)
   const favs = useLocal((s) => s.favourites)
+  const personId = useLocal((s) => (event ? s.selfie[event.id]?.personId : undefined))
   const favSet = useMemo(() => new Set(favs.map((f) => f.photoId)), [favs])
   const [downloadOpen, setDownloadOpen] = useState(false)
   const capture = useRef<CaptureHandle>(null)
@@ -80,7 +81,7 @@ export default function EventPhotos() {
           : <View style={{ flex: 1.4, justifyContent: 'center' }}><Txt v="small" center>{s.downloads === 'none' ? 'Downloads are off for this gallery' : 'Find yourself to download your photos'}</Txt></View>}
       </View>
 
-      <DownloadSheet open={downloadOpen} onClose={() => setDownloadOpen(false)} photos={photos} event={event} host={capture} />
+      <DownloadSheet open={downloadOpen} onClose={() => setDownloadOpen(false)} photos={photos} event={event} host={capture} albumId={scope === 'album' ? albumId : undefined} personId={scope === 'mine' ? personId : undefined} />
     </View>
   )
 }

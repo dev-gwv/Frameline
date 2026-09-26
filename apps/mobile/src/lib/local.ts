@@ -99,6 +99,12 @@ export const actions = {
       return { joined: [entry, ...rest] }
     })
   },
+  /** Adds galleries the server remembers for this device (listMyGalleries) without reordering the local list. */
+  mergeJoined(list: { id: ID; shortId: string; lastOpenedAt?: string }[]) {
+    const missing = list.filter((g) => !state.joined.some((j) => j.eventId === g.id))
+    if (!missing.length) return
+    local.set((s) => ({ joined: [...s.joined, ...missing.map((g) => ({ eventId: g.id, shortId: g.shortId.toUpperCase(), joinedAt: g.lastOpenedAt ?? new Date().toISOString() }))] }))
+  },
   leave: (eventId: ID) => local.set((s) => ({ joined: s.joined.filter((j) => j.eventId !== eventId) })),
 
   follow: (code: string) => local.set((s) => ({ following: s.following.includes(code) ? s.following : [...s.following, code] })),

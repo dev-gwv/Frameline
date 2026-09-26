@@ -1,14 +1,16 @@
 import { useState } from 'react'
-import { Linking, Share, View } from 'react-native'
+import { Linking, Pressable, Share, StyleSheet, View } from 'react-native'
+import * as ImagePicker from 'expo-image-picker'
+import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import * as Clipboard from 'expo-clipboard'
-import { DEMO_NOW, PLANS, fmt, type Camera } from '@frameline/shared'
+import { DEMO_NOW, PLANS, fmt, type AssetKind, type Camera } from '@frameline/shared'
 import { Button, Card, Chip, DarkCard, Field, Icon, Input, LogoMark, Meter, Screen, SectionHeader, SettingRow, Sheet, Txt, type ChipTone } from '@/components'
-import { API_MODE, queryClient, useHttp } from '@/lib/api'
+import { API_MODE, queryClient, useApi, useHttp } from '@/lib/api'
 import { errorText } from '@/lib/errors'
 import { followLink } from '@/lib/links'
 import { actions, useLocal } from '@/lib/local'
-import { useCameras, useEvents, useStudio, useUsage } from '@/lib/queries'
+import { useAction, useCameras, useEvents, useStudio, useUsage } from '@/lib/queries'
 import { toast } from '@/lib/toast'
 import { font, useTheme } from '@/theme'
 
@@ -24,6 +26,16 @@ export default function More() {
   const email = useLocal((s) => s.studioSession?.email)
   const plan = PLANS.find((p) => p.id === usage?.planId)
   const http = useHttp()
+  const api = useApi()
+  /** uploadAsset (studio-logo / studio-cover) → updateStudio with the returned URL. */
+  const brand = useAction(async (kind: Extract<AssetKind, 'studio-logo' | 'studio-cover'>) => {
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9, allowsEditing: true, aspect: kind === 'studio-logo' ? [1, 1] : [16, 9] })
+    const a = res.canceled ? undefined : res.assets[0]
+    if (!a) return null
+    const asset = await api.uploadAsset(kind, { filename: a.fileName ?? `${kind}.jpg`, uri: a.uri, contentType: a.mimeType ?? 'image/jpeg', size: a.fileSize })
+    await api.updateStudio(kind === 'studio-logo' ? { logoUrl: asset.url } : { coverUrl: asset.url })
+    return kind
+  }, { success: (k) => (k === 'studio-logo' ? 'Logo updated' : k === 'studio-cover' ? 'Cover updated' : 'No change') })
   const [signingOut, setSigningOut] = useState(false)
   const [pwOpen, setPwOpen] = useState(false)
 
@@ -42,15 +54,18 @@ export default function More() {
       {studio ? (
         <Card style={{ gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <View style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: studio.brandColor, alignItems: 'center', justifyContent: 'center' }}>
-              <Txt style={{ fontFamily: font.display, fontSize: 22, color: '#fff' }}>{studio.name[0]}</Txt>
-            </View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Change logo" onPress={() => brand.mutate('studio-logo')}
+              style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: studio.brandColor, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+              {studio.logoUrl ? <Image source={{ uri: studio.logoUrl }} style={StyleSheet.absoluteFill} contentFit="cover" /> : <Txt style={{ fontFamily: font.display, fontSize: 22, color: '#fff' }}>{studio.name[0]}</Txt>}
+            </Pressable>
             <View style={{ flex: 1 }}>
               <Txt v="h3">{studio.name}</Txt>
               <Txt v="small">{studio.handle}.frameline.in · {email}</Txt>
             </View>
           </View>
           <SettingRow first icon="phone" title={studio.phone} detail={studio.email} />
+          <SettingRow icon="image" title={brand.isPending ? 'Uploading…' : 'Logo'} detail={studio.logoUrl ? 'Tap to change' : 'Add your logo for galleries and your profile'} onPress={brand.isPending ? undefined : () => brand.mutate('studio-logo')} />
+          <SettingRow icon="maximize" title="Cover photo" detail={studio.coverUrl ? 'Shown on your studio profile · tap to change' : 'Add a cover for your studio profile'} onPress={brand.isPending ? undefined : () => brand.mutate('studio-cover')} />
         </Card>
       ) : null}
 

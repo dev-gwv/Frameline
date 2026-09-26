@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar'
 import { fmt, palette, type EventSettings, type Photo } from '@frameline/shared'
-import { Icon, IconButton, PhotoFill, Sheet, SettingRow, type IconName } from '@/components'
+import { Icon, IconButton, PhotoFill, Sheet, SettingRow, WatermarkOverlay, type IconName } from '@/components'
 import { EnquiryPrompt } from '@/components/guest'
 import { Zoomable } from '@/components/Zoomable'
 import { useApi } from '@/lib/api'
@@ -12,7 +12,7 @@ import { eventLink } from '@/lib/links'
 import { recordDownloads, useToggleFavourite } from '@/lib/guest'
 import { useLocal } from '@/lib/local'
 import { usePhotoList, type PhotoScope } from '@/lib/photoList'
-import { useAction, useEvent, usePublicEvent } from '@/lib/queries'
+import { useAction, useEvent, usePublicEvent, usePublicWatermark } from '@/lib/queries'
 import { CaptureHost, PermissionError, savePhotos, sharePhoto, type CaptureHandle } from '@/lib/save'
 import { toast } from '@/lib/toast'
 import { font } from '@/theme'
@@ -35,6 +35,7 @@ export default function Viewer() {
   const studioName = publicEvent?.studio.name
   const { photos } = usePhotoList(scope, { eventId: params.eventId || publicEvent?.id, shortId, albumId: params.albumId || undefined })
   const toggleFavourite = useToggleFavourite()
+  const { data: watermark } = usePublicWatermark(studioMode ? undefined : shortId)
   const startIndex = Math.max(0, photos.findIndex((p) => p.id === params.start))
   const [picked, setIndex] = useState<number | null>(null)
   const index = picked ?? startIndex
@@ -87,11 +88,12 @@ export default function Viewer() {
         <Zoomable width={width} height={height * 0.8} zoomed={zoomed} onZoomChange={setZoomed} onTap={() => setChrome((v) => !v)}>
           <View style={{ width: w, height: h }} accessible accessibilityRole="image" accessibilityLabel={`${item.filename}, ${fmt.dateTime(item.capturedAt)}`}>
             <PhotoFill photo={item} contentFit="contain" />
+            {studioMode ? null : <WatermarkOverlay wm={watermark} width={w} height={h} />}
           </View>
         </Zoomable>
       </View>
     )
-  }, [width, height, zoomed])
+  }, [width, height, zoomed, watermark, studioMode])
 
   const guestActions: { icon: IconName; label: string; on: () => void; active?: boolean; loading?: boolean }[] = studioMode ? [] : [
     { icon: 'heart', label: isFav ? 'Favourited' : 'Favourite', active: isFav, on: () => { if (photo) toggleFavourite(photo, event?.shortId ?? shortId) } },

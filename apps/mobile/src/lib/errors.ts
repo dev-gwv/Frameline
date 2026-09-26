@@ -52,6 +52,21 @@ export function friendlyError(e: unknown): FriendlyError {
     case 'gallery_archived': return out('Gallery archived', 'Ask the photographer to restore it.')
     case 'gallery_expired': return out('Gallery expired', 'Ask the photographer to renew it.')
     case 'gallery_empty': return out('Photos aren’t ready yet', 'Check back soon.')
+    case 'guest_uploads_disabled': return out('Guest uploads are off', 'The host isn’t collecting guest photos for this event.')
+    case 'guest_upload_limit': {
+      const left = Number(e.problem.remaining)
+      return out('Too many photos', Number.isFinite(left) ? `This gallery has room for ${plural(left, 'more photo', 'more photos')}.` : 'This gallery can’t take more guest photos.')
+    }
+    case 'no_guest_album': return out('Guest uploads aren’t set up', 'Ask the studio to add a Guest uploads album.')
+    case 'download_limit': return out('“Download all” used up', 'You’ve used all 5. Save single photos from the viewer, or ask for a ZIP by email.')
+    case 'downloads_disabled': return out('Downloads are off', 'You can still buy prints or full-resolution photos.')
+    case 'downloads_own_only': return out('Find yourself first', 'You can download only the photos you’re in. Take a selfie to find them.')
+    case 'oauth_failed':
+    case 'oauth_invalid':
+    case 'oauth_state_mismatch': return out('Google sign-in didn’t finish', e.detail)
+    case 'oauth_email_unverified': return out('Verify your Google email', e.detail)
+    case 'not_configured':
+    case 'http_501': return out('Not available yet', e.detail)
     case 'store_disabled': return out('Not for sale', 'This gallery isn’t selling photos.')
     case 'enquiries_disabled': return out('Enquiries are off', 'Contact the studio directly instead.')
     case 'otp_invalid': {

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { AppState } from 'react-native'
 import * as SecureStore from 'expo-secure-store'
+import * as WebBrowser from 'expo-web-browser'
 import { focusManager, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import {
   ApiError, createHttpApi, createMockApi,
@@ -52,6 +53,38 @@ function secureTokenStore(): TokenStore {
   }
 }
 
+const secureTokens = secureTokenStore()
+
+/**
+ * Google sign-in for the native app (apps/api README "Auth extras"): ask the API for the Google URL with
+ * `redirect=frameline://sign-in&mode=json`, open it in an auth session, and store the tokens from the redirect
+ * fragment with auth.acceptOAuthFragment. Returns false when the person cancelled.
+ */
+export const GOOGLE_REDIRECT = 'frameline://sign-in'
+export async function signInWithGoogle(http: FramelineHttpApi): Promise<boolean> {
+  const { authorizationUrl } = await http.request<{ authorizationUrl: string }>('GET', '/v1/auth/google/start', { query: { redirect: GOOGLE_REDIRECT, mode: 'json' }, auth: false })
+  const res = await WebBrowser.openAuthSessionAsync(authorizationUrl, GOOGLE_REDIRECT)
+  if (res.type !== 'success') return false
+  const fragment = res.url.includes('#') ? res.url.slice(res.url.indexOf('#') + 1) : ''
+  let ok = false
+  try {
+    ok = await http.auth.acceptOAuthFragment(fragment)
+  } catch {
+    // Some URLSearchParams polyfills lack get(): read the fragment by hand and store the tokens directly.
+    const p: Record<string, string> = {}
+    for (const pair of fragment.split('&')) { const [k, v = ''] = pair.split('='); if (k) p[k] = decodeURIComponent(v) }
+    if (p.access_token && p.refresh_token) {
+      await secureTokens.set({ accessToken: p.access_token, refreshToken: p.refresh_token, expiresAt: Date.now() + Number(p.expires_in ?? 900) * 1000 })
+      ok = true
+    }
+  }
+  if (!ok) {
+    const m = /[#&]error=([^&]+)/.exec(res.url)
+    throw new ApiError({ status: 401, code: 'oauth_failed', detail: m ? decodeURIComponent(m[1]!.replace(/\+/g, ' ')) : 'Google didn’t sign you in. Try again or use an email code.' })
+  }
+  return true
+}
+
 /** Guest gallery tokens (12 h, per event short id) in expo-sqlite kv-store: the client needs sync reads. */
 function kvGuestTokenStore(prefix = 'frameline.guest'): GuestTokenStore {
   return {
@@ -59,6 +92,23 @@ function kvGuestTokenStore(prefix = 'frameline.guest'): GuestTokenStore {
     set: (k, v) => kv.set(`${prefix}.${k.toUpperCase()}`, v),
     clear: (k) => kv.remove(`${prefix}.${k.toUpperCase()}`),
   }
+}
+
+/**
+ * Stable per-install id sent as X-Guest-Device on guest calls (follows, "my galleries" and the "Download all"
+ * counter are keyed by it). Random v4-style id kept in SecureStore; falls back to kv-store if the keychain fails.
+ */
+const DEVICE_KEY = 'frameline.guest.device'
+let deviceId: string | undefined
+export function guestDeviceId(): string {
+  if (deviceId) return deviceId
+  try { deviceId = SecureStore.getItem(DEVICE_KEY) ?? undefined } catch { deviceId = kv.get(DEVICE_KEY) ?? undefined }
+  if (!deviceId) {
+    const hex = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+    deviceId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${'89ab'[Math.floor(Math.random() * 4)]}${hex.slice(17, 20)}-${hex.slice(20)}`
+    try { SecureStore.setItem(DEVICE_KEY, deviceId) } catch { kv.set(DEVICE_KEY, deviceId) }
+  }
+  return deviceId
 }
 
 /* ---------------- clients ---------------- */
@@ -73,8 +123,9 @@ export function createApi(): ApiClients {
   if (API_URL) {
     const http = createHttpApi({
       baseUrl: API_URL,
-      tokens: secureTokenStore(),
+      tokens: secureTokens,
       guestTokens: kvGuestTokenStore(),
+      guestDeviceId,
       WebSocket: globalThis.WebSocket,
       // Refresh failed: the photographer has to sign in again. Guests never have a studio session, so this is a no-op for them.
       onUnauthorized: () => { if (local.get().studioSession) { actions.signOut(); queryClient.clear() } },
@@ -111,7 +162,7 @@ const TOPIC_KEYS: Record<ChangeTopic, string[]> = {
   usage: ['usage'],
   guests: ['guests', 'access-requests'],
   activity: ['activity'],
-  misc: ['films', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'website', 'enquiries', 'ledger', 'orders'],
+  misc: ['films', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'public-watermark', 'website', 'enquiries', 'ledger', 'orders'],
 }
 
 function LiveUpdates({ api }: { api: FramelineApi }) {

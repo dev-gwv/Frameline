@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { ScrollView, View } from 'react-native'
+import { Alert, ScrollView, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
-import { EVENT_TYPE_LABELS, fmt, type EventSettings } from '@frameline/shared'
-import { Button, Card, Chip, CoverMosaic, EmptyState, ErrorState, EventStatusChip, IconButton, LoadingList, PhotoGrid, SettingRow, Toggle, Txt } from '@/components'
+import { EVENT_TYPE_LABELS, PACKS, fmt, type EventSettings } from '@frameline/shared'
+import { Button, Card, Chip, CoverMosaic, EmptyState, ErrorState, EventStatusChip, IconButton, LoadingList, Meter, PhotoGrid, SettingRow, Toggle, Txt } from '@/components'
 import { useApi } from '@/lib/api'
 import { usePhotoList } from '@/lib/photoList'
-import { useAction, useAlbums, useEvent } from '@/lib/queries'
+import { useAction, useAlbums, useEvent, useUsage } from '@/lib/queries'
 import { radius, useTheme } from '@/theme'
 
 export default function ManageEvent() {
@@ -18,6 +18,28 @@ export default function ManageEvent() {
   const { photos, isLoading } = usePhotoList('studio', { eventId: id, albumId })
 
   const settings = useAction((patch: Partial<EventSettings>) => api.updateEventSettings(id, patch), { success: 'Saved' })
+  const { data: usage } = useUsage()
+  const pack = useAction((v: { photos: number; payWith: 'credits' | 'card' }) => api.buyPack(id, v.photos, { payWith: v.payWith }), {
+    success: (r) => `Room for ${fmt.count(r.event.photoLimit)} photos now · ${fmt.rupees(r.charged)}`,
+  })
+
+  /** buyPack: pick a pack (PACKS), then wallet credits or card. */
+  const buyMore = () => {
+    Alert.alert('Buy more photos', 'Adds room for more photos to this event only.', [
+      ...PACKS.map((p) => ({
+        text: `${fmt.count(p.photos)} photos · ${fmt.rupees(p.price)}`,
+        onPress: () => {
+          const enough = (usage?.walletCredits ?? 0) >= p.price
+          Alert.alert(`${fmt.count(p.photos)}-photo pack`, `${fmt.rupees(p.price)}. Wallet: ${fmt.rupees(usage?.walletCredits ?? 0)}.`, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Pay by card', onPress: () => pack.mutate({ photos: p.photos, payWith: 'card' }) },
+            ...(enough ? [{ text: 'Use credits', onPress: () => pack.mutate({ photos: p.photos, payWith: 'credits' as const }) }] : []),
+          ])
+        },
+      })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ])
+  }
 
   if (error) return <ErrorState error={error} onRetry={refetch} />
   if (!event) return <LoadingList />
@@ -45,6 +67,18 @@ export default function ManageEvent() {
           </Card>
         ))}
       </View>
+
+      {event.photoLimit ? (
+        <Card style={{ gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Txt weight="bold" style={{ flex: 1 }}>Photo space</Txt>
+            <Txt v="mono" style={{ fontSize: 12.5 }}>{fmt.count(event.photoCount)} / {fmt.count(event.photoLimit)}</Txt>
+          </View>
+          <Meter value={event.photoCount} max={event.photoLimit} />
+          {event.photoCount / event.photoLimit > 0.8 ? <Txt v="small">This event is nearly full. A pack adds room without changing your plan.</Txt> : null}
+          <Button label="Buy more photos" icon="plus" size="sm" loading={pack.isPending} onPress={buyMore} />
+        </Card>
+      ) : null}
 
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <Button label="Share gallery" icon="share-2" variant="primary" style={{ flex: 1.3 }} onPress={() => router.push({ pathname: '/share/[id]', params: { id: event.id } })} />

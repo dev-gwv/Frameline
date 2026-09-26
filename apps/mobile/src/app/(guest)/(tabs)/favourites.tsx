@@ -1,19 +1,21 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { View, useWindowDimensions } from 'react-native'
 import { router } from 'expo-router'
 import type { Photo } from '@frameline/shared'
 import { EmptyState, PhotoTile, Screen, SectionHeader, Txt } from '@/components'
-import { useLocal, type Favourite } from '@/lib/local'
-import { usePublicEvent } from '@/lib/queries'
+import { actions, local, useLocal, type Favourite } from '@/lib/local'
+import { useMyFavourites, usePublicEvent } from '@/lib/queries'
 import { useTheme } from '@/theme'
 
 /**
- * Favourites across galleries. Each heart is sent with setFavourite (the studio sees the picks), but the contract has
- * no "list my favourites" endpoint, so this tab shows the photo snapshots kept on the phone.
+ * Favourites across galleries. Hearts are sent with setFavourite. For galleries where this guest registered,
+ * listMyFavourites brings back picks made on other devices; they're merged into the local snapshots, which also
+ * keep favourites from galleries without registration (the server only lists them for registered guests).
  */
 export default function Favourites() {
   const { c } = useTheme()
   const favs = useLocal((s) => s.favourites)
+  const registered = useLocal((s) => s.joined.filter((j) => !!s.registrations[j.eventId]))
 
   const groups = useMemo(() => {
     const map = new Map<string, { shortId?: string; photos: Photo[] }>()
@@ -26,13 +28,15 @@ export default function Favourites() {
     return [...map.entries()]
   }, [favs])
 
+  const sync = registered.map((j) => <ServerFavourites key={j.eventId} shortId={j.shortId} />)
   if (!groups.length) {
-    return <Screen><EmptyState icon="heart" title="No favourites yet" body="Tap the heart on any photo to keep it here. The studio sees your picks too." action="Go to my events" onAction={() => router.navigate('/events')} /></Screen>
+    return <Screen>{sync}<EmptyState icon="heart" title="No favourites yet" body="Tap the heart on any photo to keep it here. The studio sees your picks too." action="Go to my events" onAction={() => router.navigate('/events')} /></Screen>
   }
   return (
     <Screen>
+      {sync}
       {groups.map(([eventId, g]) => <FavGroup key={eventId} eventId={eventId} shortId={g.shortId} photos={g.photos} />)}
-      <Txt v="small" center color={c.ink3}>Favourites are kept on this phone.</Txt>
+      <Txt v="small" center color={c.ink3}>Register in a gallery to keep favourites across your devices.</Txt>
     </Screen>
   )
 }
@@ -53,4 +57,14 @@ function FavGroup({ eventId, shortId, photos }: { eventId: string; shortId?: str
       </View>
     </View>
   )
+}
+
+/** Merges a registered gallery's server favourites into the local list (renders nothing). */
+function ServerFavourites({ shortId }: { shortId: string }) {
+  const { data } = useMyFavourites(shortId)
+  useEffect(() => {
+    const have = new Set(local.get().favourites.map((f) => f.photoId))
+    for (const p of data ?? []) if (!have.has(p.id)) actions.setFavourite(p, shortId, true)
+  }, [data, shortId])
+  return null
 }

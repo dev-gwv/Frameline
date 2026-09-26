@@ -5,7 +5,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { Image } from 'expo-image'
 import { Button, Card, EmptyState, Icon, LoadingList, Screen, Txt } from '@/components'
 import { ApiError } from '@frameline/shared'
-import { API_MODE, useApi } from '@/lib/api'
+import { useApi } from '@/lib/api'
 import { friendlyError } from '@/lib/errors'
 import { actions, lastRegistration, useLocal } from '@/lib/local'
 import { usePublicEvent } from '@/lib/queries'
@@ -13,11 +13,9 @@ import { toast } from '@/lib/toast'
 import { useTheme } from '@/theme'
 
 /**
- * Guest upload: pick photos → uploadPhotos({ source: 'guest', uploadedBy }) into the Guest uploads album (goes to
- * review when the event asks for it). The per-phone limit is counted locally.
- *
- * NOTE: on the real API POST /v1/events/:id/uploads needs a studio session (uploader role); there is no public
- * guest-upload endpoint yet, so guests without a studio session get a plain-words 401 message.
+ * Guest upload: pick photos → uploadGuestPhotos(shortId, files, { uploadedBy }) into the Guest uploads album (the
+ * server applies review and watermarking). The limit shown is a local estimate until the server answers
+ * 409 `guest_upload_limit` with the real room left.
  */
 export default function GuestUpload() {
   const { c } = useTheme()
@@ -30,11 +28,12 @@ export default function GuestUpload() {
   const [assets, setAssets] = useState<ImagePicker.ImagePickerAsset[]>([])
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState(0)
+  const [serverRemaining, setServerRemaining] = useState<number>()
 
   if (!event) return <LoadingList />
   const album = event.albums.find((a) => a.kind === 'guest')
   const s = event.settings
-  const remaining = Math.max(0, s.guestUploadLimit - sentBefore)
+  const remaining = serverRemaining ?? Math.max(0, s.guestUploadLimit - sentBefore)
   if (!s.guestUploads || !album) return <Screen><EmptyState icon="upload-cloud" title="Guest uploads are off" body="The host isn’t collecting guest photos for this event." /></Screen>
 
   const pick = async () => {
@@ -45,15 +44,19 @@ export default function GuestUpload() {
   const send = async () => {
     setBusy(true)
     try {
-      await api.uploadPhotos(event.id, album.id, assets.map((a, i) => ({
+      await api.uploadGuestPhotos(event.shortId, assets.map((a, i) => ({
         filename: a.fileName ?? `guest_${Date.now()}_${i}.jpg`, size: a.fileSize ?? 3_000_000, url: a.uri, width: a.width, height: a.height,
-      })), { quality: 'web', source: 'guest', uploadedBy: reg?.name ?? 'Guest', watermark: s.watermarkGuestUploads || undefined })
+      })), { uploadedBy: reg?.name })
       actions.countGuestUpload(event.id, assets.length)
       setSent(assets.length)
       setAssets([])
     } catch (e) {
-      if (API_MODE === 'http' && e instanceof ApiError && e.status === 401) {
-        toast.error('Guest uploads aren’t open in the app yet', 'Share your photos from the gallery website, or send them to the studio')
+      if (e instanceof ApiError && e.code === 'guest_upload_limit') {
+        const left = Number(e.problem.remaining)
+        if (Number.isFinite(left)) { setServerRemaining(left); if (left > 0) setAssets((xs) => xs.slice(0, left)) }
+        toast.error('Too many photos', Number.isFinite(left) && left > 0 ? `This gallery has room for ${left} more. We kept the first ${left} you picked.` : 'This gallery can’t take more guest photos.')
+      } else if (e instanceof ApiError && e.code === 'guest_uploads_disabled') {
+        toast.error('Guest uploads are off', 'The host isn’t collecting guest photos for this event any more.')
       } else {
         const f = friendlyError(e)
         toast.error(f.title, f.detail)

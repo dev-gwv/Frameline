@@ -1,5 +1,5 @@
 import { useMutation, useQuery, type UseMutationOptions } from '@tanstack/react-query'
-import { createSeed, type FramelineApi, type ID, type ListPhotosQuery, type Photo, type Price, type PublicPhotosQuery } from '@frameline/shared'
+import type { FramelineApi, ID, ListPhotosQuery, Photo, PublicPhotosQuery } from '@frameline/shared'
 import { useApi } from './api'
 import { friendlyError } from './errors'
 import { useLocal, type SelfieMatch } from './local'
@@ -79,22 +79,44 @@ export const useStudioProfile = (code?: string) => {
   return useQuery({ queryKey: ['studio-profile', key], queryFn: () => api.getStudioProfile(key!), enabled: !!key })
 }
 
-let fallbackPrices: Price[] | null = null
-/**
- * Store prices. `listPrices` is a studio endpoint (GET /v1/prices needs an editor session), so guests on the real API
- * get 401: fall back to the standard price list. The server prices the order from the studio's own list either way.
- */
-export const usePrices = () => {
+/** Store prices for a gallery (public endpoint; the server prices the order from the same list). */
+export const usePublicPrices = (shortId?: string) => {
   const api = useApi()
-  return useQuery({
-    queryKey: ['orders', 'prices'],
-    queryFn: async (): Promise<{ prices: Price[]; standard: boolean }> => {
-      try { return { prices: await api.listPrices(), standard: false } } catch {
-        fallbackPrices ??= createSeed().prices
-        return { prices: fallbackPrices, standard: true }
-      }
-    },
-  })
+  const key = upper(shortId)
+  return useQuery({ queryKey: ['orders', 'public-prices', key], queryFn: () => api.listPublicPrices(key!), enabled: !!key })
+}
+
+/** The studio's watermark as guests see it on previews. */
+export const usePublicWatermark = (shortId?: string) => {
+  const api = useApi()
+  const key = upper(shortId)
+  return useQuery({ queryKey: ['public-watermark', key], queryFn: () => api.getPublicWatermark(key!), enabled: !!key, staleTime: 10 * 60_000 })
+}
+
+/** Studios this device follows (keyed by X-Guest-Device on the API). */
+export const useFollowedStudios = () => {
+  const api = useApi()
+  return useQuery({ queryKey: ['studio-profile', 'followed'], queryFn: () => api.listFollowedStudios() })
+}
+
+/** Galleries this device has opened. */
+export const useMyGalleries = () => {
+  const api = useApi()
+  return useQuery({ queryKey: ['public-event', 'mine'], queryFn: () => api.listMyGalleries() })
+}
+
+/** A registered guest's favourites in one gallery (needs a guest session with a guest id). */
+export const useMyFavourites = (shortId: string | undefined, enabled = true) => {
+  const api = useApi()
+  const key = upper(shortId)
+  return useQuery({ queryKey: ['public-photos', 'favourites', key], queryFn: () => api.listMyFavourites(key!), enabled: !!key && enabled })
+}
+
+/** Orders this guest placed in one gallery. */
+export const useMyOrders = (shortId: string | undefined) => {
+  const api = useApi()
+  const key = upper(shortId)
+  return useQuery({ queryKey: ['orders', 'mine', key], queryFn: () => api.listMyOrders(key!), enabled: !!key })
 }
 
 /**

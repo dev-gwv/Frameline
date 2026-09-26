@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { router } from 'expo-router'
 import { Image } from 'expo-image'
@@ -6,16 +6,20 @@ import { Button, Card, EmptyState, Field, Icon, Input, Screen, SectionHeader, Sk
 import { notFoundText, useOpenCode } from '@/components/guest'
 import { API_MODE } from '@/lib/api'
 import { parseCode } from '@/lib/links'
-import { useLocal } from '@/lib/local'
-import { useStudioProfile } from '@/lib/queries'
+import { actions, useLocal } from '@/lib/local'
+import { useFollowedStudios, useStudioProfile } from '@/lib/queries'
 import { font, useTheme } from '@/theme'
 
 /**
- * Studios this phone follows. The follow itself is sent with followStudio (from the profile screen); the list is kept
- * on the phone because the contract has no "studios I follow" endpoint.
+ * Studios this device follows: listFollowedStudios (keyed by the install's X-Guest-Device id) merged with the local
+ * list, which shows instantly and covers follows made before the device id existed.
  */
 export default function Following() {
-  const following = useLocal((s) => s.following)
+  const localFollowing = useLocal((s) => s.following)
+  const { data: server } = useFollowedStudios()
+  const following = useMemo(() => [...new Set([...localFollowing, ...(server ?? []).map((st) => st.followCode.toUpperCase())])], [localFollowing, server])
+  // Keep the local cache in step with the server so Follow buttons elsewhere show the right state.
+  useEffect(() => { for (const st of server ?? []) actions.follow(st.followCode.toUpperCase()) }, [server])
   const openCode = useOpenCode()
   const [code, setCode] = useState('')
   const [error, setError] = useState<string>()

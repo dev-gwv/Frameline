@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Platform, Pressable, TextInput, View } from 'reac
 import { router } from 'expo-router'
 import { Button, Divider, Field, GoldText, Input, LogoMark, Screen, Txt } from '@/components'
 import type { SessionResponse } from '@frameline/shared'
-import { queryClient, useHttp } from '@/lib/api'
+import { queryClient, signInWithGoogle, useHttp } from '@/lib/api'
 import { errorText } from '@/lib/errors'
 import { actions } from '@/lib/local'
 import { toast } from '@/lib/toast'
@@ -34,6 +34,22 @@ export default function SignIn() {
     actions.signIn(session?.user.email ?? addr.trim().toLowerCase(), { name: session?.user.name })
     if (session?.isNewUser) toast.success('Welcome to Frameline', 'Your studio is ready')
     router.replace('/home')
+  }
+
+  const [googleBusy, setGoogleBusy] = useState(false)
+  /** API mode: native Google flow (mode=json → auth session → acceptOAuthFragment), then load the account with me(). */
+  const google = async () => {
+    if (!http) { toast.success('Signed in with Google', 'Demo account: studio@northlight.in'); finish('studio@northlight.in'); return }
+    setGoogleBusy(true); setError(undefined)
+    try {
+      if (!(await signInWithGoogle(http))) return
+      const me = await http.auth.me()
+      queryClient.clear()
+      actions.signIn(me.user.email, { name: me.user.name, studioName: me.memberships[0]?.studioName })
+      router.replace('/home')
+    } catch (e) {
+      setError(errorText(e))
+    } finally { setGoogleBusy(false) }
   }
 
   const sendCode = async (resend = false) => {
@@ -95,15 +111,10 @@ export default function SignIn() {
 
         {step === 'email' || step === 'password' ? (
           <>
-            {/* Google sign-in needs an app redirect the API accepts; demo-only in mock mode. */}
-            {!http ? (
-              <>
-                <Button label="Continue with Google" icon="globe" size="lg" onPress={() => { toast.success('Signed in with Google', 'Demo account: studio@northlight.in'); finish('studio@northlight.in') }} />
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <Divider style={{ flex: 1 }} /><Txt v="small" color={c.ink3}>or use email</Txt><Divider style={{ flex: 1 }} />
-                </View>
-              </>
-            ) : null}
+            <Button label="Continue with Google" icon="globe" size="lg" loading={googleBusy} onPress={google} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Divider style={{ flex: 1 }} /><Txt v="small" color={c.ink3}>or use email</Txt><Divider style={{ flex: 1 }} />
+            </View>
             <Field label="Email address" error={error}>
               <Input icon="mail" value={email} onChangeText={(t) => { setEmail(t); setError(undefined) }} autoCapitalize="none" keyboardType="email-address" autoComplete="email" textContentType="emailAddress" placeholder="you@studio.in" returnKeyType="go" onSubmitEditing={step === 'email' ? () => sendCode() : withPassword} invalid={!!error} />
             </Field>

@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { EVENT_TYPE_LABELS, fmt } from '@frameline/shared'
 import { Button, Card, Chip, EmptyState, ErrorState, Icon, IconButton, LoadingList, Screen, SectionHeader, SettingRow, ToneView, Txt } from '@/components'
 import { EnquiryPrompt } from '@/components/guest'
+import { useQueryClient } from '@tanstack/react-query'
 import { useApi } from '@/lib/api'
 import { errorCode, friendlyError } from '@/lib/errors'
 import { followLink } from '@/lib/links'
@@ -18,6 +19,7 @@ import { font, radius, useTheme } from '@/theme'
 export default function StudioProfileScreen() {
   const { c } = useTheme()
   const api = useApi()
+  const qc = useQueryClient()
   const { code } = useLocalSearchParams<{ code: string }>()
   const followCode = String(code ?? '').toUpperCase()
   const { data, isLoading, error, refetch } = useStudioProfile(followCode)
@@ -35,11 +37,17 @@ export default function StudioProfileScreen() {
   const { studio, featured } = data
 
   const toggleFollow = async () => {
-    if (following) { actions.unfollow(studio.followCode); toast.info(`Unfollowed ${studio.name}`); return }
+    if (following) {
+      actions.unfollow(studio.followCode)
+      api.unfollowStudio(studio.followCode).then(() => qc.invalidateQueries({ queryKey: ['studio-profile'] }), () => {})
+      toast.info(`Unfollowed ${studio.name}`)
+      return
+    }
     setBusy(true)
     try {
       await api.followStudio(studio.followCode)
       actions.follow(studio.followCode)
+      qc.invalidateQueries({ queryKey: ['studio-profile'] })
       refetch()
       toast.success(`Following ${studio.name}`)
     } catch (e) {

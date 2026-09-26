@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { KeyboardAvoidingView, Platform, View } from 'react-native'
 import { ApiError, type PublicEvent } from '@frameline/shared'
-import { API_MODE, useApi, useHttp } from '@/lib/api'
+import { API_MODE, useApi } from '@/lib/api'
 import { errorCode, friendlyError } from '@/lib/errors'
 import { actions, lastRegistration, useLocal } from '@/lib/local'
 import { toast } from '@/lib/toast'
@@ -9,6 +9,8 @@ import { useTheme } from '@/theme'
 import { Icon } from './Icon'
 import { ToneView } from './photo'
 import { Button, Card, Field, Input, Screen, Txt } from './primitives'
+
+const emailOk = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())
 
 function GateHeader({ event, icon, title, body }: { event: PublicEvent; icon: 'lock' | 'user'; title: string; body: string }) {
   const { c } = useTheme()
@@ -35,8 +37,11 @@ function GateHeader({ event, icon, title, body }: { event: PublicEvent; icon: 'l
 export function PinGate({ event }: { event: PublicEvent }) {
   const { c } = useTheme()
   const api = useApi()
-  const http = useHttp()
   const reg = useLocal(lastRegistration)
+  const [askOpen, setAskOpen] = useState(false)
+  const [askName, setAskName] = useState(reg?.name ?? '')
+  const [askEmail, setAskEmail] = useState(reg?.email ?? '')
+  const [askBusy, setAskBusy] = useState(false)
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string>()
   const [locked, setLocked] = useState(false)
@@ -60,17 +65,19 @@ export function PinGate({ event }: { event: PublicEvent }) {
     }
   }
 
-  // POST …/access-requests exists on the API but not in the shared contract yet, so it's only sent in API mode.
+  /** requestAccess: the photographer sees the request in Guests and can reply with the PIN. */
   const askHost = async () => {
-    if (!reg) { toast.info('Ask the host for the PIN', 'It’s on the invitation or the message you got with the link'); return }
+    if (askName.trim().length < 2 || !emailOk(askEmail)) { toast.error('Add your name and email', 'So the host knows who is asking and where to reply'); return }
+    setAskBusy(true)
     try {
-      if (http) await http.request('POST', `/v1/public/events/${encodeURIComponent(event.shortId)}/access-requests`, { body: { name: reg.name, email: reg.email, note: 'Asked from the Frameline app' }, auth: false })
+      await api.requestAccess(event.shortId, { name: askName.trim(), email: askEmail.trim(), note: 'Asked from the Frameline app' })
       setAsked(true)
-      toast.success('Request sent', `${event.studio.name} will share access with ${reg.email}${API_MODE === 'mock' ? ' (demo)' : ''}`)
+      setAskOpen(false)
+      toast.success('Request sent', `${event.studio.name} will reply to ${askEmail.trim()}`)
     } catch (e) {
       const f = friendlyError(e)
       toast.error(f.title, f.detail)
-    }
+    } finally { setAskBusy(false) }
   }
 
   return (
@@ -84,15 +91,21 @@ export function PinGate({ event }: { event: PublicEvent }) {
               onChangeText={(t) => { const v = t.replace(/\D/g, ''); setPin(v); setError(undefined); if (v.length === 4) unlock(v) }} />
           </Field>
           <Button label={locked ? 'Locked for now' : 'Unlock gallery'} variant="primary" size="lg" loading={busy} disabled={pin.length !== 4 || locked} onPress={() => unlock()} />
-          <Button label={asked ? 'Request sent' : 'I don’t have a PIN — ask the host'} variant="ghost" disabled={asked} onPress={askHost} />
+          {askOpen ? (
+            <View style={{ gap: 10 }}>
+              <Field label="Your name"><Input value={askName} onChangeText={setAskName} autoComplete="name" placeholder="Full name" /></Field>
+              <Field label="Email for the reply"><Input value={askEmail} onChangeText={setAskEmail} keyboardType="email-address" autoCapitalize="none" autoComplete="email" placeholder="you@gmail.com" /></Field>
+              <Button label="Send request" loading={askBusy} onPress={askHost} />
+            </View>
+          ) : (
+            <Button label={asked ? 'Request sent' : 'I don’t have a PIN — ask the host'} variant="ghost" disabled={asked} onPress={() => setAskOpen(true)} />
+          )}
         </Card>
         {API_MODE === 'mock' ? <Txt v="small" center color={c.ink3}>Demo PIN for the sample wedding: 5211</Txt> : null}
       </Screen>
     </KeyboardAvoidingView>
   )
 }
-
-const emailOk = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())
 
 /** Registration form for galleries with `requireRegistration` / `access: 'registered'` (registerGuest). */
 export function RegistrationGate({ event }: { event: PublicEvent }) {

@@ -2,7 +2,7 @@ import { memo, useEffect, type ReactNode } from 'react'
 import { Animated, Pressable, StyleSheet, Text, View, useAnimatedValue, type StyleProp, type ViewStyle } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Image } from 'expo-image'
-import type { Photo, Tone } from '@frameline/shared'
+import type { Photo, PublicWatermark, Tone } from '@frameline/shared'
 import { font, useTheme } from '@/theme'
 import { Icon } from './Icon'
 
@@ -85,3 +85,31 @@ const styles = StyleSheet.create({
   processingText: { color: '#F3ECDF', fontFamily: font.bodyBold, fontSize: 9 },
   fav: { position: 'absolute', right: 4, top: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(12,10,8,0.5)', alignItems: 'center', justifyContent: 'center' },
 })
+
+const WM_SIZE = { subtle: 0.035, normal: 0.05, bold: 0.07 } as const
+
+/**
+ * The studio watermark over a guest preview (getPublicWatermark), drawn at the configured corner, size, opacity and
+ * edge offset. Only a visual overlay: downloads get the watermark burned in by the server when the studio asks for it.
+ */
+export function WatermarkOverlay({ wm, width, height }: { wm: PublicWatermark | undefined; width: number; height: number }) {
+  if (!wm?.enabled || !wm.settings.applyTo.previews) return null
+  const w = wm.settings
+  const short = Math.min(width, height)
+  const edge = (short * (w.edgeOffset ?? 3)) / 100
+  const fontSize = Math.max(9, short * WM_SIZE[w.size])
+  const pos = { [w.position[0] === 't' ? 'top' : 'bottom']: edge, [w.position[1] === 'l' ? 'left' : 'right']: edge }
+  const align = w.position[1] === 'l' ? 'flex-start' as const : 'flex-end' as const
+  return (
+    <View pointerEvents="none" style={[{ position: 'absolute', alignItems: align, opacity: Math.max(0, Math.min(1, w.opacity / 100)) }, pos]}>
+      {w.mode === 'logo' && w.logoUrl
+        ? <Image source={{ uri: w.logoUrl }} style={{ width: fontSize * 5, height: fontSize * 2 }} contentFit="contain" />
+        : (
+          <>
+            <Text style={{ color: '#fff', fontFamily: font.display, fontSize, textShadowColor: 'rgba(0,0,0,0.45)', textShadowRadius: 3 }}>{w.text}</Text>
+            {w.subtitle ? <Text style={{ color: '#fff', fontFamily: font.body, fontSize: fontSize * 0.5, textShadowColor: 'rgba(0,0,0,0.45)', textShadowRadius: 3 }}>{w.subtitle}</Text> : null}
+          </>
+        )}
+    </View>
+  )
+}

@@ -9,6 +9,7 @@ import { EVENT_TYPE_LABELS, fmt, hash, tone, type Album, type PublicBlockReason,
 import { Button, Card, EmptyState, ErrorState, Icon, IconButton, LoadingList, PhotoTile, SectionHeader, SettingRow, Sheet, ToneView, Txt } from '@/components'
 import { PinGate, RegistrationGate } from '@/components/gates'
 import { EnquiryPrompt, InfoCard } from '@/components/guest'
+import { useQueryClient } from '@tanstack/react-query'
 import { useApi } from '@/lib/api'
 import { friendlyError } from '@/lib/errors'
 import { useGuestAccessGuard } from '@/lib/guest'
@@ -54,6 +55,7 @@ export default function GuestEvent() {
 function Landing({ event, back }: { event: PublicEvent; back: React.ReactNode }) {
   const { c } = useTheme()
   const api = useApi()
+  const qc = useQueryClient()
   const insets = useSafeAreaInsets()
   const { width } = useWindowDimensions()
   const eventId = event.id
@@ -85,11 +87,17 @@ function Landing({ event, back }: { event: PublicEvent; back: React.ReactNode })
   }
 
   const toggleFollow = async () => {
-    if (following) { actions.unfollow(studio.followCode); toast.info(`Unfollowed ${studio.name}`); return }
+    if (following) {
+      actions.unfollow(studio.followCode)
+      api.unfollowStudio(studio.followCode).then(() => qc.invalidateQueries({ queryKey: ['studio-profile'] }), () => {})
+      toast.info(`Unfollowed ${studio.name}`)
+      return
+    }
     setFollowBusy(true)
     try {
       await api.followStudio(studio.followCode)
       actions.follow(studio.followCode)
+      qc.invalidateQueries({ queryKey: ['studio-profile'] })
       toast.success(`Following ${studio.name}`)
     } catch (e) {
       const f = friendlyError(e)

@@ -1,14 +1,19 @@
+import { useEffect } from 'react'
 import { View } from 'react-native'
 import { router } from 'expo-router'
 import { Card, EmptyState, Screen, SectionHeader, Txt } from '@/components'
 import { EventCard, JoinForm } from '@/components/guest'
 import { API_MODE } from '@/lib/api'
-import { useLocal } from '@/lib/local'
+import { actions, useLocal } from '@/lib/local'
+import { useMyGalleries } from '@/lib/queries'
 import { useTheme } from '@/theme'
 
 export default function GuestEvents() {
   const { c } = useTheme()
   const joined = useLocal((s) => s.joined)
+  // Galleries this device opened (listMyGalleries, keyed by X-Guest-Device); the local list is the instant cache.
+  const { data: server } = useMyGalleries()
+  useEffect(() => { if (server?.length) actions.mergeJoined(server) }, [server])
   return (
     <Screen>
       <Card style={{ gap: 12 }}>

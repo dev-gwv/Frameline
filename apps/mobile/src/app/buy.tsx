@@ -2,20 +2,20 @@ import { useState } from 'react'
 import { Pressable, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import * as Haptics from 'expo-haptics'
-import { fmt, type Order, type PaymentMethod } from '@frameline/shared'
+import { ApiError, fmt, type Order, type PaymentMethod, type ShippingAddress } from '@frameline/shared'
 import { Button, Card, DarkCard, Field, Icon, IconButton, Input, LoadingList, Screen, Segmented, Txt } from '@/components'
 import { API_MODE, useApi } from '@/lib/api'
 import { friendlyError } from '@/lib/errors'
 import { actions, lastRegistration, useLocal } from '@/lib/local'
 import { usePhotoList, type PhotoScope } from '@/lib/photoList'
-import { usePrices, usePublicEvent } from '@/lib/queries'
+import { usePublicEvent, usePublicPrices } from '@/lib/queries'
 import { toast } from '@/lib/toast'
 import { font, radius, useTheme } from '@/theme'
 
 const emailOk = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())
 
 /**
- * Buy sheet: prices from listPrices, order via createOrder (priced by the server from the studio's price list).
+ * Buy sheet: prices from listPublicPrices, order via createOrder (prints collect a delivery address) (priced by the server from the studio's price list).
  * Without Razorpay keys the API simulates payment and the order comes back `paid`; with keys it comes back
  * `pending` with `checkout` details — Razorpay Checkout isn't wired into the app yet.
  */
@@ -24,7 +24,7 @@ export default function Buy() {
   const api = useApi()
   const params = useLocalSearchParams<{ shortId: string; eventId?: string; photoId?: string; scope?: PhotoScope; albumId?: string }>()
   const { data: event } = usePublicEvent(params.shortId)
-  const { data: priceList } = usePrices()
+  const { data: prices, error: pricesError } = usePublicPrices(params.shortId)
   const { photos } = usePhotoList(params.scope ?? 'album', { shortId: params.shortId, eventId: params.eventId || event?.id, albumId: params.albumId || undefined })
   const photoIds = params.photoId ? [params.photoId] : photos.map((p) => p.id)
   const n = Math.max(1, photoIds.length)
@@ -37,19 +37,30 @@ export default function Buy() {
   const [qty, setQty] = useState(1)
   const [method, setMethod] = useState<'upi' | 'card'>('upi')
   const [phase, setPhase] = useState<'choose' | 'paying' | { order: Order }>('choose')
+  const [ship, setShip] = useState<ShippingAddress>({ name: reg?.name ?? '', phone: reg?.phone ?? '', line1: '', line2: '', city: '', state: '', postal: '', country: 'India' })
+  const setS = (k: keyof ShippingAddress) => (v: string) => { setShip((x) => ({ ...x, [k]: v })); setErrors((e) => ({ ...e, [`shipping.${k}`]: '' })) }
 
-  if (!priceList || !event) return <LoadingList />
-  const prices = priceList.prices
+  if (pricesError && !prices) return <Screen><Txt>{friendlyError(pricesError).title}. {friendlyError(pricesError).detail}</Txt></Screen>
+  if (!prices || !event) return <LoadingList />
   const studio = event.studio
   const item = prices.find((p) => p.id === selected)
   const units = item?.id === 'print812' ? qty : item?.id === 'multi' ? Math.max(3, n) : item?.id === 'single' ? n : 1
   const total = (item?.price ?? 0) * units
+  const isPrint = !!item?.id.startsWith('print')
 
   const pay = async () => {
     if (!item) return
     const e: Record<string, string> = {}
     if (name.trim().length < 2) e.name = 'Enter your name for the receipt'
     if (!emailOk(email)) e.email = 'Enter an email so we can send your photos'
+    if (isPrint) {
+      if (ship.name.trim().length < 2) e['shipping.name'] = 'Who should receive the prints?'
+      if (ship.phone.replace(/\D/g, '').length < 8) e['shipping.phone'] = 'A phone number for the courier'
+      if (ship.line1.trim().length < 3) e['shipping.line1'] = 'House, street and area'
+      if (!ship.city.trim()) e['shipping.city'] = 'City'
+      if (!ship.state.trim()) e['shipping.state'] = 'State'
+      if (!/^[0-9A-Za-z -]{3,10}$/.test(ship.postal.trim())) e['shipping.postal'] = 'PIN code'
+    }
     setErrors(e)
     if (Object.keys(e).length) return
     setPhase('paying')
@@ -57,13 +68,15 @@ export default function Buy() {
       const order = await api.createOrder(event.shortId, {
         items: [{ priceId: item.id, photoIds: item.id === 'all' ? [] : photoIds.slice(0, 500), quantity: item.id === 'print812' ? qty : undefined }],
         method: method as PaymentMethod,
-        buyer: { name: name.trim(), email: email.trim(), phone: reg?.phone || undefined },
+        buyer: { name: name.trim(), email: email.trim(), phone: (isPrint ? ship.phone : reg?.phone) || undefined },
+        ...(isPrint ? { shipping: { ...ship, name: ship.name.trim(), phone: ship.phone.trim(), line1: ship.line1.trim(), line2: ship.line2?.trim() || undefined, city: ship.city.trim(), state: ship.state.trim(), postal: ship.postal.trim() } } : {}),
       })
       actions.addOrder({ id: order.id, number: order.number, eventId: event.id, item: order.items, amount: order.paid, at: order.at, status: order.status })
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {})
       setPhase({ order })
     } catch (err) {
       setPhase('choose')
+      if (err instanceof ApiError && err.fieldErrors.length) setErrors(Object.fromEntries(err.fieldErrors.map((x) => [x.field, x.message])))
       const f = friendlyError(err)
       toast.error(f.title, f.detail)
     }
@@ -109,7 +122,6 @@ export default function Buy() {
           )
         })}
       </View>
-      {priceList.standard ? <Txt v="small" color={c.ink3}>Standard prices shown. The studio’s own prices apply at checkout.</Txt> : null}
 
       {item?.id === 'print812' ? (
         <Card style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -119,6 +131,21 @@ export default function Buy() {
             <Txt v="mono" style={{ fontSize: 18, minWidth: 28, textAlign: 'center' }}>{qty}</Txt>
             <IconButton icon="plus" label="More copies" tone="soft" onPress={() => setQty(Math.min(20, qty + 1))} />
           </View>
+        </Card>
+      ) : null}
+
+      {isPrint ? (
+        <Card style={{ gap: 10 }}>
+          <Txt weight="bold">Deliver prints to</Txt>
+          <Field label="Name" error={errors['shipping.name']}><Input value={ship.name} onChangeText={setS('name')} autoComplete="name" invalid={!!errors['shipping.name']} /></Field>
+          <Field label="Phone" error={errors['shipping.phone']}><Input value={ship.phone} onChangeText={setS('phone')} keyboardType="phone-pad" autoComplete="tel" placeholder="+91 98200 12345" invalid={!!errors['shipping.phone']} /></Field>
+          <Field label="Address" error={errors['shipping.line1']}><Input value={ship.line1} onChangeText={setS('line1')} autoComplete="street-address" placeholder="House, street, area" invalid={!!errors['shipping.line1']} /></Field>
+          <Field label="Landmark (optional)"><Input value={ship.line2 ?? ''} onChangeText={setS('line2')} /></Field>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flex: 1 }}><Field label="City" error={errors['shipping.city']}><Input value={ship.city} onChangeText={setS('city')} invalid={!!errors['shipping.city']} /></Field></View>
+            <View style={{ flex: 1 }}><Field label="PIN code" error={errors['shipping.postal']}><Input value={ship.postal} onChangeText={setS('postal')} keyboardType="number-pad" autoComplete="postal-code" invalid={!!errors['shipping.postal']} /></Field></View>
+          </View>
+          <Field label="State" error={errors['shipping.state']}><Input value={ship.state} onChangeText={setS('state')} invalid={!!errors['shipping.state']} /></Field>
         </Card>
       ) : null}
 
