@@ -441,8 +441,9 @@ publicRoutes.openapi(createRoute({
   const key = p.r2Key ? p.r2Key.replace(/\/[^/]+$/, `/renditions/${size}.jpg`) : null
   const obj = key && c.env.PROCESSOR_URL ? await c.env.MEDIA.get(key) : null
   if (!obj) throw new AppError(404, 'rendition_unavailable', 'Not found', 'No download rendition exists for this photo yet. Use the photo URL instead.')
-  background(c, getDb(c.env.DB).update(schema.photos).set({ downloads: sql`${schema.photos.downloads} + 1` }).where(eq(schema.photos.id, p.id)).run())
-  return new Response(obj.body, {
+  // HEAD (clients checking the link exists) must not count as a download.
+  if (c.req.method !== 'HEAD') background(c, getDb(c.env.DB).update(schema.photos).set({ downloads: sql`${schema.photos.downloads} + 1` }).where(eq(schema.photos.id, p.id)).run())
+  return new Response(c.req.method === 'HEAD' ? null : obj.body, {
     headers: { 'Content-Type': 'image/jpeg', 'Content-Disposition': `attachment; filename="${p.filename.replace(/"/g, '')}"`, 'Cache-Control': 'private, max-age=3600' },
   })
 })
