@@ -89,3 +89,9 @@ export const useZipRequests = (eventId?: ID) => {
     refetchInterval: (q) => (q.state.data?.some((z) => z.status === 'queued') ? 2500 : false),
   })
 }
+/** Events in the trash (soft-deleted; purged 30 days after deletion). */
+export const useDeletedEvents = (enabled = true) => {
+  const api = useApi()
+  return useQuery({ queryKey: ['events', 'deleted'], queryFn: () => api.listDeletedEvents(), enabled })
+}
+export const useCarts = () => { const api = useApi(); return useQuery({ queryKey: ['orders', 'carts'], queryFn: () => api.listCarts() }) }

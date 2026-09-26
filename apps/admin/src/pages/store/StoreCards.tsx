@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { MessageCircle, Store as StoreIcon } from 'lucide-react'
 import { fmt, STORE_COMMISSION, type Price } from '@frameline/shared'
 import { Button, Card, CardHeader, DarkCard, EmptyState, Field, Input, Modal, Skeleton } from '@frameline/ui'
-import { useApi } from '../../lib/api'
-import { useAction, useEvents, usePrices } from '../../lib/queries'
+import { errorMessage, useApi } from '../../lib/api'
+import { useAction, useCarts, useEvents, usePrices } from '../../lib/queries'
+import { storeNow } from './revenue'
 import { QueryError } from '../system'
 
 /** Default store prices, saved with api.updatePrices (every selling event uses them). */
@@ -58,17 +59,48 @@ function EditPricesModal({ open, onOpenChange, prices }: { open: boolean; onOpen
   )
 }
 
-/**
- * Abandoned carts. The API doesn't track unpaid carts yet, so this card only explains the feature
- * (no invented counts, no fake reminders).
- */
+/** Abandoned carts (api.listCarts): guests who started paying but didn't finish. Reminders via api.remindCarts. */
 export function CartsCard() {
+  const api = useApi()
+  const carts = useCarts()
+  const [picked, setPicked] = useState<string[] | null>(null)
+  const list = carts.data ?? []
+  const selected = picked ?? list.filter((c) => !c.reminders).map((c) => c.orderId)
+  const remind = useAction((ids: string[]) => api.remindCarts(ids), {
+    success: (r) => `Reminder sent to ${r.reminded} ${r.reminded === 1 ? 'guest' : 'guests'}`,
+    onSuccess: () => setPicked(null),
+  })
+  const toggle = (id: string) => setPicked(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id])
+  const total = list.reduce((n, c) => n + c.amount, 0)
   return (
     <DarkCard>
       <div className="flex items-center gap-2 font-bold"><MessageCircle size={14} /> Carts to recover</div>
-      <div className="mt-1 text-[12px] text-side-ink-2">
-        Coming soon: guests who add photos to their cart but don’t pay will be listed here, with a one-tap WhatsApp reminder that links back to their cart.
-      </div>
+      {carts.isError ? <div className="mt-2 text-[12px] text-side-ink-2">Couldn’t load carts. {errorMessage(carts.error)} <button type="button" className="font-bold underline" onClick={() => carts.refetch()}>Try again</button></div>
+        : carts.isLoading ? <Skeleton className="mt-2 h-20" />
+        : !list.length ? <div className="mt-1 text-[12px] text-side-ink-2">No abandoned carts. Guests who add photos but don’t finish paying show up here after 30 minutes.</div>
+        : <>
+          <div className="mb-2 mt-1 text-[12px] text-side-ink-2">{list.length} {list.length === 1 ? 'guest' : 'guests'} left <span className="font-mono text-side-ink">{fmt.rupees(total)}</span> unpaid. Send a reminder with a link back to their cart.</div>
+          <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+            {list.map((c) => {
+              const on = selected.includes(c.orderId)
+              return (
+                <li key={c.orderId}>
+                  <label className="flex cursor-pointer items-start gap-2 rounded-control px-1.5 py-1.5 hover:bg-side-2">
+                    <input type="checkbox" className="mt-0.5 size-4 accent-[var(--gold)]" checked={on} onChange={() => toggle(c.orderId)} aria-label={`Remind ${c.buyer}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex justify-between gap-2 text-[12.5px] font-bold"><span className="truncate">{c.buyer}</span><span className="font-mono tnum">{fmt.rupees(c.amount)}</span></span>
+                      <span className="block truncate text-[11px] text-side-ink-2">{c.items} · {c.eventName}</span>
+                      <span className="block text-[11px] text-side-ink-2">Started {fmt.ago(c.startedAt, storeNow())}{c.reminders ? ` · reminded ${c.reminders}× (last ${fmt.ago(c.remindedAt ?? c.startedAt, storeNow())})` : ' · not reminded yet'}</span>
+                    </span>
+                  </label>
+                </li>
+              )
+            })}
+          </ul>
+          <Button size="sm" variant="primary" className="mt-2" icon={<MessageCircle size={13} />} disabled={!selected.length} loading={remind.isPending} onClick={() => remind.mutate(selected)}>
+            Send {selected.length ? `${selected.length} ` : ''}{selected.length === 1 ? 'reminder' : 'reminders'}
+          </Button>
+        </>}
     </DarkCard>
   )
 }

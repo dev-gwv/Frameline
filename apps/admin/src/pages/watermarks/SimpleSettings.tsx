@@ -2,10 +2,9 @@ import { useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, ImageIcon, Trash2, Type, Upload } from 'lucide-react'
 import type { WatermarkSettings } from '@frameline/shared'
 import { Button, Card, cn, Field, Input, Segmented, Select, StepBadge, Tip, Toggle } from '@frameline/ui'
-import { imageDataUrl } from '../qr/util'
+import { assetAccept, useAssetUpload } from '../wallet/assets'
 import { FONTS, fontStack, POSITIONS } from './lib'
 
-const MAX_LOGO = 5 * 1024 * 1024
 
 function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
@@ -29,18 +28,15 @@ export function SimpleSettings({ wm, onChange }: {
   onChange: (patch: Partial<WatermarkSettings>) => void
 }) {
   const [more, setMore] = useState(false)
-  const [logoError, setLogoError] = useState<string>()
-  const [reading, setReading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const up = useAssetUpload('watermark-logo')
+  const logoError = up.error
+  const reading = up.pending
 
+  // Uploaded with api.uploadAsset('watermark-logo'); the asset URL is saved on the watermark.
   async function pickLogo(file: File) {
-    setLogoError(undefined)
-    const okType = ['image/png', 'image/svg+xml'].includes(file.type) || /\.(png|svg)$/i.test(file.name)
-    if (!okType) { setLogoError('Use a PNG or SVG file. A transparent PNG looks best.'); return }
-    if (file.size > MAX_LOGO) { setLogoError(`That file is ${(file.size / 1048576).toFixed(1)} MB. Logos must be 5 MB or smaller.`); return }
-    // Stored on the watermark as a small data URL (the API keeps up to 2 KB until logo uploads exist).
-    setReading(true)
-    try { onChange({ logoUrl: await imageDataUrl(file, 2000, { keepAlpha: true }) }) } catch (e) { setLogoError((e as Error).message) } finally { setReading(false) }
+    const asset = await up.upload(file)
+    if (asset) onChange({ logoUrl: asset.url })
   }
 
   return (
@@ -75,7 +71,7 @@ export function SimpleSettings({ wm, onChange }: {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            <input ref={fileRef} type="file" accept="image/png,image/svg+xml,.png,.svg" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickLogo(f); e.target.value = '' }} />
+            <input ref={fileRef} type="file" accept={assetAccept('watermark-logo')} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickLogo(f); e.target.value = '' }} />
             {wm.logoUrl ? (
               <div className="flex items-center gap-3 rounded-control border border-line p-2">
                 <div className="grid h-12 w-20 shrink-0 place-items-center rounded-md bg-side p-1.5">
@@ -88,8 +84,8 @@ export function SimpleSettings({ wm, onChange }: {
             ) : (
               <button type="button" disabled={reading} onClick={() => fileRef.current?.click()} className="flex flex-col items-center gap-1 rounded-control border border-dashed border-line-2 px-3 py-5 text-center hover:bg-sunk">
                 <Upload size={18} className="text-ink-3" />
-                <span className="text-[12.5px] font-bold">{reading ? 'Preparing your logo…' : 'Upload your logo'}</span>
-                <span className="text-[11.5px] text-ink-3">PNG or SVG, up to 5 MB. Transparent works best.</span>
+                <span className="text-[12.5px] font-bold">{reading ? 'Uploading your logo…' : 'Upload your logo'}</span>
+                <span className="text-[11.5px] text-ink-3">PNG, WebP or JPG, up to 10 MB. A transparent PNG works best.</span>
               </button>
             )}
             {logoError && <span className="text-[11.5px] font-semibold text-bad" role="alert">{logoError}</span>}

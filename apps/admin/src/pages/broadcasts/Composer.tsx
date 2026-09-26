@@ -1,8 +1,8 @@
 import { useRef, useState, type ChangeEvent } from 'react'
 import { CalendarClock, ImagePlus, Send, Trash2 } from 'lucide-react'
 import { fmt, type PhotoEvent } from '@frameline/shared'
-import { Button, Card, cn, ConfirmDialog, Field, Input, Modal, Segmented, Select, Textarea, useToast } from '@frameline/ui'
-import { imageDataUrl } from '../qr/util'
+import { Button, Card, cn, ConfirmDialog, Field, Input, Modal, Segmented, Select, Textarea } from '@frameline/ui'
+import { assetAccept, useAssetUpload } from '../wallet/assets'
 import { audienceSize, BODY_MAX, eventReach, TITLE_MAX, type Draft } from './draft'
 
 function toLocalInput(d: Date) {
@@ -22,7 +22,6 @@ export function Composer({ draft, onChange, events, followers, busy, onSend }: {
   busy?: boolean
   onSend: (scheduledAt?: string) => void
 }) {
-  const toast = useToast()
   const fileRef = useRef<HTMLInputElement>(null)
   const [confirming, setConfirming] = useState(false)
   const [scheduleOpen, setScheduleOpen] = useState(false)
@@ -31,7 +30,8 @@ export function Composer({ draft, onChange, events, followers, busy, onSend }: {
   const [touched, setTouched] = useState(false)
   const patch = (p: Partial<Draft>) => onChange({ ...draft, ...p })
 
-  const [imageBusy, setImageBusy] = useState(false)
+  const imageUp = useAssetUpload('broadcast-image')
+  const imageBusy = imageUp.pending
   const size = audienceSize(draft, events, followers)
   const eventName = events.find((e) => e.id === draft.eventId)?.name
   const audienceLabel = draft.audience === 'all' ? `all ${fmt.count(followers)} followers` : `${fmt.count(size)} guests of ${eventName ?? 'the event'}`
@@ -43,14 +43,8 @@ export function Composer({ draft, onChange, events, followers, busy, onSend }: {
     const f = e.target.files?.[0]
     e.target.value = ''
     if (!f) return
-    if (!f.type.startsWith('image/')) return toast.error('That file isn’t an image', 'Pick a JPG, PNG or WebP.')
-    if (f.size > 10_000_000) return toast.error('Image is too large', 'Use an image under 10 MB.')
-    setImageBusy(true)
-    // Shrunk to a small preview so it fits the API's 4 KB image field (no image upload endpoint yet).
-    imageDataUrl(f, 4000)
-      .then((image) => patch({ image }))
-      .catch((err: Error) => toast.error('Couldn’t use that image', err.message))
-      .finally(() => setImageBusy(false))
+    // Uploaded with api.uploadAsset('broadcast-image'); its URL goes out as the broadcast's imageUrl.
+    void imageUp.upload(f).then((a) => { if (a) patch({ image: a.url }) })
   }
 
   const trySend = () => { setTouched(true); if (valid) setConfirming(true) }
@@ -87,8 +81,9 @@ export function Composer({ draft, onChange, events, followers, busy, onSend }: {
           ) : (
             <Button size="sm" loading={imageBusy} icon={<ImagePlus size={13} />} onClick={() => fileRef.current?.click()}>Add image</Button>
           )}
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onImage} />
+          <input ref={fileRef} type="file" accept={assetAccept('broadcast-image')} className="hidden" onChange={onImage} />
         </div>
+        {imageUp.error && <span className="text-[11.5px] font-semibold text-bad" role="alert">{imageUp.error}</span>}
       </Field>
       <Field label="Send to">
         <Segmented stretch value={draft.audience} onChange={(v) => patch({ audience: v, eventId: draft.eventId || events[0]?.id || '' })}

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, HelpCircle, MessageSquareQuote, Plus, Tag, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowDown, ArrowUp, HelpCircle, ImagePlus, MessageSquareQuote, Plus, Tag, Trash2 } from 'lucide-react'
 import type { Studio, StudioFaq, StudioService, StudioTestimonial } from '@frameline/shared'
 import { Button, Card, cn, EmptyState, Field, Input, Segmented, Textarea, Tip } from '@frameline/ui'
 import { useApi } from '../../lib/api'
 import { useAction } from '../../lib/queries'
+import { assetAccept, useAssetUpload } from '../wallet/assets'
 
 /*
  * Services, testimonials and FAQ live on the Studio (api.updateStudio). The website, the studio app
@@ -115,6 +116,7 @@ export function StudioContentEditor({ studio, kind, onKindChange, className }: {
                     <Field label="Name" error={err(i, 'name')}><Input value={t.name} maxLength={60} placeholder="Riya & Kabir" onChange={(e) => patch(i, { name: e.target.value })} /></Field>
                     <Field label="Detail (optional)"><Input value={t.detail ?? ''} maxLength={60} placeholder="Udaipur, 2026" onChange={(e) => patch(i, { detail: e.target.value })} /></Field>
                   </div>
+                  <TestimonialPhoto url={t.photoUrl} name={t.name} onChange={(photoUrl) => patch(i, { photoUrl } as Partial<Item>)} />
                 </> })()}
                 {kind === 'faq' && (() => { const f = it as StudioFaq; return <>
                   <Field label="Question" error={err(i, 'q')}><Input value={f.q} maxLength={120} placeholder="How long until we get our photos?" onChange={(e) => patch(i, { q: e.target.value })} /></Field>
@@ -141,5 +143,24 @@ export function StudioContentEditor({ studio, kind, onKindChange, className }: {
         <Button size="sm" variant="dark" disabled={!dirty} loading={save.isPending} onClick={submit}>Save {label.many.toLowerCase()}</Button>
       </div>
     </Card>
+  )
+}
+
+/** Client photo for a testimonial, uploaded with api.uploadAsset('testimonial-photo'). Saved with the list. */
+function TestimonialPhoto({ url, name, onChange }: { url?: string; name: string; onChange: (url: string | undefined) => void }) {
+  const ref = useRef<HTMLInputElement>(null)
+  const up = useAssetUpload('testimonial-photo')
+  return (
+    <Field label="Photo (optional)" error={up.error}>
+      <div className="flex items-center gap-2">
+        <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full border border-line bg-sunk text-[13px] font-bold text-ink-3">
+          {url ? <img src={url} alt={name ? `${name}` : 'Client'} className="size-full object-cover" /> : (name.trim()[0] ?? '?')}
+        </span>
+        <Button size="sm" icon={<ImagePlus size={13} />} loading={up.pending} onClick={() => ref.current?.click()}>{url ? 'Replace' : 'Add photo'}</Button>
+        {url && <Button size="sm" variant="ghost" onClick={() => onChange(undefined)}>Remove</Button>}
+        <input ref={ref} type="file" hidden accept={assetAccept('testimonial-photo')}
+          onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; const a = await up.upload(f); if (a) onChange(a.url) }} />
+      </div>
+    </Field>
   )
 }

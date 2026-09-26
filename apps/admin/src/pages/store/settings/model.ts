@@ -3,7 +3,7 @@ import { GSTIN_RE, IFSC_RE, PAN_RE, PIN_RE } from '../../wallet/lib'
 
 export type DocId = KycDocKind
 export type DocStatus = 'verified' | 'review' | 'needed'
-export interface DocState { file: string; status: DocStatus }
+export interface DocState { file: string; status: DocStatus; /** From uploadAsset('kyc-document'). */ assetId?: string }
 
 /** Form shape for the store settings page (built from, and saved back to, the API's StoreSettings). */
 export interface StoreSettingsData {
@@ -24,7 +24,7 @@ const DOC_IDS: DocId[] = ['pan', 'id', 'gst', 'cheque']
 export function fromApi(s: StoreSettings): StoreSettingsData {
   const docs = Object.fromEntries(DOC_IDS.map((id) => {
     const d = s.kyc.documents.find((x) => x.kind === id)
-    return [id, { file: d?.fileName ?? '', status: d?.status ?? 'needed' }]
+    return [id, { file: d?.fileName ?? '', status: d?.status ?? 'needed', ...(d?.assetId ? { assetId: d.assetId } : {}) }]
   })) as Record<DocId, DocState>
   const i = s.international
   return {
@@ -55,7 +55,7 @@ export function toPatch(saved: StoreSettingsData, d: StoreSettingsData): StoreSe
   if (k.gst !== sk.gst) kyc.gstRegistered = k.gst === 'yes'
   const address = diff({ street: sk.street, city: sk.city, state: sk.state, postal: sk.postal }, { street: k.street.trim(), city: k.city.trim(), state: k.state, postal: k.postal }, ['street', 'city', 'state', 'postal'])
   if (Object.keys(address).length) kyc.address = address
-  if (JSON.stringify(k.docs) !== JSON.stringify(sk.docs)) kyc.documents = DOC_IDS.map((id) => ({ kind: id, fileName: k.docs[id].file, status: k.docs[id].status }))
+  if (JSON.stringify(k.docs) !== JSON.stringify(sk.docs)) kyc.documents = DOC_IDS.map((id) => ({ kind: id, fileName: k.docs[id].file, status: k.docs[id].status, ...(k.docs[id].assetId ? { assetId: k.docs[id].assetId } : {}) }))
   if (Object.keys(kyc).length) patch.kyc = kyc
 
   const p = d.payout, sp = saved.payout

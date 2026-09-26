@@ -2,7 +2,8 @@ import { useRef, useState, type ChangeEvent } from 'react'
 import { CalendarClock, Circle, Copy, Download, ImagePlus, MoreHorizontal, Palette, Pencil, Square, Trash2, X } from 'lucide-react'
 import { fmt, type PhotoEvent, type SmartQR } from '@frameline/shared'
 import { Button, Chip, cn, Field, Input, Menu, QRCode, Select, Tip, useToast } from '@frameline/ui'
-import { downloadBlob, imageDataUrl, svgMarkup, useCopy } from './util'
+import { downloadBlob, svgMarkup, useCopy } from './util'
+import { assetAccept, useAssetUpload } from '../wallet/assets'
 import { buildPoster, shortUrl } from './poster'
 import { scheduleOf } from './modals'
 
@@ -28,6 +29,7 @@ export function QRCard({ qr, events, studioName, brandColor, onUpdate, onSchedul
   const toast = useToast()
   const qrRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const logoUp = useAssetUpload('qr-logo')
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(qr.name)
   const event = events.find((e) => e.id === qr.eventId)
@@ -60,10 +62,8 @@ export function QRCard({ qr, events, studioName, brandColor, onUpdate, onSchedul
     const f = e.target.files?.[0]
     e.target.value = ''
     if (!f) return
-    if (!/^image\/(png|jpeg|svg\+xml|webp)$/.test(f.type)) return toast.error('That file isn’t an image', 'Use a PNG, JPG, SVG or WebP logo.')
-    imageDataUrl(f, 4000, { keepAlpha: true })
-      .then((logoUrl) => onUpdate({ logoUrl }))
-      .catch((err: Error) => toast.error('Couldn’t use that logo', err.message))
+    // Uploaded with api.uploadAsset('qr-logo'); problems show under the code.
+    void logoUp.upload(f).then((a) => { if (a) onUpdate({ logoUrl: a.url }) })
   }
 
   return (
@@ -93,12 +93,14 @@ export function QRCard({ qr, events, studioName, brandColor, onUpdate, onSchedul
             { label: 'Delete QR', icon: <Trash2 size={14} />, danger: true, onSelect: onDelete },
           ]}
         />
-        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" className="hidden" onChange={onLogo} />
+        <input ref={fileRef} type="file" accept={assetAccept('qr-logo')} className="hidden" onChange={onLogo} />
       </div>
 
       <div className="relative grid place-items-center rounded-[10px] border border-line bg-white p-3.5">
         <div ref={qrRef}><QRCode value={url} size={140} color={qr.color} rounded={rounded} logo={logo} /></div>
+        {logoUp.pending && <span className="absolute bottom-1.5 text-[11px] font-semibold text-ink-3">Uploading logo…</span>}
       </div>
+      {logoUp.error && <p className="-mt-1.5 text-[11.5px] font-semibold text-bad" role="alert">{logoUp.error}</p>}
 
       <Field label="Currently opens" htmlFor={`opens-${qr.id}`}>
         <Select id={`opens-${qr.id}`} value={qr.eventId} onChange={(e) => onUpdate({ eventId: e.target.value })}>

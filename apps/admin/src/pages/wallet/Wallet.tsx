@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Landmark, Receipt } from 'lucide-react'
 import { ApiError, fmt, type LedgerEntry, type StoreSettings } from '@frameline/shared'
-import { Button, Card, Chip, DarkCard, Field, Input, Modal, PageHeader, Skeleton, StatCard, TabBar, useToast } from '@frameline/ui'
+import { Button, Card, Chip, DarkCard, Field, Input, Modal, PageHeader, Skeleton, StatCard, TabBar } from '@frameline/ui'
 import { errorMessage, useApi } from '../../lib/api'
 import { useAction } from '../../lib/queries'
 import { QueryError } from '../system'
 import { BillingForm, validateBilling } from './BillingForm'
-import { BILLING_KEY, DEFAULT_BILLING, readLocal, round2, writeLocal, type Billing } from './lib'
+import { round2, type Billing } from './lib'
+import { useBilling } from './billing'
 import { useWallet } from './useWallet'
 import { CommissionTab, InvoicesTab, LedgerTab, OrdersTab, PlanPurchasesTab } from './WalletTabs'
 
@@ -101,23 +102,25 @@ function WithdrawModal({ open, onOpenChange, balance, payout, destination, onDon
   )
 }
 
-/** Billing & GST details for Frameline's invoices. The API has no field for these yet, so they stay in this browser. */
+/** Billing & GST details for Frameline's invoices, saved on the Studio (Studio.billing). */
 function BillingModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const toast = useToast()
-  const [value, setValue] = useState<Billing>(() => readLocal(BILLING_KEY, DEFAULT_BILLING))
+  const b = useBilling()
+  const [value, setValue] = useState<Billing | null>(null)
   const [showErrors, setShowErrors] = useState(false)
-  useEffect(() => { if (open) { setValue(readLocal(BILLING_KEY, DEFAULT_BILLING)); setShowErrors(false) } }, [open])
+  useEffect(() => { if (open) { setValue(b.billing ?? null); setShowErrors(false) } }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open && !value && b.billing) setValue(b.billing) }, [open, value, b.billing])
   const save = () => {
+    if (!value) return
     if (Object.keys(validateBilling(value)).length) { setShowErrors(true); return }
-    writeLocal(BILLING_KEY, value)
-    toast.success('Billing details saved', 'New invoices use these details.')
-    onOpenChange(false)
+    b.save.mutate(value, { onSuccess: () => onOpenChange(false) })
   }
   return (
     <Modal open={open} onOpenChange={onOpenChange}
       title="Billing & GST details" description="Printed on your tax invoices for plans, packs and commission." width={520}
-      footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" onClick={save}>Save details</Button></>}>
-      <div className="px-6 py-4"><BillingForm value={value} onChange={setValue} showErrors={showErrors} /></div>
+      footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" disabled={!value} loading={b.save.isPending} onClick={save}>Save details</Button></>}>
+      <div className="px-6 py-4">
+        {b.isError ? <QueryError error={b.error} retry={() => b.refetch()} /> : value ? <BillingForm value={value} onChange={setValue} showErrors={showErrors} /> : <Skeleton className="h-64" />}
+      </div>
     </Modal>
   )
 }

@@ -71,8 +71,8 @@ export function UpgradeModal({ target, period, usage, onClose }: { target: Plan 
 }
 
 /**
- * Buy a one-off event pack for one event. Packs are paid from wallet credits (api.spendCredits);
- * when the wallet is short, the difference is topped up by card first (api.addCredits).
+ * Buy a one-off event pack for one event with api.buyPack: from wallet credits (the pack price) or
+ * by card (price + GST). The API raises the event's photo limit and records the purchase.
  */
 export function PackModal({ pack, credits, onClose }: { pack: (typeof PACKS)[number] | null; credits: number; onClose: () => void }) {
   const api = useApi()
@@ -80,31 +80,27 @@ export function PackModal({ pack, credits, onClose }: { pack: (typeof PACKS)[num
   const [eventId, setEventId] = useState('')
   const [pay, setPay] = useState<PayWith>('card')
   const price = pack?.price ?? 0
-  const total = round2(price * (1 + GST_RATE))
-  const short = Math.max(0, round2(total - credits))
+  const gst = round2(price * GST_RATE)
   const selectable = (events.data ?? []).filter((e) => e.status !== 'archived')
   useEffect(() => {
     if (!pack) return
-    setPay(credits >= total ? 'credits' : 'card')
+    setPay(credits >= price ? 'credits' : 'card')
     setEventId(selectable.find((e) => e.status === 'expiring' || e.photoCount / e.photoLimit > 0.6)?.id ?? selectable[0]?.id ?? '')
-  }, [pack, credits, total, events.data]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pack, credits, price, events.data]) // eslint-disable-line react-hooks/exhaustive-deps
   const ev = events.data?.find((e) => e.id === eventId)
+  const byCredits = pay === 'credits'
 
-  const buy = useAction(async () => {
+  const buy = useAction(() => {
     if (!pack || !ev) throw new Error('Pick an event first')
-    const topUp = pay === 'credits' ? 0 : Math.ceil(short)
-    if (topUp > 0) await api.addCredits(topUp)
-    await api.spendCredits(total, `${fmt.count(pack.photos)}-photo pack · ${ev.name}`)
-    await api.updateEvent(ev.id, { photoLimit: ev.photoLimit + pack.photos })
-    return ev
+    return api.buyPack(ev.id, pack.photos, { payWith: byCredits ? 'credits' : 'card' })
   }, {
-    success: (e) => `${fmt.count(pack?.photos ?? 0)} photos added to ${e.name}`,
+    success: (r) => `${fmt.count(pack?.photos ?? 0)} photos added to ${r.event.name} · limit now ${fmt.count(r.event.photoLimit)}`,
     onSuccess: onClose,
   })
 
   return (
     <Modal open={!!pack} onOpenChange={(v) => !v && onClose()} title={pack ? `${fmt.count(pack.photos)}-photo event pack` : 'Event pack'} description="Adds capacity to one event for 12 months, beyond your plan." width={520}
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!ev} loading={buy.isPending} onClick={() => buy.mutate(undefined)}>{pay === 'credits' ? `Pay ${fmt.rupees(total, true)} from credits` : `Pay ${fmt.rupees(Math.ceil(short), true)}`}</Button></>}>
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!ev} loading={buy.isPending} onClick={() => buy.mutate(undefined)}>{byCredits ? `Pay ${fmt.rupees(price)} from credits` : `Pay ${fmt.rupees(round2(price + gst), true)}`}</Button></>}>
       {pack && (
         <div className="flex flex-col gap-4 px-6 py-4 text-[13px]">
           <Field label="Event" htmlFor="pack-event" hint={ev ? `Now ${fmt.count(ev.photoCount)} / ${fmt.count(ev.photoLimit)} photos → limit becomes ${fmt.count(ev.photoLimit + pack.photos)}` : undefined}>
@@ -114,17 +110,11 @@ export function PackModal({ pack, credits, onClose }: { pack: (typeof PACKS)[num
           </Field>
           <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5">
             <Row label={`${fmt.count(pack.photos)} photos`} value={fmt.rupees(price, true)} />
-            <Row label="GST 18%" value={fmt.rupees(round2(price * GST_RATE), true)} />
-            <Row label="Total" value={fmt.rupees(total, true)} strong />
-            {pay !== 'credits' && credits > 0 && <Row label="From your wallet credits" value={`− ${fmt.rupees(Math.min(credits, total), true)}`} />}
-            {pay !== 'credits' && <Row label={pay === 'upi' ? 'Pay by UPI now' : 'Pay by card now'} value={fmt.rupees(Math.ceil(short), true)} strong />}
+            {byCredits
+              ? <Row label="From wallet credits (GST was paid when you bought them)" value={fmt.rupees(price, true)} strong />
+              : <><Row label="GST 18%" value={fmt.rupees(gst, true)} /><Row label="Total" value={fmt.rupees(round2(price + gst), true)} strong /></>}
           </div>
-          {credits >= total
-            ? <PayMethods value={pay} onChange={setPay} credits={credits} needed={total} only={['credits']} />
-            : <>
-              <p className="text-[12px] text-ink-3">Packs are paid from wallet credits. You have {fmt.rupees(credits)}, so we top up the difference first.</p>
-              <PayMethods value={pay} onChange={setPay} />
-            </>}
+          <PayMethods value={pay} onChange={setPay} credits={credits} needed={price} />
         </div>
       )}
     </Modal>

@@ -7,7 +7,8 @@ import { errorMessage } from '../../lib/api'
 import { useOrders, usePurchases } from '../../lib/queries'
 import { QueryError } from '../system'
 import { OrderDrawer } from '../store/OrderDrawer'
-import { DEFAULT_BILLING, BILLING_KEY, downloadCsv, downloadFile, exportOrdersCsv, money, ORDER_STATUS, orderBreakdown, readLocal, round2, td, th, type Billing } from './lib'
+import { downloadCsv, downloadFile, exportOrdersCsv, money, ORDER_STATUS, orderBreakdown, round2, td, th, type Billing } from './lib'
+import { useBilling } from './billing'
 import { LEDGER_TYPES, PURCHASE_METHOD, purchaseGst } from './useWallet'
 
 const Table = ({ children, min = 640 }: { children: ReactNode; min?: number }) => (
@@ -226,16 +227,18 @@ ${tax}
 export function InvoicesTab() {
   const q = usePurchases()
   const toast = useToast()
+  const { billing, hasBilling } = useBilling()
   const invoices = (q.data ?? []).filter((p) => p.method !== 'coupon' && p.amount > 0)
   const download = (p: Purchase) => {
-    const b = readLocal<Billing>(BILLING_KEY, DEFAULT_BILLING)
+    if (!billing) return
+    const b = billing
     downloadFile(`${p.invoiceNumber}.html`, invoiceHtml(p, b), 'text/html;charset=utf-8')
     toast.success('Invoice downloaded', 'Open it in a browser and print to PDF if you need a PDF file.')
   }
   if (q.isError) return <QueryError error={q.error} retry={() => q.refetch()} />
   return (
     <>
-      <Toolbar><span className="text-[12px] text-ink-3">Tax invoices use your Billing & GST details. Update them before downloading.</span></Toolbar>
+      <Toolbar><span className="text-[12px] text-ink-3">{hasBilling ? 'Tax invoices use your Billing & GST details (button at the top).' : 'Add your Billing & GST details (button at the top) so invoices show your address and GSTIN.'}</span></Toolbar>
       {q.isLoading ? <div className="px-4 pb-4"><Skeleton className="h-40" /></div> : !invoices.length ? (
         <EmptyState icon={<FileText size={22} />} title="No invoices yet" body="Every paid plan, pack or top-up gets a tax invoice here." />
       ) : (
@@ -248,7 +251,7 @@ export function InvoicesTab() {
                 <td className={`${td} whitespace-nowrap font-mono text-[11.5px] text-ink-2`}>{fmt.date(p.at)}</td>
                 <td className={td}>{p.description}</td>
                 <td className={`${td} text-right font-mono`}>{fmt.rupees(round2(p.amount + purchaseGst(p)), true)}</td>
-                <td className={`${td} text-right`}><Button size="sm" icon={<FileText size={12} />} onClick={() => download(p)}>Download</Button></td>
+                <td className={`${td} text-right`}><Button size="sm" icon={<FileText size={12} />} disabled={!billing} onClick={() => download(p)}>Download</Button></td>
               </tr>
             ))}
           </tbody>

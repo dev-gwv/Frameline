@@ -67,10 +67,8 @@ export const INDIAN_STATES = [
   'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
 ]
 
-/* ---------------- Billing details (shared by /wallet modal and /settings/billing) ---------------- */
+/* ---------------- Billing details form shape (stored on Studio.billing, see billing.ts) ---------------- */
 export interface Billing { name: string; gstin: string; address: string; state: string; email: string }
-export const BILLING_KEY = 'frameline.billing'
-export const DEFAULT_BILLING: Billing = { name: 'Northlight Studio LLP', gstin: '27AAKFN4521Q1Z8', address: '14 Hill Road, Bandra West, Mumbai 400050', state: 'Maharashtra', email: 'accounts@northlight.in' }
 
 /* ---------------- Money & orders ---------------- */
 export const GST = 0.18

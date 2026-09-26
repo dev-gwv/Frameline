@@ -1,16 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Plus, QrCode } from 'lucide-react'
 import type { ID, SmartQR as SmartQRType } from '@frameline/shared'
-import { Button, ConfirmDialog, EmptyState, PageHeader, Skeleton, useToast } from '@frameline/ui'
+import { Button, ConfirmDialog, EmptyState, PageHeader, Skeleton } from '@frameline/ui'
 import { useApi } from '../../lib/api'
 import { useAction, useEvents, useQRs, useStudio } from '../../lib/queries'
 import { QueryError } from '../system'
 import { QRCard, TARGETS } from './QRCard'
-import { NewQRModal, ScheduleModal, scheduleOf } from './modals'
+import { NewQRModal, ScheduleModal } from './modals'
 
 export default function SmartQR() {
   const api = useApi()
-  const toast = useToast()
   const qrs = useQRs()
   const events = useEvents()
   const studio = useStudio()
@@ -42,27 +41,7 @@ export default function SmartQR() {
     onSuccess: () => setCreating(false),
   })
 
-  // Neither the mock nor the API switches a QR by itself yet, so while this page is open we apply
-  // switches whose time has come (on load and every 30 s) and then clear the schedule.
-  const applying = useRef(new Set<ID>())
-  useEffect(() => {
-    const run = () => {
-      const now = Date.now()
-      for (const q of qrs.data ?? []) {
-        const s = scheduleOf(q)
-        if (!s || new Date(s.at).getTime() > now || applying.current.has(q.id)) continue
-        applying.current.add(q.id)
-        api.updateQR(q.id, { eventId: s.eventId, scheduledEventId: '', scheduledAt: '' })
-          .then(() => toast.success(`Now opens ${eventName(s.eventId)}`, 'Your scheduled switch ran.'))
-          .catch(() => { /* deleted meanwhile */ })
-          .finally(() => applying.current.delete(q.id))
-      }
-    }
-    run()
-    const t = setInterval(run, 30_000)
-    return () => clearInterval(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qrs.data, api])
+  // Scheduled switches run server-side (cron); the list refreshes through live updates.
 
   const header = (
     <PageHeader title="Smart QR" subtitle="Print a QR once and point it at a different event whenever you like."

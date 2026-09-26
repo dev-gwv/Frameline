@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Download } from 'lucide-react'
 import { Button, Card, PageHeader, TabBar } from '@frameline/ui'
-import { useEvents, useStudio, useUsage } from '../../lib/queries'
+import { useDeletedEvents, useEvents, useStudio, useUsage } from '../../lib/queries'
 import { QueryError } from '../system'
 import { eventsCsv, EventsReport, toRows, type Bucket } from './EventsReport'
 import { downloadUsageReport, UsageReport, useUsageReportAction } from './UsageReport'
@@ -13,12 +13,13 @@ export default function Reports() {
   const [params, setParams] = useSearchParams()
   const tab: Tab = params.get('tab') === 'usage' ? 'usage' : 'events'
   const events = useEvents()
+  const deleted = useDeletedEvents()
   const usage = useUsage()
   const studio = useStudio()
   const { report, request } = useUsageReportAction()
   const [bucket, setBucket] = useState<Bucket>('active')
   const [query, setQuery] = useState('')
-  const rows = useMemo(() => (events.data ? toRows(events.data, usage.data) : undefined), [events.data, usage.data])
+  const rows = useMemo(() => (events.data ? toRows(events.data, usage.data, deleted.data) : undefined), [events.data, usage.data, deleted.data])
 
   const download = () => {
     if (tab === 'events') {

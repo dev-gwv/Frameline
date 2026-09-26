@@ -2,6 +2,8 @@ import { useRef, useState } from 'react'
 import { Download, FileText, Upload } from 'lucide-react'
 import { Button, Card, Chip, Field, Input, Segmented, Select, useToast } from '@frameline/ui'
 import { downloadFile, INDIAN_STATES } from '../../wallet/lib'
+import { assetAccept, assetErrorMessage, assetProblem } from '../../wallet/assets'
+import { useApi } from '../../../lib/api'
 import type { DocId, DocStatus, TabProps } from './model'
 
 const DOCS: { id: DocId; label: string; hint: string }[] = [
@@ -13,9 +15,6 @@ const DOCS: { id: DocId; label: string; hint: string }[] = [
 const STATUS: Record<DocStatus, { label: string; tone: 'ok' | 'accent' | 'warn' }> = {
   verified: { label: 'Verified', tone: 'ok' }, review: { label: 'In review', tone: 'accent' }, needed: { label: 'Needed', tone: 'warn' },
 }
-const ACCEPT = ['image/jpeg', 'image/png', 'application/pdf', 'image/webp', 'image/heic', 'image/heif']
-const ACCEPT_EXT = /\.(jpe?g|png|pdf|webp|heic|heif)$/i
-const MAX = 10 * 1024 * 1024
 
 function declarationLetter(name: string, pan: string, address: string) {
   const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -51,15 +50,24 @@ Place: ______________________
 export function KycTab({ data, set, errors }: TabProps) {
   const k = data.kyc
   const toast = useToast()
+  const api = useApi()
+  const [uploading, setUploading] = useState<DocId | null>(null)
   const inputs = useRef<Partial<Record<DocId, HTMLInputElement | null>>>({})
   const [docError, setDocError] = useState<Partial<Record<DocId, string>>>({})
-  const onFile = (id: DocId, f?: File) => {
+  // The file goes to private storage with api.uploadAsset('kyc-document'); saving sends its assetId for review.
+  const onFile = async (id: DocId, f?: File) => {
     if (!f) return
-    if (!(ACCEPT.includes(f.type) || ACCEPT_EXT.test(f.name))) { setDocError((e) => ({ ...e, [id]: `${f.name} isn’t a JPG, PNG, PDF, WebP or HEIC file.` })); return }
-    if (f.size > MAX) { setDocError((e) => ({ ...e, [id]: `${f.name} is ${(f.size / 1048576).toFixed(1)} MB. The limit is 10 MB; scan at a lower resolution.` })); return }
+    const problem = assetProblem('kyc-document', f)
+    if (problem) { setDocError((e) => ({ ...e, [id]: problem })); return }
     setDocError((e) => ({ ...e, [id]: undefined }))
-    set('kyc', { docs: { ...k.docs, [id]: { file: f.name, status: 'review' } } })
-    toast.success('Document added', `Save changes to send ${f.name} for review. We usually check within 1 working day.`)
+    setUploading(id)
+    try {
+      const asset = await api.uploadAsset('kyc-document', { filename: f.name, blob: f, contentType: f.type, size: f.size })
+      set('kyc', { docs: { ...k.docs, [id]: { file: asset.fileName || f.name, status: 'review', assetId: asset.id } } })
+      toast.success('Document uploaded', `Save changes to send ${f.name} for review. We usually check within 1 working day.`)
+    } catch (err) {
+      setDocError((e) => ({ ...e, [id]: assetErrorMessage('kyc-document', err) }))
+    } finally { setUploading(null) }
   }
   const address = [k.street, k.city, k.state, k.postal].filter(Boolean).join(', ')
 
@@ -125,15 +133,15 @@ export function KycTab({ data, set, errors }: TabProps) {
                   <div className="truncate font-mono text-[11px] text-ink-3">{doc.file || d.hint}</div>
                 </div>
                 <Chip tone={st.tone}>{st.label}</Chip>
-                <Button size="sm" icon={<Upload size={12} />} onClick={() => inputs.current[d.id]?.click()} aria-label={`Upload ${d.label}`}>{doc.file ? 'Replace' : 'Upload'}</Button>
-                <input ref={(el) => { inputs.current[d.id] = el }} type="file" hidden accept=".jpg,.jpeg,.png,.pdf,.webp,.heic,.heif"
-                  onChange={(e) => { onFile(d.id, e.target.files?.[0]); e.target.value = '' }} />
+                <Button size="sm" icon={<Upload size={12} />} loading={uploading === d.id} onClick={() => inputs.current[d.id]?.click()} aria-label={`Upload ${d.label}`}>{doc.file ? 'Replace' : 'Upload'}</Button>
+                <input ref={(el) => { inputs.current[d.id] = el }} type="file" hidden accept={assetAccept('kyc-document')}
+                  onChange={(e) => { void onFile(d.id, e.target.files?.[0]); e.target.value = '' }} />
               </div>
               {docError[d.id] && <div className="mt-1 pl-[42px] text-[11.5px] font-semibold text-bad">{docError[d.id]}</div>}
             </div>
           )
         })}
-        <p className="mt-2 text-[11.5px] text-ink-3">JPG, PNG, PDF, WebP, HEIC · up to 10 MB each. Not registered for GST? Pick “No” above for a declaration letter template.</p>
+        <p className="mt-2 text-[11.5px] text-ink-3">PDF, JPG or PNG · up to 10 MB each. Not registered for GST? Pick “No” above for a declaration letter template.</p>
       </Card>
     </div>
   )

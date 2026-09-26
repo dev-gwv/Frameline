@@ -1,20 +1,28 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Button, Card, useToast } from '@frameline/ui'
+import { Button, Card, Skeleton } from '@frameline/ui'
+import { QueryError } from '../system'
 import { BillingForm, validateBilling } from '../wallet/BillingForm'
-import { BILLING_KEY, DEFAULT_BILLING, readLocal, writeLocal, type Billing } from '../wallet/lib'
+import { useBilling } from '../wallet/billing'
+import type { Billing } from '../wallet/lib'
 
-/** Same billing details as the Orders & wallet modal (shared localStorage key frameline.billing). */
+/** Billing & GST details on the Studio (same data as the Orders & wallet modal). */
 export function BillingTab() {
-  const toast = useToast()
-  const [saved, setSaved] = useState<Billing>(() => readLocal(BILLING_KEY, DEFAULT_BILLING))
+  const b = useBilling()
+  if (b.isError) return <QueryError error={b.error} retry={() => b.refetch()} />
+  if (!b.billing) return <Skeleton className="h-[360px]" />
+  return <BillingEditor saved={b.billing} save={b.save} />
+}
+
+function BillingEditor({ saved, save }: { saved: Billing; save: ReturnType<typeof useBilling>['save'] }) {
   const [value, setValue] = useState<Billing>(saved)
   const [showErrors, setShowErrors] = useState(false)
-  const dirty = JSON.stringify(saved) !== JSON.stringify(value)
-  const save = () => {
+  const savedJson = JSON.stringify(saved)
+  useEffect(() => { setValue(JSON.parse(savedJson) as Billing) }, [savedJson])
+  const dirty = savedJson !== JSON.stringify(value)
+  const submit = () => {
     if (Object.keys(validateBilling(value)).length) { setShowErrors(true); return }
-    writeLocal(BILLING_KEY, value); setSaved(value); setShowErrors(false)
-    toast.success('Saved', 'New invoices use these details.')
+    save.mutate(value, { onSuccess: () => setShowErrors(false) })
   }
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px] [&>*]:min-w-0">
@@ -26,7 +34,7 @@ export function BillingTab() {
         <BillingForm value={value} onChange={setValue} showErrors={showErrors} />
         <div className="flex justify-end gap-2">
           {dirty && <Button variant="ghost" onClick={() => { setValue(saved); setShowErrors(false) }}>Discard</Button>}
-          <Button variant="primary" disabled={!dirty} onClick={save}>Save changes</Button>
+          <Button variant="primary" disabled={!dirty} loading={save.isPending} onClick={submit}>Save changes</Button>
         </div>
       </Card>
       <Card className="self-start text-[12.5px] text-ink-2">

@@ -6,6 +6,7 @@ import { useApi } from '../../lib/api'
 import { useAction, useStudio } from '../../lib/queries'
 import { QueryError } from '../system'
 import { EMAIL_RE } from '../wallet/lib'
+import { assetAccept, useAssetUpload } from '../wallet/assets'
 import { StudioContentEditor, type ContentKind } from '../website/StudioContentEditor'
 
 const COLOURS = ['#8C2F39', '#1B1712', '#C08A2C', '#2A8A8F', '#386641', '#6B4F7A']
@@ -36,17 +37,6 @@ function toPatch(f: Form, studio: Studio): Partial<Studio> {
   }
 }
 
-function readImage(f: File, maxMb: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!f.type.startsWith('image/')) return reject(new Error(`${f.name} isn’t an image.`))
-    if (f.size > maxMb * 1048576) return reject(new Error(`${f.name} is over ${maxMb} MB. Use a smaller image.`))
-    const r = new FileReader()
-    r.onload = () => resolve(String(r.result))
-    r.onerror = () => reject(new Error('Couldn’t read that file.'))
-    r.readAsDataURL(f)
-  })
-}
-
 export function ProfileTab() {
   const q = useStudio()
   if (q.isError) return <QueryError error={q.error} retry={() => q.refetch()} />
@@ -62,6 +52,8 @@ function ProfileForm({ studio }: { studio: Studio }) {
   const [contentKind, setContentKind] = useState<ContentKind>('services')
   const logoRef = useRef<HTMLInputElement>(null)
   const coverRef = useRef<HTMLInputElement>(null)
+  const logoUp = useAssetUpload('studio-logo')
+  const coverUp = useAssetUpload('studio-cover')
   // Take in server changes (e.g. after saving services below) without wiping unsaved edits.
   const base = useRef(pick(studio))
   useEffect(() => {
@@ -96,12 +88,11 @@ function ProfileForm({ studio }: { studio: Studio }) {
     if (Object.keys(errors).length) { toast.error('Some details need fixing', 'Fields with a problem are marked in red.'); return }
     save.mutate(undefined)
   }
+  // Uploaded with api.uploadAsset; the asset URL is saved on the studio with "Save changes".
   const onImage = async (f: File | undefined, kind: 'logo' | 'cover') => {
     if (!f) return
-    try {
-      const url = await readImage(f, kind === 'logo' ? 1 : 2)
-      set(kind === 'logo' ? { logoUrl: url } : { coverUrl: url })
-    } catch (e) { toast.error('Image not added', (e as Error).message) }
+    const asset = await (kind === 'logo' ? logoUp : coverUp).upload(f)
+    if (asset) set(kind === 'logo' ? { logoUrl: asset.url } : { coverUrl: asset.url })
   }
 
   return (
@@ -138,24 +129,24 @@ function ProfileForm({ studio }: { studio: Studio }) {
               <Input aria-label="Brand colour hex" className="w-28 font-mono uppercase" maxLength={7} value={form.brandColor} onChange={(e) => set({ brandColor: e.target.value.startsWith('#') ? e.target.value : `#${e.target.value}` })} />
             </div>
           </Field>
-          <Field label="Logo" hint="Square PNG or JPG, up to 1 MB">
+          <Field label="Logo" hint="Square PNG, JPG or WebP, up to 10 MB" error={logoUp.error}>
             <div className="flex items-center gap-3">
               <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-card border border-line bg-sunk font-display text-[22px] font-semibold" style={form.logoUrl ? undefined : { background: form.brandColor, color: '#fff' }}>
                 {form.logoUrl ? <img src={form.logoUrl} alt="Studio logo" className="size-full object-cover" /> : form.name.slice(0, 1)}
               </div>
-              <Button size="sm" icon={<ImagePlus size={13} />} onClick={() => logoRef.current?.click()}>{form.logoUrl ? 'Replace' : 'Upload logo'}</Button>
+              <Button size="sm" icon={<ImagePlus size={13} />} loading={logoUp.pending} onClick={() => logoRef.current?.click()}>{form.logoUrl ? 'Replace' : 'Upload logo'}</Button>
               {form.logoUrl && <Button size="sm" variant="ghost" onClick={() => set({ logoUrl: '' })}>Remove</Button>}
-              <input ref={logoRef} type="file" hidden accept="image/*" onChange={(e) => { onImage(e.target.files?.[0], 'logo'); e.target.value = '' }} />
+              <input ref={logoRef} type="file" hidden accept={assetAccept('studio-logo')} onChange={(e) => { onImage(e.target.files?.[0], 'logo'); e.target.value = '' }} />
             </div>
           </Field>
-          <Field label="Cover photo" hint="16:9, up to 2 MB. Shown on your website and studio app page.">
+          <Field label="Cover photo" hint="16:9, up to 10 MB. Shown on your website and studio app page." error={coverUp.error}>
             <div className="relative aspect-video overflow-hidden rounded-card border border-line bg-sunk">
               {form.coverUrl ? <img src={form.coverUrl} alt="Cover" className="size-full object-cover" /> : <div className="grid size-full place-items-center text-[12px] text-ink-3">No cover yet</div>}
               <div className="absolute bottom-2 right-2 flex gap-1.5">
-                <Button size="sm" icon={<ImagePlus size={13} />} onClick={() => coverRef.current?.click()}>{form.coverUrl ? 'Replace' : 'Upload cover'}</Button>
+                <Button size="sm" icon={<ImagePlus size={13} />} loading={coverUp.pending} onClick={() => coverRef.current?.click()}>{form.coverUrl ? 'Replace' : 'Upload cover'}</Button>
                 {form.coverUrl && <Button size="sm" aria-label="Remove cover" onClick={() => set({ coverUrl: '' })}><Trash2 size={13} /></Button>}
               </div>
-              <input ref={coverRef} type="file" hidden accept="image/*" onChange={(e) => { onImage(e.target.files?.[0], 'cover'); e.target.value = '' }} />
+              <input ref={coverRef} type="file" hidden accept={assetAccept('studio-cover')} onChange={(e) => { onImage(e.target.files?.[0], 'cover'); e.target.value = '' }} />
             </div>
           </Field>
         </Card>

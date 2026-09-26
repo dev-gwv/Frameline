@@ -99,7 +99,7 @@ export default function Plan() {
                 </tbody>
               </table>
             </div>
-            <p className="px-4 py-2.5 text-[12px] text-ink-3">Paid from wallet credits; if you’re short, we top up the difference by UPI or card first.</p>
+            <p className="px-4 py-2.5 text-[12px] text-ink-3">Pay from wallet credits or by UPI or card. The receipt is in Orders & wallet → Invoices.</p>
           </Card>
           {usage ? <RenewalCard multiplier={usage.renewalMultiplier} credits={usage.walletCredits} /> : <Skeleton className="h-48" />}
         </div>
