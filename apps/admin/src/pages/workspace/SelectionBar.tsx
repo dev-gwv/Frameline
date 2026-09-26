@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { Download, Eye, EyeOff, FolderInput, ImageIcon, Trash2, X } from 'lucide-react'
 import { fmt, type Album, type ID } from '@frameline/shared'
-import { ConfirmDialog, Menu, Tip, useToast } from '@frameline/ui'
+import { ConfirmDialog, Menu, Tip } from '@frameline/ui'
 import { useApi } from '../../lib/api'
-import { useAction } from '../../lib/queries'
-import { rememberCover } from './lib'
+import { useAction, useStudio } from '../../lib/queries'
 
 interface Props {
   eventId: ID
@@ -22,14 +21,19 @@ const barBtn = 'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] bord
 
 export function SelectionBar({ eventId, ids, total, allHidden, albums, currentAlbumId, onSelectAll, selectingAll, onClear }: Props) {
   const api = useApi()
-  const toast = useToast()
+  const studioEmail = useStudio().data?.email
   const [confirmDelete, setConfirmDelete] = useState(false)
   const n = ids.length
   const plural = (k: number) => `${fmt.count(k)} photo${k === 1 ? '' : 's'}`
 
   const move = useAction((a: Album) => api.updatePhotos(ids, { albumId: a.id }), { success: (_d, a) => `Moved ${plural(n)} to ${a.name}`, onSuccess: onClear })
   const hide = useAction((hidden: boolean) => api.updatePhotos(ids, { hidden }), { success: (_d, h) => (h ? `${plural(n)} hidden from guests` : `${plural(n)} visible to guests again`), onSuccess: onClear })
-  const cover = useAction(() => api.setCover(eventId, ids[0], 'event'), { success: 'Event cover updated', onSuccess: () => { rememberCover(eventId, ids[0], 'event'); onClear() } })
+  const cover = useAction(() => api.setCover(eventId, ids[0], 'event'), { success: 'Event cover updated', onSuccess: onClear })
+  const zip = useAction(() => api.requestZip(eventId, studioEmail ?? '', { photoIds: ids }), {
+    success: (z) => `Preparing a ZIP of ${plural(z.photoCount)}. We’ll email the link to ${z.email}.`,
+    error: 'Couldn’t request the ZIP',
+    onSuccess: onClear,
+  })
   const remove = useAction(() => api.deletePhotos(ids), { success: `${plural(n)} deleted`, onSuccess: onClear })
 
   const targets = albums.filter((a) => a.kind === 'album' && a.id !== currentAlbumId)
@@ -51,9 +55,11 @@ export function SelectionBar({ eventId, ids, total, allHidden, albums, currentAl
         <Tip label={n === 1 ? 'Use this photo on the gallery cover' : 'Select one photo to use as the cover'}>
           <span className="inline-flex"><button type="button" className={barBtn} disabled={n !== 1} onClick={() => cover.mutate(undefined)}><ImageIcon size={12} />Set as cover</button></span>
         </Tip>
-        <button type="button" className={barBtn} onClick={() => { toast.toast({ kind: 'info', title: `Preparing a ZIP of ${plural(n)} — we’ll notify you`, body: 'You’ll get a download link here and by email when it’s ready.' }); onClear() }}>
-          <Download size={12} />Download
-        </button>
+        <Tip label={studioEmail ? `Email a ZIP to ${studioEmail}` : 'Email me a ZIP'}>
+          <span className="inline-flex"><button type="button" className={barBtn} disabled={zip.isPending || !studioEmail} onClick={() => zip.mutate(undefined)}>
+            <Download size={12} />{zip.isPending ? 'Requesting…' : 'Download ZIP'}
+          </button></span>
+        </Tip>
         <button type="button" className={`${barBtn} text-bad`} onClick={() => setConfirmDelete(true)}><Trash2 size={12} />Delete</button>
         <Tip label="Clear selection (Esc)">
           <button type="button" aria-label="Clear selection" className="grid size-7 shrink-0 place-items-center rounded-[7px] text-side-ink-2 hover:bg-side-2 hover:text-side-ink" onClick={onClear}><X size={14} /></button>

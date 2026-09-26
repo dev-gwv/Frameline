@@ -4,9 +4,9 @@ import { Download, FolderPlus } from 'lucide-react'
 import type { AccessRequest, Guest, Photo } from '@frameline/shared'
 import { Button, Card, CardHeader, Chip, EmptyState, PageHeader, Skeleton, TabBar, useToast } from '@frameline/ui'
 import { useApi } from '../../lib/api'
-import { useAccessRequests, useAction, useAlbums, useEvent, useGuests, usePhotos } from '../../lib/queries'
+import { useAccessRequests, useAction, useAlbums, useEvent, useGuests, usePhotos, useStudio } from '../../lib/queries'
 import { QueryError } from '../system'
-import { downloadCsv, readReviewed, roleLabel, writeReviewed } from './data'
+import { downloadCsv, roleLabel } from './data'
 import { PicksModal } from './PicksModal'
 import { FavouritesTab, RegisteredTab, RequestsTab, UploadsTab, type ReviewState } from './Tabs'
 
@@ -29,22 +29,37 @@ export default function Guests() {
   const guestAlbum = albums.data?.find((a) => a.kind === 'guest')
   const uploads = usePhotos(guestAlbum ? event.data?.id : undefined, { albumId: guestAlbum?.id, sort: 'sequence' })
 
+  const studio = useStudio()
   const [viewing, setViewing] = useState<Guest | null>(null)
-  const [reviewed, setReviewed] = useState(() => readReviewed(eventId))
   const [busyRequest, setBusyRequest] = useState<string>()
 
+  const ev = event.data!
   const guestList = guests.data ?? []
   const favGuests = guestList.filter((g) => g.favourites.length > 0)
   const uploadList = uploads.data?.items ?? []
-  const stateOf = (p: Photo): ReviewState => (p.hidden ? 'hidden' : reviewed.has(p.id) ? 'published' : 'pending')
+  const stateOf = (p: Photo): ReviewState => (p.hidden ? 'hidden' : p.reviewStatus === 'pending' ? 'pending' : 'published')
 
   const resolve = useAction(({ r, approve }: { r: AccessRequest; approve: boolean }) => api.resolveAccessRequest(r.id, approve), {
     success: (_, v) => (v.approve ? `${v.r.name} can now manage this event` : `Declined ${v.r.name}’s request`),
     onSettled: () => setBusyRequest(undefined),
   })
-  const decide = useAction(({ photos, publish }: { photos: Photo[]; publish: boolean }) => api.updatePhotos(photos.map((p) => p.id), { hidden: !publish }), {
+  // Approve = mark reviewed (and show it again if it was hidden). Hide = keep it out of the gallery.
+  const decide = useAction(async ({ photos, publish }: { photos: Photo[]; publish: boolean }) => {
+    const ids = photos.map((p) => p.id)
+    if (publish) {
+      const pending = photos.filter((p) => p.reviewStatus === 'pending').map((p) => p.id)
+      const hidden = photos.filter((p) => p.hidden).map((p) => p.id)
+      if (pending.length) await api.setPhotoReview(pending, 'approved')
+      if (hidden.length) await api.updatePhotos(hidden, { hidden: false })
+    } else {
+      await api.updatePhotos(ids, { hidden: true })
+    }
+  }, {
     success: (_, v) => (v.publish ? `${v.photos.length === 1 ? 'Photo' : `${v.photos.length} photos`} published to the gallery` : 'Photo hidden from guests'),
-    onSuccess: (_, v) => setReviewed((prev) => { const next = new Set(prev); v.photos.forEach((p) => next.add(p.id)); writeReviewed(eventId, next); return next }),
+  })
+  const zipPicks = useAction((g: Guest) => api.requestZip(ev.id, studio.data?.email ?? '', { photoIds: g.favourites }), {
+    success: (z, g) => `ZIP of ${g.name}’s ${z.photoCount} picks requested. We’ll email the link to ${z.email}.`,
+    error: 'Couldn’t request the ZIP',
   })
 
   // Client proofing: the client's picks (or the most active host) become an album.
@@ -52,13 +67,14 @@ export default function Guests() {
     const byCount = [...favGuests].sort((a, b) => b.favourites.length - a.favourites.length)
     return byCount.find((g) => g.role === 'client') ?? byCount.find((g) => g.role === 'host')
   }, [favGuests])
+  // Copies (not moves) the picks, so the original albums stay complete.
   const createAlbum = useAction(async () => {
-    const ev = event.data!
     const album = await api.createAlbum(ev.id, `${proofer!.name.split(' ')[0]}’s picks`)
-    await api.updatePhotos(proofer!.favourites, { albumId: album.id })
-    return album
+    const copies = await api.copyPhotosToAlbum(proofer!.favourites, album.id)
+    return { album, copied: copies.length }
   }, {
-    onSuccess: (album) => toast.toast({ kind: 'success', title: `Album “${album.name}” created`, body: `${proofer!.favourites.length} photos moved in for proofing.`, action: { label: 'Open album', onClick: () => navigate(`/events/${event.data!.id}?album=${album.id}`) } }),
+    error: 'Couldn’t create the album',
+    onSuccess: ({ album, copied }) => toast.toast({ kind: 'success', title: `Album “${album.name}” created`, body: `${copied} photos copied in for proofing. The originals stay where they are.`, action: { label: 'Open album', onClick: () => navigate(`/events/${ev.id}?album=${album.id}`) } }),
   })
 
   const exportCsv = () => {
@@ -72,7 +88,6 @@ export default function Guests() {
 
   if (event.error) return <div className="px-4 pt-6 sm:px-7"><QueryError error={event.error} retry={() => event.refetch()} /></div>
   if (event.isLoading || !event.data) return <div className="flex flex-col gap-4 px-4 pt-6 sm:px-7"><Skeleton className="h-10 w-72" /><Skeleton className="h-9 w-full" /><Skeleton className="h-72" /></div>
-  const ev = event.data
   const tabLoading = guests.isLoading || (tab === 'requests' && requests.isLoading)
 
   return (
@@ -92,7 +107,7 @@ export default function Guests() {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0">
             {guests.error ? <QueryError error={guests.error} retry={() => guests.refetch()} /> : tabLoading ? <Skeleton className="h-72" /> : (
-              tab === 'favourites' ? <FavouritesTab guests={guestList} onView={setViewing} />
+              tab === 'favourites' ? <FavouritesTab guests={guestList} onView={setViewing} onZip={(g) => zipPicks.mutate(g)} zippingId={zipPicks.isPending ? zipPicks.variables?.id : undefined} />
               : tab === 'registered' ? <RegisteredTab guests={guestList} />
               : tab === 'requests' ? <RequestsTab requests={requests.data ?? []} busyId={busyRequest} onResolve={(r, approve) => { setBusyRequest(r.id); resolve.mutate({ r, approve }) }} />
               : <UploadsTab photos={uploadList} loading={albums.isLoading || uploads.isLoading} stateOf={stateOf}

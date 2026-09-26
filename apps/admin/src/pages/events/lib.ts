@@ -1,23 +1,7 @@
-import { DEMO_NOW, fmt, type EventType, type PhotoEvent } from '@frameline/shared'
+import { ApiError, DEMO_NOW, fmt, type PhotoEvent } from '@frameline/shared'
 
 export const GALLERY_URL: string = import.meta.env.VITE_GALLERY_URL ?? 'http://localhost:5174'
 export const galleryLink = (e: Pick<PhotoEvent, 'shortId'>) => `${GALLERY_URL}/${e.shortId}`
-
-export const EVENT_TYPES: { value: EventType; label: string }[] = [
-  { value: 'wedding', label: 'Wedding' },
-  { value: 'engagement', label: 'Engagement' },
-  { value: 'couple', label: 'Couple shoot' },
-  { value: 'family', label: 'Family' },
-  { value: 'baby', label: 'Baby shoot' },
-  { value: 'birthday', label: 'Birthday' },
-  { value: 'corporate', label: 'Corporate' },
-  { value: 'school', label: 'School' },
-  { value: 'sports', label: 'Sports' },
-  { value: 'product', label: 'Product' },
-  { value: 'real-estate', label: 'Real estate' },
-  { value: 'themed', label: 'Themed' },
-  { value: 'other', label: 'Other' },
-]
 
 export type StatusFilter = 'all' | 'live' | 'draft' | 'expiring' | 'archived'
 export type SortKey = 'recent' | 'name' | 'photos'
@@ -56,6 +40,14 @@ export function shortIdError(value: string, events: PhotoEvent[], selfId?: strin
   const v = value.trim().toUpperCase()
   if (!SHORT_ID_RE.test(v)) return 'Use exactly 7 letters or numbers, like 6402F9F.'
   if (events.some((e) => e.id !== selfId && e.shortId.toUpperCase() === v)) return 'Another event already uses this ID. Try a different one.'
+  return null
+}
+
+/** Inline message for a failed Event ID change (409 conflict / 422 from the API), or null when it's another kind of error. */
+export function shortIdApiError(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null
+  if (err.status === 409 || /conflict|taken/.test(err.code)) return 'Another event already uses this ID. Try a different one.'
+  if (err.status === 422) return err.fieldError('shortId') ?? err.detail ?? 'This Event ID can’t be used. Try a different one.'
   return null
 }
 

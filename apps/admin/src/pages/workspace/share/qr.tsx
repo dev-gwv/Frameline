@@ -1,29 +1,33 @@
-import { forwardRef } from 'react'
+import { forwardRef, useMemo } from 'react'
+import { encode } from 'uqr'
 import { QRCode } from '@frameline/ui'
 import { downloadBlob } from '../lib'
 
 export type QRStyle = 'rounded' | 'soft' | 'hybrid' | 'classic'
 export type QRCorner = 'rounded' | 'circle' | 'square'
 
-interface StyledQRProps { seed: number; size?: number; color: string; style: QRStyle; corner: QRCorner; logo?: string }
+interface StyledQRProps { value: string; size?: number; color: string; style: QRStyle; corner: QRCorner; logo?: string }
 
 /**
- * Wraps the shared QRCode in one exportable SVG and layers the chosen finder
- * shape and centre logo on top. (QRCode is decorative until a real encoder lands.)
+ * The shared (scannable) QRCode in one exportable SVG, with the chosen finder shape
+ * layered over its three corner squares. `logo` is drawn in the centre by QRCode,
+ * which then switches to high error correction so the code still scans.
  */
-export const StyledQR = forwardRef<SVGSVGElement, StyledQRProps>(function StyledQR({ seed, size = 220, color, style, corner, logo }, ref) {
-  const c = size / 21
-  const finder = (cx: number, cy: number) => {
-    const x = cx * c, y = cy * c
-    const key = `${cx}-${cy}`
+export const StyledQR = forwardRef<SVGSVGElement, StyledQRProps>(function StyledQR({ value, size = 220, color, style, corner, logo }, ref) {
+  // Same encoding options as QRCode, so the module grid lines up with what it draws.
+  const n = useMemo(() => encode(value, { ecc: logo ? 'H' : 'Q', border: 1 }).size, [value, logo])
+  const c = size / n
+  const finder = (mx: number, my: number) => {
+    const x = mx * c, y = my * c
+    const key = `${mx}-${my}`
     if (corner === 'circle') {
-      const r = 3.5 * c, mx = x + r, my = y + r
+      const r = 3.5 * c, cx = x + r, cy = y + r
       return (
         <g key={key}>
           <rect x={x - c * 0.2} y={y - c * 0.2} width={7.4 * c} height={7.4 * c} fill="#fff" />
-          <circle cx={mx} cy={my} r={r} fill={color} />
-          <circle cx={mx} cy={my} r={2.5 * c} fill="#fff" />
-          <circle cx={mx} cy={my} r={1.5 * c} fill={color} />
+          <circle cx={cx} cy={cy} r={r} fill={color} />
+          <circle cx={cx} cy={cy} r={2.5 * c} fill="#fff" />
+          <circle cx={cx} cy={cy} r={1.5 * c} fill={color} />
         </g>
       )
     }
@@ -37,22 +41,17 @@ export const StyledQR = forwardRef<SVGSVGElement, StyledQRProps>(function Styled
       </g>
     )
   }
+  const far = n - 1 - 7 // module where the right/bottom finders start (1-module border)
   const pad = c * 1.5
   const full = size + pad * 2
   return (
-    <svg ref={ref} xmlns="http://www.w3.org/2000/svg" width={full} height={full} viewBox={`0 0 ${full} ${full}`} role="img" aria-label="QR code preview">
+    <svg ref={ref} xmlns="http://www.w3.org/2000/svg" width={full} height={full} viewBox={`0 0 ${full} ${full}`} role="img" aria-label={`QR code for ${value}`}>
       <rect width={full} height={full} rx={style === 'classic' ? 0 : c} fill="#fff" />
       <g transform={`translate(${pad} ${pad})`}>
         <g opacity={style === 'soft' ? 0.82 : 1}>
-          <QRCode seed={seed} size={size} color={color} rounded={style === 'rounded' || style === 'soft'} />
+          <QRCode value={value} size={size} color={color} rounded={style === 'rounded' || style === 'soft'} logo={logo} />
         </g>
-        {style !== 'classic' || corner !== 'square' ? [finder(0, 0), finder(14, 0), finder(0, 14)] : null}
-        {logo && (
-          <g>
-            <rect x={size / 2 - 3 * c} y={size / 2 - 3 * c} width={6 * c} height={6 * c} rx={c} fill="#fff" />
-            <image href={logo} x={size / 2 - 2.5 * c} y={size / 2 - 2.5 * c} width={5 * c} height={5 * c} preserveAspectRatio="xMidYMid meet" />
-          </g>
-        )}
+        {[finder(1, 1), finder(far, 1), finder(1, far)]}
       </g>
     </svg>
   )

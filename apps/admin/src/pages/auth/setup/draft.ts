@@ -24,22 +24,19 @@ export type Patch = (p: Partial<SetupDraft>) => void
 
 export const BRAND_SWATCHES = ['#B37C22', '#1F3A5F', '#8C2F39', '#2F5D50', '#1B1712', '#6B4F7A']
 export const HEARD_OPTIONS = ['Instagram', 'A friend or another photographer', 'Google search', 'YouTube', 'A guest gallery I saw', 'Other']
-export const EVENT_TYPE_LABELS: Record<EventType, string> = {
-  wedding: 'Wedding', engagement: 'Engagement', couple: 'Couple shoot', family: 'Family', baby: 'Baby shoot', birthday: 'Birthday',
-  corporate: 'Corporate', school: 'School', sports: 'Sports', product: 'Product', 'real-estate': 'Real estate', themed: 'Themed', other: 'Other',
-}
-export const TAKEN_HANDLES = ['studio', 'photos', 'admin']
+const KINDS: StudioKind[] = ['photographer', 'studio', 'agency']
 export const isHex = (v: string) => /^#[0-9a-fA-F]{6}$/.test(v)
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 
 export function draftFromStudio(s?: Studio): SetupDraft {
   return {
-    kind: 'studio',
+    kind: KINDS.includes(s?.studioType as StudioKind) ? (s!.studioType as StudioKind) : 'studio',
     city: s?.city ?? '',
-    heard: '',
+    heard: s?.referralSource ?? '',
     name: s?.name ?? '',
     logoUrl: s?.logoUrl,
+    coverUrl: s?.coverUrl,
     brandColor: s?.brandColor ?? BRAND_SWATCHES[2],
     handle: s?.handle ?? '',
     phone: s?.phone ?? '',
@@ -53,16 +50,20 @@ export function draftFromStudio(s?: Studio): SetupDraft {
 
 export type HandleStatus = 'empty' | 'invalid' | 'checking' | 'available' | 'taken'
 
-/** Debounced (simulated) availability check for `<handle>.frameline.in`. */
-export function useHandleCheck(handle: string): HandleStatus {
+/**
+ * Format check for `<handle>.frameline.in`, debounced while typing. Whether the address is free is
+ * decided by the API when saving (409 `handle_taken`); pass that handle as `taken` to show it here.
+ */
+export function useHandleCheck(handle: string, taken?: string): HandleStatus {
   const [status, setStatus] = useState<HandleStatus>('empty')
   useEffect(() => {
     const h = handle.trim()
     if (!h) { setStatus('empty'); return }
-    if (!/^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/.test(h)) { setStatus('invalid'); return }
+    if (!/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/.test(h)) { setStatus('invalid'); return }
+    if (taken && h === taken) { setStatus('taken'); return }
     setStatus('checking')
-    const t = setTimeout(() => setStatus(TAKEN_HANDLES.includes(h) ? 'taken' : 'available'), 450)
+    const t = setTimeout(() => setStatus('available'), 300)
     return () => clearTimeout(t)
-  }, [handle])
+  }, [handle, taken])
   return status
 }

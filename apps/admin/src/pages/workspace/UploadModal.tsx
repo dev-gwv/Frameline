@@ -97,7 +97,7 @@ export function UploadModal({ open, onOpenChange, event, albums, albumId, files,
     const toSend: UploadFile[] = files
       .filter((f) => !dupSet.has(f) && !large.has(f))
       .map((f) => ({ filename: f.name, size: f.size, url: objectUrl(f) }))
-    start({ eventId: event.id, albumId: targetAlbum.id, albumName: targetAlbum.name, files: toSend, quality })
+    start({ eventId: event.id, albumId: targetAlbum.id, albumName: targetAlbum.name, files: toSend, quality, watermark, fast: speed === 'fast' })
     onFiles([])
     onOpenChange(false)
   }

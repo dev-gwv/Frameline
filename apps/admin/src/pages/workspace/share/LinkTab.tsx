@@ -4,7 +4,7 @@ import type { AccessMode, EventSettings, PhotoEvent, Studio } from '@frameline/s
 import { Button, ConfirmDialog, Input, Segmented, Textarea, Toggle, useToast } from '@frameline/ui'
 import { useApi } from '../../../lib/api'
 import { useAction } from '../../../lib/queries'
-import { copyText, galleryLink, https } from '../lib'
+import { copyText, displayUrl, galleryLink } from '../lib'
 import { GuestPreview } from './GuestPreview'
 import { fillTemplate, loadTemplate, mailtoUrl, variableValues, whatsappUrl } from './message'
 
@@ -29,7 +29,7 @@ export function LinkTab({ event, studio }: { event: PhotoEvent; studio?: Studio 
   const [confirmPin, setConfirmPin] = useState(false)
   const [showEmail, setShowEmail] = useState(false)
   const s = event.settings
-  const link = https(galleryLink(event, s.shortLinks))
+  const link = galleryLink(event, s.shortLinks)
   const resetPin = useAction(() => api.resetPin(event.id), { success: (pin) => `New PIN is ${pin}. The old one no longer works.` })
 
   const message = fillTemplate(loadTemplate(), variableValues(event, studio))
@@ -41,7 +41,7 @@ export function LinkTab({ event, studio }: { event: PhotoEvent; studio?: Studio 
         <div>
           <div className="mb-1.5 text-[12px] font-bold text-ink-2">Gallery link</div>
           <div className="flex gap-2">
-            <Input readOnly value={link.replace(/^https:\/\//, '')} aria-label="Gallery link" icon={<Link2 size={14} />} className="min-w-0 flex-1 font-mono"
+            <Input readOnly value={displayUrl(link)} aria-label="Gallery link" icon={<Link2 size={14} />} className="min-w-0 flex-1 font-mono"
               onFocus={(e) => e.target.select()}
               suffix={<label className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-3">Short link <Toggle size="sm" label="Short links" checked={s.shortLinks} onCheckedChange={(v) => settings.mutate({ shortLinks: v })} /></label>} />
             <Button variant="primary" icon={<Copy size={14} />} onClick={() => copy(link)}>Copy</Button>

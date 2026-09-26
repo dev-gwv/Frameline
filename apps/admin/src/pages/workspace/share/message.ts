@@ -1,5 +1,5 @@
 import { fmt, type PhotoEvent, type Studio } from '@frameline/shared'
-import { appLink, galleryLink, https } from '../lib'
+import { appLink, galleryLink } from '../lib'
 
 export const TEMPLATE_KEY = 'frameline.messageTemplate'
 export const MAX_TEMPLATE = 2000
@@ -21,8 +21,8 @@ export function variableValues(event: PhotoEvent, studio?: Studio, short = event
     'Event name': event.name,
     'Event ID': event.shortId,
     'Studio name': studio?.name ?? 'your photographer',
-    'Web gallery link': https(galleryLink(event, short)),
-    'App link': https(appLink(event)),
+    'Web gallery link': galleryLink(event, short),
+    'App link': appLink(event),
     PIN: event.settings.pin,
     'Expiry date': fmt.date(event.expiresAt),
   }

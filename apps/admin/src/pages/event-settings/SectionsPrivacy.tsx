@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { EyeOff, KeyRound, Lock, RefreshCw, ScanFace, ShieldCheck, Smartphone, Users } from 'lucide-react'
 import type { AccessMode, PhotoEvent } from '@frameline/shared'
 import { fmt } from '@frameline/shared'
-import { Button, Chip, Field, Input, Meter, Segmented, Toggle, useToast } from '@frameline/ui'
-import { useEvents, useGuests } from '../../lib/queries'
-import { useApi } from '../../lib/api'
+import { Button, Chip, Field, Input, Segmented, Toggle } from '@frameline/ui'
+import { useAction, useEvents, useGuests } from '../../lib/queries'
+import { errorMessage, useApi } from '../../lib/api'
+import { GALLERY_URL, shortIdApiError } from '../events/lib'
 import { AutoField, Row, SectionCard, TextLink } from './parts'
 import type { SaveEvent, SaveSettings } from './useEventSaver'
 
@@ -15,6 +16,11 @@ const ID_RE = /^[A-Z0-9]{7}$/
 
 export function GeneralSection({ event, update }: SectionProps) {
   const events = useEvents().data ?? []
+  const [idError, setIdError] = useState<string | null>(null)
+  const saveShortId = async (v: string) => {
+    const err = await update({ shortId: v }, { quiet: true })
+    if (err) setIdError(shortIdApiError(err) ?? errorMessage(err))
+  }
   return (
     <SectionCard id="general" title="General">
       <div className="grid gap-3.5 sm:grid-cols-2">
@@ -28,8 +34,9 @@ export function GeneralSection({ event, update }: SectionProps) {
           format={(v) => v.toUpperCase().replace(/[^A-Z0-9]/g, '')}
           validate={(v) => !ID_RE.test(v) ? 'Use exactly 7 letters or numbers (A–Z, 0–9).'
             : events.some((e) => e.id !== event.id && e.shortId === v) ? 'Another event already uses this ID. Try a different one.' : null}
-          hint={<>Gallery link: <span className="font-mono">frameline.in/{event.shortId}</span>. Changing it breaks links and QR codes already shared.</>}
-          onSave={(v) => update({ shortId: v })}
+          hint={<>Gallery link: <span className="font-mono">{GALLERY_URL.replace(/^https?:\/\//, '')}/{event.shortId}</span>. Changing it breaks links and QR codes already shared.</>}
+          serverError={idError} onEdit={() => setIdError(null)}
+          onSave={(v) => void saveShortId(v)}
         />
         <Field label="Event date" htmlFor="ev-date" hint={`Gallery expires ${fmt.date(event.expiresAt)}`}>
           <Input
@@ -50,16 +57,10 @@ const ACCESS: { value: AccessMode; label: string }[] = [
 
 export function AccessSection({ event, set }: SectionProps) {
   const api = useApi()
-  const toast = useToast()
   const navigate = useNavigate()
   const registered = useGuests(event.id).data?.length ?? 0
   const s = event.settings
-  const [resetting, setResetting] = useState(false)
-  const newPin = async () => {
-    setResetting(true)
-    try { await api.resetPin(event.id) } catch (e) { toast.error('Couldn’t change the PIN', e instanceof Error ? e.message : 'Try again.') }
-    setResetting(false)
-  }
+  const resetPin = useAction(() => api.resetPin(event.id), { success: (pin) => `New PIN is ${pin}. The old one no longer works.`, error: 'Couldn’t change the PIN' })
   return (
     <SectionCard id="access" title="Access">
       <Row
@@ -72,7 +73,7 @@ export function AccessSection({ event, set }: SectionProps) {
       {s.access === 'link-pin' && (
         <Row
           icon={<KeyRound size={15} />} title="Gallery PIN" description="Guests type this once. A new PIN stops the old one working."
-          control={<Button size="sm" icon={<RefreshCw size={12} />} loading={resetting} onClick={newPin}>New PIN</Button>}
+          control={<Button size="sm" icon={<RefreshCw size={12} />} loading={resetPin.isPending} onClick={() => resetPin.mutate(undefined)}>New PIN</Button>}
         />
       )}
       <Row
@@ -90,39 +91,31 @@ export function AccessSection({ event, set }: SectionProps) {
 }
 
 export function FacesSection({ event, set }: SectionProps) {
-  const toast = useToast()
+  const api = useApi()
   const s = event.settings
-  const [progress, setProgress] = useState<number | null>(null)
-  const timer = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
-  useEffect(() => () => clearInterval(timer.current), [])
+  const [queued, setQueued] = useState<number | null>(null)
+  const reindex = useAction(() => api.reindexFaces(event.id), {
+    success: (r) => `Re-indexing ${fmt.count(r.queued)} photos. Selfie search updates as each one finishes.`,
+    onSuccess: (r) => setQueued(r.queued),
+  })
+  // The API doesn't report indexing progress; show "queued" for a minute, then the normal state.
   useEffect(() => {
-    if (progress === null || progress < 100) return
-    clearInterval(timer.current)
-    const t = setTimeout(() => {
-      setProgress(null)
-      toast.success('Face index ready', `${fmt.count(event.photoCount)} photos indexed. Selfie search uses the new index now.`)
-    }, 400)
+    if (queued === null) return
+    const t = setTimeout(() => setQueued(null), 60_000)
     return () => clearTimeout(t)
-  }, [progress, toast, event.photoCount])
-
-  const rerun = () => {
-    setProgress(0)
-    toast.toast({ kind: 'info', title: 'Re-running face indexing', body: `${fmt.count(event.photoCount)} photos · about a minute. You can keep working.` })
-    clearInterval(timer.current)
-    timer.current = setInterval(() => setProgress((p) => Math.min(100, (p ?? 0) + 6 + Math.random() * 8)), 350)
-  }
+  }, [queued])
 
   return (
     <SectionCard
       id="faces" title="Faces"
       action={
         <div className="flex items-center gap-2">
-          {progress !== null ? <Chip tone="accent" dot>Indexing {Math.round(progress)}%</Chip> : s.faceSearch ? <Chip tone="ok">Index ready</Chip> : <Chip>Off</Chip>}
-          <Button size="sm" icon={<RefreshCw size={12} />} onClick={rerun} disabled={progress !== null || !s.faceSearch || event.photoCount === 0}>Re-run indexing</Button>
+          {queued !== null ? <Chip tone="accent" dot>Re-indexing {fmt.count(queued)}</Chip> : s.faceSearch ? <Chip tone="ok">Index ready</Chip> : <Chip>Off</Chip>}
+          <Button size="sm" icon={<RefreshCw size={12} />} loading={reindex.isPending} onClick={() => reindex.mutate(undefined)}
+            disabled={queued !== null || !s.faceSearch || event.photoCount === 0}>Re-run indexing</Button>
         </div>
       }
     >
-      {progress !== null && <Meter value={progress} className="mb-2" />}
       <Row
         icon={<ScanFace size={15} />} title="Selfie search" description="Guests find themselves across all albums"
         control={<Toggle label="Selfie search" checked={s.faceSearch} onCheckedChange={(v) => set({ faceSearch: v })} />}

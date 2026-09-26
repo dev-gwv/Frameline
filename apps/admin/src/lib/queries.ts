@@ -1,5 +1,5 @@
 import { useMutation, useQuery, type UseMutationOptions } from '@tanstack/react-query'
-import type { ID, ListPhotosQuery } from '@frameline/shared'
+import type { ID, ListPhotosQuery, PhotoIdsQuery } from '@frameline/shared'
 import { useToast } from '@frameline/ui'
 import { errorMessage, useApi } from './api'
 
@@ -58,5 +58,34 @@ export function useAction<TVars, TData = unknown>(
       onError?.(err, vars, ctx, m)
     },
     ...rest,
+  })
+}
+
+// ── Money, settings & tools (keys sit under TOPIC_KEYS roots so live updates refresh them) ──
+export const useStoreSettings = () => { const api = useApi(); return useQuery({ queryKey: ['orders', 'store-settings'], queryFn: () => api.getStoreSettings() }) }
+export const usePurchases = () => { const api = useApi(); return useQuery({ queryKey: ['ledger', 'purchases'], queryFn: () => api.listPurchases() }) }
+export const useUsageBreakdown = (enabled = true) => { const api = useApi(); return useQuery({ queryKey: ['usage', 'breakdown'], queryFn: () => api.getUsageBreakdown(), enabled }) }
+/** Polls every 3 s while the report is still processing (live updates usually beat it). */
+export const useUsageReport = () => {
+  const api = useApi()
+  return useQuery({ queryKey: ['usage', 'report'], queryFn: () => api.getUsageReport(), refetchInterval: (q) => (q.state.data?.status === 'processing' ? 3000 : false) })
+}
+export const useNotificationPrefs = () => { const api = useApi(); return useQuery({ queryKey: ['team', 'notification-prefs'], queryFn: () => api.getNotificationPrefs() }) }
+export const useCameraUploads = (cameraId?: ID, refetchInterval?: number | false) => {
+  const api = useApi()
+  return useQuery({ queryKey: ['cameras', cameraId, 'uploads'], queryFn: () => api.listCameraUploads(cameraId!), enabled: !!cameraId, refetchInterval })
+}
+
+/** Every matching photo id (select-all, the viewer's previous/next). */
+export const usePhotoIds = (eventId: ID | undefined, q: PhotoIdsQuery = {}) => {
+  const api = useApi()
+  return useQuery({ queryKey: ['photos', eventId, 'ids', q], queryFn: () => api.listPhotoIds(eventId!, q), enabled: !!eventId, placeholderData: (prev) => prev })
+}
+/** "Email me every photo" requests for an event; polls while one is still being prepared. */
+export const useZipRequests = (eventId?: ID) => {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['zips', eventId], queryFn: () => api.listZipRequests(eventId!), enabled: !!eventId,
+    refetchInterval: (q) => (q.state.data?.some((z) => z.status === 'queued') ? 2500 : false),
   })
 }

@@ -16,10 +16,9 @@ export function FilmsModal({ eventId, open, onOpenChange }: { eventId: ID; open:
   const [editing, setEditing] = useState<Film | null>(null)
   const [error, setError] = useState('')
 
-  const save = useAction(async () => {
-    if (editing) { await api.deleteFilm(editing.id) }
-    return api.addFilm(eventId, name.trim(), url.trim())
-  }, { success: () => (editing ? 'Film updated' : 'Film added'), onSuccess: () => { setName(''); setUrl(''); setEditing(null) } })
+  const save = useAction(() => (editing
+    ? api.updateFilm(editing.id, { name: name.trim(), url: url.trim() })
+    : api.addFilm(eventId, name.trim(), url.trim())), { success: () => (editing ? 'Film updated' : 'Film added'), onSuccess: () => { setName(''); setUrl(''); setEditing(null) } })
   const remove = useAction((id: ID) => api.deleteFilm(id), { success: 'Film removed' })
 
   const submit = () => {

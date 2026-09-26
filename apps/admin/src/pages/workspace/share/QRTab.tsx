@@ -1,8 +1,8 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { Download, FileImage, ImagePlus, Printer, X } from 'lucide-react'
-import { hash, type PhotoEvent, type Studio } from '@frameline/shared'
+import type { PhotoEvent, Studio } from '@frameline/shared'
 import { Button, Input, Segmented, Tip, useToast, cn } from '@frameline/ui'
-import { appLink, downloadBlob, galleryLink, https, slug } from '../lib'
+import { appLink, displayUrl, downloadBlob, galleryLink, slug } from '../lib'
 import { StyledQR, buildPoster, downloadSvg, svgString, svgToPng, type QRCorner, type QRStyle } from './qr'
 
 const MAX_LOGO = 80 * 1024
@@ -21,7 +21,7 @@ export function QRTab({ event, studio }: { event: PhotoEvent; studio?: Studio })
   const [logoError, setLogoError] = useState('')
   const [target, setTarget] = useState<'web' | 'app'>('web')
 
-  const url = https(target === 'web' ? galleryLink(event, event.settings.shortLinks) : appLink(event))
+  const url = target === 'web' ? galleryLink(event, event.settings.shortLinks) : appLink(event)
   const swatches = Array.from(new Set(['#1B1712', brand, '#8C2F39', '#1D3557', '#264653', '#6D597A', '#B37C22']))
   const base = `${slug(event.name)}-${target}-qr`
 
@@ -44,7 +44,7 @@ export function QRTab({ event, studio }: { event: PhotoEvent; studio?: Studio })
   }
   const dlPoster = () => {
     const s = getSvg(); if (!s) return
-    const poster = buildPoster({ qrSvg: s, studio: studio?.name ?? 'Your studio', event: event.name, link: url.replace(/^https:\/\//, ''), pin: event.settings.access === 'link-pin' ? event.settings.pin : undefined, color })
+    const poster = buildPoster({ qrSvg: s, studio: studio?.name ?? 'Your studio', event: event.name, link: displayUrl(url), pin: event.settings.access === 'link-pin' ? event.settings.pin : undefined, color })
     downloadSvg(poster, `${slug(event.name)}-poster-a4.svg`)
     toast.success('A4 poster downloaded', 'Open it in any browser or print shop app and print at 100%.')
   }
@@ -95,9 +95,9 @@ export function QRTab({ event, studio }: { event: PhotoEvent; studio?: Studio })
       <div className="flex flex-col items-center gap-3 rounded-card bg-sunk p-4">
         <div className="eyebrow">Preview</div>
         <div className="rounded-[10px] bg-white p-2 shadow-card">
-          <StyledQR ref={svgRef} seed={hash(url) % 100000} size={210} color={HEX.test(color) ? color : '#1B1712'} style={style} corner={corner} logo={logo?.url} />
+          <StyledQR ref={svgRef} value={url} size={210} color={HEX.test(color) ? color : '#1B1712'} style={style} corner={corner} logo={logo?.url} />
         </div>
-        <div className="max-w-full truncate font-mono text-[11px] text-ink-2">{url.replace(/^https:\/\//, '')}</div>
+        <div className="max-w-full truncate font-mono text-[11px] text-ink-2">{displayUrl(url)}</div>
         <div className="grid w-full grid-cols-2 gap-2">
           <Button icon={<Download size={14} />} className="justify-center" onClick={dlSvg}>SVG</Button>
           <Button icon={<FileImage size={14} />} className="justify-center" onClick={dlPng}>PNG</Button>

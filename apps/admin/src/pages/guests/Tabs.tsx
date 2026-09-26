@@ -1,6 +1,6 @@
 import { Check, Download, Eye, EyeOff, Heart, ImageIcon, UserCheck, UserPlus, X } from 'lucide-react'
 import { DEMO_NOW, fmt, type AccessRequest, type Guest, type Photo } from '@frameline/shared'
-import { Button, Card, Chip, EmptyState, PhotoTile, Skeleton, useToast } from '@frameline/ui'
+import { Button, Card, Chip, EmptyState, PhotoTile, Skeleton } from '@frameline/ui'
 import { usePhotosByIds, roleLabel } from './data'
 
 const th = 'px-3 py-2 text-left text-[11.5px] font-semibold text-ink-3 first:pl-4 last:pr-4'
@@ -15,8 +15,7 @@ function PicksPreview({ ids }: { ids: string[] }) {
   )
 }
 
-export function FavouritesTab({ guests, onView }: { guests: Guest[]; onView: (g: Guest) => void }) {
-  const toast = useToast()
+export function FavouritesTab({ guests, onView, onZip, zippingId }: { guests: Guest[]; onView: (g: Guest) => void; onZip: (g: Guest) => void; zippingId?: string }) {
   const rows = guests.filter((g) => g.favourites.length > 0).sort((a, b) => b.favourites.length - a.favourites.length)
   if (!rows.length) return <Card><EmptyState icon={<Heart size={22} />} title="No favourites yet" body="When guests star photos in the gallery, you’ll see who picked what here." /></Card>
   return (
@@ -33,8 +32,7 @@ export function FavouritesTab({ guests, onView }: { guests: Guest[]; onView: (g:
               <td className={`${td} text-right`}>
                 <div className="flex justify-end gap-1.5">
                   <Button size="sm" onClick={() => onView(g)}>View picks</Button>
-                  <Button size="sm" icon={<Download size={12} />}
-                    onClick={() => toast.toast({ kind: 'info', title: `Preparing a ZIP of ${g.favourites.length} photos`, body: `We’ll email you the download link for ${g.name}’s picks in a few minutes.` })}>ZIP</Button>
+                  <Button size="sm" icon={<Download size={12} />} loading={zippingId === g.id} onClick={() => onZip(g)} aria-label={`Email me a ZIP of ${g.name}’s picks`}>ZIP</Button>
                 </div>
               </td>
             </tr>

@@ -6,11 +6,12 @@ import { BRAND_SWATCHES, isHex, type HandleStatus, type Patch, type SetupDraft }
 import { PhonePreview } from './PhonePreview'
 
 const MAX_LOGO_BYTES = 1_500_000
+const MAX_COVER_BYTES = 3_000_000
 
 function HandleChip({ status }: { status: HandleStatus }) {
   switch (status) {
     case 'checking': return <Chip><Loader2 size={11} className="animate-spin" />Checking</Chip>
-    case 'available': return <Chip tone="ok">Available</Chip>
+    case 'available': return <Chip tone="ok">Looks good</Chip>
     case 'taken': return <Chip tone="bad">Taken</Chip>
     case 'invalid': return <Chip tone="warn">Not allowed</Chip>
     default: return null
@@ -19,7 +20,7 @@ function HandleChip({ status }: { status: HandleStatus }) {
 
 const handleHint: Record<HandleStatus, string | undefined> = {
   empty: 'Pick a short name for your gallery links.',
-  invalid: 'Use 3–30 lowercase letters, numbers or hyphens, starting and ending with a letter or number.',
+  invalid: 'Use 3–40 lowercase letters, numbers or hyphens, starting and ending with a letter or number.',
   checking: undefined,
   available: undefined,
   taken: 'Someone already uses this address. Try adding your city, like northlight-pune.',
@@ -49,8 +50,11 @@ export function StepBrand({ draft, patch, handleStatus, onError }: {
     e.target.value = ''
     if (!file) return
     if (!file.type.startsWith('image/')) { onError('That file isn’t an image. Choose a JPG or PNG.'); return }
-    if (draft.coverUrl?.startsWith('blob:')) URL.revokeObjectURL(draft.coverUrl)
-    patch({ coverUrl: URL.createObjectURL(file) })
+    if (file.size > MAX_COVER_BYTES) { onError('That cover is over 3 MB. Export a smaller JPG (about 1920 px wide) and try again.'); return }
+    const reader = new FileReader()
+    reader.onload = () => patch({ coverUrl: String(reader.result) })
+    reader.onerror = () => onError('Couldn’t read that file. Try another one.')
+    reader.readAsDataURL(file)
   }
   const hexInvalid = hexText.length > 0 && !isHex(hexText)
 

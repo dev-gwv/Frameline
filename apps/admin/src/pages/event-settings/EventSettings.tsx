@@ -4,6 +4,7 @@ import { CalendarX2, CheckCircle2, Eye } from 'lucide-react'
 import { fmt } from '@frameline/shared'
 import { Button, Chip, EmptyState, PageHeader, Skeleton } from '@frameline/ui'
 import { useEvent } from '../../lib/queries'
+import { GALLERY_URL } from '../events/lib'
 import { QueryError } from '../system'
 import { GuestSummary } from './GuestSummary'
 import { SectionNavDesktop, SectionNavMobile, useScrollSpy } from './SectionNav'
@@ -12,8 +13,6 @@ import { DownloadsSection } from './SectionsDownloads'
 import { DangerSection, HostsSection } from './SectionsHosts'
 import { AccessSection, FacesSection, GeneralSection, type SectionProps } from './SectionsPrivacy'
 import { useEventSaver } from './useEventSaver'
-
-const GALLERY_URL = import.meta.env.VITE_GALLERY_URL ?? 'http://localhost:5174'
 
 function SaveIndicator({ saving, savedAt }: { saving: boolean; savedAt: number | null }) {
   const [, tick] = useState(0)

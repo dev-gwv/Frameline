@@ -31,16 +31,4 @@ export function downloadCsv(filename: string, header: string[], rows: (string | 
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-/**
- * Review state for guest uploads. The Photo model has no "pending review" flag yet, so decisions made
- * here are remembered per event in this browser; hidden/published is written to the API.
- */
-const reviewKey = (eventId: ID) => `frameline.guest-review.${eventId}`
-export function readReviewed(eventId: ID): Set<ID> {
-  try { return new Set(JSON.parse(localStorage.getItem(reviewKey(eventId)) ?? '[]') as ID[]) } catch { return new Set() }
-}
-export function writeReviewed(eventId: ID, ids: Set<ID>) {
-  try { localStorage.setItem(reviewKey(eventId), JSON.stringify([...ids])) } catch { /* storage unavailable */ }
-}
-
 export const roleLabel = (role: 'guest' | 'host' | 'client') => (role === 'client' ? 'client · host' : role)

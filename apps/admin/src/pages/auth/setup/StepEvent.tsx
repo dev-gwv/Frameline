@@ -1,7 +1,7 @@
 import { CalendarDays } from 'lucide-react'
-import { PRESETS, type EventType, type PresetId } from '@frameline/shared'
+import { EVENT_TYPES, PRESETS, type EventType, type PresetId } from '@frameline/shared'
 import { Card, cn, Field, Input, Select } from '@frameline/ui'
-import { EVENT_TYPE_LABELS, type Patch, type SetupDraft } from './draft'
+import type { Patch, SetupDraft } from './draft'
 
 export function StepEvent({ draft, patch, errors }: { draft: SetupDraft; patch: Patch; errors: Partial<Record<'eventName' | 'eventDate', string>> }) {
   return (
@@ -15,7 +15,7 @@ export function StepEvent({ draft, patch, errors }: { draft: SetupDraft; patch: 
         </Field>
         <Field label="Type" htmlFor="fe-type">
           <Select id="fe-type" value={draft.eventType} onChange={(e) => patch({ eventType: e.target.value as EventType })}>
-            {(Object.keys(EVENT_TYPE_LABELS) as EventType[]).map((t) => <option key={t} value={t}>{EVENT_TYPE_LABELS[t]}</option>)}
+            {EVENT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
           </Select>
         </Field>
       </div>

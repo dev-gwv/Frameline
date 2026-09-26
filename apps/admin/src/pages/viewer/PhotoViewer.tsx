@@ -6,8 +6,8 @@ import {
 import { fmt, type PhotoSort } from '@frameline/shared'
 import { Button, ConfirmDialog, EmptyState, Menu, Modal, Skeleton, useToast } from '@frameline/ui'
 import { useApi } from '../../lib/api'
-import { useAction, useAlbums, useEvent, usePeople, usePhoto, usePhotos, useStudio, useWatermark } from '../../lib/queries'
-import { copyText, downloadBlob, liveUrl, rememberCover, useCovers } from '../workspace/lib'
+import { useAction, useAlbums, useEvent, usePeople, usePhoto, usePhotoIds, usePhotos, useStudio, useWatermark } from '../../lib/queries'
+import { GALLERY_URL, copyText, downloadBlob, liveUrl } from '../workspace/lib'
 import { renderPhoto } from './download'
 import { InfoPanel } from './InfoPanel'
 import { INITIAL_VIEW, MIN_SCALE, Stage, type ViewState } from './Stage'
@@ -28,15 +28,17 @@ export default function PhotoViewer() {
   const eventId = event?.id
   const photoQ = usePhoto(photoId)
   const photo = photoQ.data
-  const listQ = usePhotos(eventId, { albumId: albumParam, sort })
-  const list = useMemo(() => listQ.data?.items ?? [], [listQ.data])
+  // Every id in this album/sort for previous/next; only the photos around this one are loaded for the filmstrip.
+  const idsQ = usePhotoIds(eventId, { albumId: albumParam, sort })
+  const ids = useMemo(() => idsQ.data ?? [], [idsQ.data])
+  const index = ids.indexOf(photoId)
+  const windowStart = Math.max(0, index - 5)
+  const stripQ = usePhotos(index >= 0 ? eventId : undefined, { albumId: albumParam, sort, offset: windowStart, limit: 11 })
   const albums = useAlbums(eventId).data ?? []
   const people = usePeople(eventId).data ?? []
   const studio = useStudio().data
   const wm = useWatermark().data
-  const covers = useCovers(eventId)
 
-  const index = list.findIndex((p) => p.id === photoId)
   const album = albums.find((a) => a.id === photo?.albumId)
   const url = liveUrl(photo?.url)
 
@@ -45,8 +47,8 @@ export default function PhotoViewer() {
   const backUrl = `/events/${eventParam}${qs}`
   const close = useCallback(() => navigate(backUrl), [navigate, backUrl])
   const goTo = useCallback((id: string) => navigate(`/events/${eventParam}/photos/${id}${qs}`, { replace: true }), [navigate, eventParam, qs])
-  const prev = index > 0 ? list[index - 1] : undefined
-  const next = index >= 0 && index < list.length - 1 ? list[index + 1] : undefined
+  const prev = index > 0 ? { id: ids[index - 1] } : undefined
+  const next = index >= 0 && index < ids.length - 1 ? { id: ids[index + 1] } : undefined
 
   /* ---------- View state ---------- */
   const [view, setView] = useState<ViewState>(INITIAL_VIEW)
@@ -95,7 +97,6 @@ export default function PhotoViewer() {
 
   const setCover = useAction((scope: 'event' | 'album') => api.setCover(eventId!, photoId, scope), {
     success: (_d, s) => (s === 'event' ? 'Event cover updated' : `${album?.name ?? 'Album'} cover updated`),
-    onSuccess: (_d, s) => rememberCover(eventId!, photoId, s, photo?.albumId),
   })
   const hide = useAction((hidden: boolean) => api.updatePhotos([photoId], { hidden }), { success: (_d, h) => (h ? 'Hidden from guests' : 'Visible to guests again') })
   const move = useAction((a: { id: string; name: string }) => api.updatePhotos([photoId], { albumId: a.id }), {
@@ -107,19 +108,29 @@ export default function PhotoViewer() {
     onSuccess: () => { const to = next ?? prev; if (to) goTo(to.id); else close() },
   })
 
-  const shareUrl = event ? `https://frameline.in/${event.shortId.toLowerCase()}/p/${photoId}` : ''
+  const shareUrl = event ? `${GALLERY_URL}/${event.shortId}/p/${photoId}` : ''
   const share = async () => {
     if (navigator.share) {
       try { await navigator.share({ title: photo?.filename, text: event?.name, url: shareUrl }); return } catch (e) { if ((e as Error).name === 'AbortError') return }
     }
     const ok = await copyText(shareUrl)
-    if (ok) toast.success('Link copied', shareUrl.replace('https://', '')); else toast.error('Couldn’t copy the link', shareUrl)
+    if (ok) toast.success('Link copied', shareUrl.replace(/^https?:\/\//, '')); else toast.error('Couldn’t copy the link', shareUrl)
   }
   const [downloading, setDownloading] = useState(false)
   const download = useCallback(async (kind: 'web' | 'original') => {
     if (!photo) return
     setDownloading(true)
     try {
+      // Originals: the real uploaded file when there is one. Web size (and tone placeholders) are drawn in the browser.
+      if (kind === 'original' && url) {
+        const res = await fetch(url).catch(() => null)
+        if (res?.ok) {
+          const file = await res.blob()
+          downloadBlob(file, photo.filename)
+          toast.success('Original downloaded', `${fmt.bytes(file.size)} · ${photo.filename}`)
+          return
+        }
+      }
       const blob = await renderPhoto(photo, url, kind === 'web'
         ? { maxEdge: 2048, watermark: event?.settings.watermarkOff ? undefined : `© ${wm?.text || studio?.name || 'Studio'}` }
         : {})
@@ -131,7 +142,7 @@ export default function PhotoViewer() {
     } finally { setDownloading(false) }
   }, [photo, url, event?.settings.watermarkOff, wm?.text, studio?.name, toast])
 
-  const askDelete = () => (covers.event === photoId ? setCoverGuard(true) : setConfirmDelete(true))
+  const askDelete = () => (event?.coverPhotoId === photoId ? setCoverGuard(true) : setConfirmDelete(true))
 
   /* ---------- Keyboard ---------- */
   useEffect(() => {
@@ -166,9 +177,9 @@ export default function PhotoViewer() {
     )
   }
 
-  const neighbours = index >= 0 ? list.slice(Math.max(0, index - 5), index + 6) : photo ? [photo] : []
-  const isEventCover = covers.event === photoId
-  const isAlbumCover = !!photo && covers.albums[photo.albumId] === photoId
+  const neighbours = index >= 0 && stripQ.data ? stripQ.data.items : photo ? [photo] : []
+  const isEventCover = event?.coverPhotoId === photoId
+  const isAlbumCover = !!album && album.coverPhotoId === photoId
   const moveTargets = albums.filter((a) => a.kind === 'album' && a.id !== photo?.albumId)
 
   return (
@@ -181,7 +192,7 @@ export default function PhotoViewer() {
               <ArrowLeft size={13} /><span className="max-w-[120px] truncate">{albums.find((a) => a.id === albumParam)?.name ?? 'All photos'}</span>
             </button>
             <span className="font-mono text-[12px] text-side-ink-2" aria-label="Photo position">
-              <b className="text-side-gold">{index >= 0 ? index + 1 : '–'}</b> / {fmt.count(listQ.data?.total ?? 0)}
+              <b className="text-side-gold">{index >= 0 ? index + 1 : '–'}</b> / {fmt.count(ids.length)}
             </span>
             {photo && (
               <span className="hidden min-w-0 items-center gap-1.5 rounded-control border border-side-line bg-side-2 py-0.5 pl-2 pr-0.5 sm:inline-flex">
@@ -249,7 +260,7 @@ export default function PhotoViewer() {
 
       {/* Right panel (desktop) / bottom sheet (phone) */}
       <aside className="hidden min-h-0 border-l border-side-line bg-side-2 md:block">
-        {photo && <InfoPanel photo={photo} album={album} position={index + 1} total={listQ.data?.total ?? 0} people={people} personName={personName} eventId={eventParam} />}
+        {photo && <InfoPanel photo={photo} album={album} position={index + 1} total={ids.length} people={people} personName={personName} eventId={eventParam} />}
       </aside>
       {infoOpen && photo && (
         <div className="fixed inset-0 z-40 flex flex-col justify-end md:hidden">
@@ -259,7 +270,7 @@ export default function PhotoViewer() {
               <span className="truncate font-mono text-[12px]">{photo.filename}</span>
               <button type="button" aria-label="Close details" onClick={() => setInfoOpen(false)} className="rounded p-1 hover:bg-side"><X size={16} /></button>
             </div>
-            <div className="h-[60vh]"><InfoPanel photo={photo} album={album} position={index + 1} total={listQ.data?.total ?? 0} people={people} personName={personName} eventId={eventParam} /></div>
+            <div className="h-[60vh]"><InfoPanel photo={photo} album={album} position={index + 1} total={ids.length} people={people} personName={personName} eventId={eventParam} /></div>
           </div>
         </div>
       )}

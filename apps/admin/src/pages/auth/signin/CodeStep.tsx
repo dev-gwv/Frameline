@@ -2,44 +2,68 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@frameline/ui'
 import { CodeInput } from './CodeInput'
-import { DEMO_CODE, pause, useCodeCheck, useCountdown } from './mockAuth'
+import { clock, describeAuthError, useCountdown } from './authHelpers'
+
+export interface CodeSent { resendAfter: number; devCode?: string }
 
 /** Enter the 6-digit code sent to `email`. Used by sign-in and by forgot password. */
-export function CodeStep({ email, title, verifyLabel, onVerified, onChangeEmail, extra }: {
+export function CodeStep({ email, title, verifyLabel, sent, onVerify, onResend, onChangeEmail, extra }: {
   email: string
   title: string
   verifyLabel: string
-  onVerified: () => void | Promise<void>
+  /** Result of the request that sent the first code. */
+  sent: CodeSent
+  /** Checks the code; throws an ApiError when it's wrong. */
+  onVerify: (code: string) => Promise<void>
+  onResend: () => Promise<CodeSent>
   onChangeEmail: () => void
   extra?: ReactNode
 }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
+  const [resending, setResending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [locked, setLocked] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
-  const { left, start } = useCountdown()
-  const check = useCodeCheck()
+  const [devCode, setDevCode] = useState(sent.devCode)
+  const resend = useCountdown()
+  const wait = useCountdown()
 
-  useEffect(() => { start() }, [start])
+  useEffect(() => { resend.start(sent.resendAfter) }, [resend.start, sent.resendAfter])
 
   const verify = async (value = code) => {
-    if (value.length < 6 || busy || check.locked) return
+    if (value.length < 6 || busy || locked || wait.left > 0) return
     setBusy(true)
-    await pause(500)
-    if (check.check(value)) {
-      await onVerified()
-    } else {
+    try {
+      await onVerify(value)
+    } catch (err) {
+      const f = describeAuthError(err)
+      setError(f.message)
+      if (f.locked) setLocked(true)
+      if (f.waitSeconds) wait.start(f.waitSeconds)
       setCode('')
+      setBusy(false)
     }
-    setBusy(false)
   }
 
-  const resend = async () => {
+  const doResend = async () => {
     setNotice(null)
-    await pause(300)
-    start()
-    setCode('')
-    check.clearError()
-    setNotice(`New code sent to ${email}.`)
+    setResending(true)
+    try {
+      const r = await onResend()
+      resend.start(r.resendAfter)
+      setDevCode(r.devCode)
+      setCode('')
+      setError(null)
+      setLocked(false)
+      setNotice(`New code sent to ${email}.`)
+    } catch (err) {
+      const f = describeAuthError(err)
+      setError(f.message)
+      if (f.waitSeconds) resend.start(f.waitSeconds)
+    } finally {
+      setResending(false)
+    }
   }
 
   return (
@@ -53,22 +77,22 @@ export function CodeStep({ email, title, verifyLabel, onVerified, onChangeEmail,
       </div>
       <CodeInput
         value={code}
-        onChange={(v) => { setCode(v); if (check.error && !check.locked) check.clearError() }}
+        onChange={(v) => { setCode(v); if (error && !locked) setError(null) }}
         onComplete={(v) => void verify(v)}
-        disabled={busy || check.locked}
-        invalid={!!check.error}
+        disabled={busy || locked}
+        invalid={!!error}
         autoFocus
       />
-      {check.error && <p role="alert" className="-mt-1 text-[12px] font-semibold text-bad">{check.error}</p>}
-      {notice && !check.error && <p className="-mt-1 text-[12px] text-ok">{notice}</p>}
-      {import.meta.env.DEV && <p className="-mt-1 rounded-control bg-sunk px-3 py-1.5 font-mono text-[11.5px] text-ink-2">Demo code: {DEMO_CODE}</p>}
-      <Button variant="primary" size="lg" className="justify-center" loading={busy} disabled={code.length < 6 || check.locked} onClick={() => void verify()}>
+      {error && <p role="alert" className="-mt-1 text-[12px] font-semibold text-bad">{error}{wait.left > 0 && <> · <span className="font-mono tnum">{clock(wait.left)}</span></>}</p>}
+      {notice && !error && <p className="-mt-1 text-[12px] text-ok" role="status">{notice}</p>}
+      {devCode && <p className="-mt-1 rounded-control bg-sunk px-3 py-1.5 font-mono text-[11.5px] text-ink-2">Development code: {devCode}</p>}
+      <Button variant="primary" size="lg" className="justify-center" loading={busy} disabled={code.length < 6 || locked || wait.left > 0} onClick={() => void verify()}>
         {verifyLabel}
       </Button>
       <div className="flex items-center justify-between text-[12px]">
-        {left > 0
-          ? <span className="text-ink-3">Resend code in <span className="font-mono tnum">0:{String(left).padStart(2, '0')}</span></span>
-          : <button type="button" onClick={() => void resend()} className="font-bold text-accent-text hover:underline" disabled={check.locked}>Resend code</button>}
+        {resend.left > 0
+          ? <span className="text-ink-3">Resend code in <span className="font-mono tnum">{clock(resend.left)}</span></span>
+          : <button type="button" onClick={() => void doResend()} className="font-bold text-accent-text hover:underline disabled:opacity-50" disabled={resending}>{resending ? 'Sending…' : 'Resend code'}</button>}
         {extra}
       </div>
     </div>

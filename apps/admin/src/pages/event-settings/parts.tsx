@@ -39,11 +39,14 @@ export function TextLink({ className, ...rest }: HTMLAttributes<HTMLButtonElemen
  * Shows the validation message inline instead of saving a bad value.
  */
 export function AutoField({
-  label, value, onSave, validate, format, hint, mono, inputMode, maxLength, className, suffix, id,
+  label, value, onSave, validate, format, hint, mono, inputMode, maxLength, className, suffix, id, serverError, onEdit,
 }: {
   label: ReactNode; value: string; onSave: (v: string) => void; validate?: (v: string) => string | null
   format?: (v: string) => string; hint?: ReactNode; mono?: boolean; inputMode?: 'text' | 'numeric'
   maxLength?: number; className?: string; suffix?: ReactNode; id: string
+  /** Error returned by the API for the last save (shown until the value changes). */
+  serverError?: string | null
+  onEdit?: () => void
 }) {
   const [v, setV] = useState(value)
   const focused = useRef(false)
@@ -51,20 +54,22 @@ export function AutoField({
   save.current = onSave
   useEffect(() => { if (!focused.current) setV(value) }, [value])
   const error = validate?.(v) ?? null
+  const failed = useRef<string | null>(null)
+  if (serverError) failed.current = v
   useEffect(() => {
-    if (v === value || error) return
+    if (v === value || error || (serverError && failed.current === v)) return
     const t = setTimeout(() => save.current(v), 700)
     return () => clearTimeout(t)
-  }, [v, value, error])
+  }, [v, value, error, serverError])
   return (
-    <Field label={label} htmlFor={id} error={error} hint={hint} className={className}>
+    <Field label={label} htmlFor={id} error={error ?? serverError} hint={hint} className={className}>
       <Input
         id={id} value={v} inputMode={inputMode} maxLength={maxLength} suffix={suffix}
         className={cn(mono && 'font-mono tracking-wide')}
-        aria-invalid={!!error}
+        aria-invalid={!!(error ?? serverError)}
         onFocus={() => { focused.current = true }}
         onBlur={() => { focused.current = false }}
-        onChange={(e) => setV(format ? format(e.target.value) : e.target.value)}
+        onChange={(e) => { setV(format ? format(e.target.value) : e.target.value); onEdit?.() }}
       />
     </Field>
   )

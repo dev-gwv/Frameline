@@ -71,7 +71,7 @@ const TOPIC_KEYS: Record<ChangeTopic, string[]> = {
   usage: ['usage'],
   guests: ['guests', 'access-requests'],
   activity: ['activity'],
-  misc: ['films', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'website', 'enquiries', 'ledger', 'orders'],
+  misc: ['films', 'zips', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'website', 'enquiries', 'ledger', 'orders'],
 }
 
 function LiveUpdates({ api }: { api: FramelineApi }) {

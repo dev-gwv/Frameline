@@ -137,7 +137,7 @@ export function startImport(api: FramelineApi, args: { eventId: ID; folderId: st
             filename: `DRV_${prefix}_${String(skipHere + i + k + 1).padStart(4, '0')}.JPG`,
             size: 8_000_000 + (hash(`${f.path}${i + k}`) % 5_000_000),
           }))
-          await api.uploadPhotos(args.eventId, albumId, files, { quality: args.quality })
+          await api.uploadPhotos(args.eventId, albumId, files, { quality: args.quality, watermark: args.watermark, source: 'drive' })
           done += files.length
           patch(job.id, { done })
           await sleep(350)

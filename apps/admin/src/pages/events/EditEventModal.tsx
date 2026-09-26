@@ -4,7 +4,7 @@ import type { PhotoEvent } from '@frameline/shared'
 import { Button, Field, Input, Modal } from '@frameline/ui'
 import { useApi } from '../../lib/api'
 import { useAction } from '../../lib/queries'
-import { shortIdError, toDateInput } from './lib'
+import { shortIdApiError, shortIdError, toDateInput } from './lib'
 
 /** Rename, change the event ID, or move the date. */
 export function EditEventModal({ event, events, onClose }: { event: PhotoEvent | null; events: PhotoEvent[]; onClose: () => void }) {
@@ -12,18 +12,23 @@ export function EditEventModal({ event, events, onClose }: { event: PhotoEvent |
   const [name, setName] = useState('')
   const [shortId, setShortId] = useState('')
   const [date, setDate] = useState('')
+  const [idApiErr, setIdApiErr] = useState<string | null>(null)
   useEffect(() => {
-    if (event) { setName(event.name); setShortId(event.shortId); setDate(toDateInput(event.date)) }
+    if (event) { setName(event.name); setShortId(event.shortId); setDate(toDateInput(event.date)); setIdApiErr(null) }
   }, [event])
 
   const nameErr = name.trim().length < 3 ? 'Use at least 3 characters.' : null
-  const idErr = event ? shortIdError(shortId, events, event.id) : null
+  const idErr = (event ? shortIdError(shortId, events, event.id) : null) ?? idApiErr
   const dateErr = date ? null : 'Pick a date.'
   const idChanged = !!event && shortId.trim().toUpperCase() !== event.shortId
 
-  const save = useAction(() => api.updateEvent(event!.id, { name: name.trim(), shortId: shortId.trim().toUpperCase(), date: new Date(date).toISOString() }), {
+  // Only send the Event ID when it changed; the API checks it's free (409 → shown under the field).
+  const save = useAction(() => api.updateEvent(event!.id, {
+    name: name.trim(), date: new Date(date).toISOString(), ...(idChanged ? { shortId: shortId.trim().toUpperCase() } : {}),
+  }), {
     success: 'Event updated',
     onSuccess: onClose,
+    onError: (err) => setIdApiErr(idChanged ? shortIdApiError(err) : null),
   })
 
   return (
@@ -38,7 +43,7 @@ export function EditEventModal({ event, events, onClose }: { event: PhotoEvent |
         </Field>
         <Field label="Event ID" htmlFor="ee-id" error={idErr}
           hint={idChanged ? 'The old gallery link and QR codes stop working after you save. Share the new link.' : 'Part of the gallery link guests open.'}>
-          <Input id="ee-id" className="font-mono uppercase" maxLength={7} value={shortId} onChange={(e) => setShortId(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />
+          <Input id="ee-id" className="font-mono uppercase" maxLength={7} value={shortId} onChange={(e) => { setShortId(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '')); setIdApiErr(null) }} />
         </Field>
         <Field label="Date" htmlFor="ee-date" error={dateErr}>
           <Input id="ee-date" type="date" icon={<CalendarDays size={14} />} value={date} onChange={(e) => setDate(e.target.value)} />

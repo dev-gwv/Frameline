@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
-import type { NewEventInput, Studio } from '@frameline/shared'
+import { ApiError, type NewEventInput, type Studio } from '@frameline/shared'
 import { Button, LogoMark, Skeleton, useToast } from '@frameline/ui'
 import { useApi } from '../../lib/api'
+import { useAuth } from '../../lib/auth'
 import { useAction, useStudio } from '../../lib/queries'
 import { draftFromStudio, isHex, useHandleCheck, type SetupDraft } from './setup/draft'
 import { PhonePreview } from './setup/PhonePreview'
@@ -30,12 +31,17 @@ export default function Setup() {
   const [step, setStep] = useState(0)
   const [draft, setDraft] = useState<SetupDraft | null>(null)
   const [errors, setErrors] = useState<Errors>({})
-  const handleStatus = useHandleCheck(draft?.handle ?? '')
+  const [takenHandle, setTakenHandle] = useState<string>()
+  const handleStatus = useHandleCheck(draft?.handle ?? '', takenHandle)
+  const { mode } = useAuth()
 
   useEffect(() => { if (studio.data && !draft) setDraft(draftFromStudio(studio.data)) }, [studio.data, draft])
   useEffect(() => { if (studio.isError && !draft) setDraft(draftFromStudio()) }, [studio.isError, draft])
 
-  const saveStudio = useAction((patch: Partial<Studio>) => api.updateStudio(patch), { error: 'Couldn’t save your studio' })
+  const saveStudio = useAction((patch: Partial<Studio>) => api.updateStudio(patch), {
+    error: 'Couldn’t save your studio',
+    onError: (err, patch) => { if (err instanceof ApiError && err.code === 'handle_taken' && patch.handle) setTakenHandle(patch.handle) },
+  })
   const createEvent = useAction((input: NewEventInput) => api.createEvent(input), {
     success: (e) => `${e.name} created`, error: 'Couldn’t create the event',
   })
@@ -71,16 +77,23 @@ export default function Setup() {
     setErrors(e)
     if (Object.keys(e).length) return
     if (step === 0) {
-      await saveStudio.mutateAsync({ name: draft.name.trim(), city: draft.city.trim() })
+      await saveStudio.mutateAsync({ name: draft.name.trim(), city: draft.city.trim(), studioType: draft.kind, referralSource: draft.heard || undefined })
       next()
     } else if (step === 1) {
       if (handleStatus === 'checking') { toast.toast({ kind: 'info', title: 'Still checking your gallery address', body: 'Try again in a second.' }); return }
       if (handleStatus !== 'available') { toast.error('Choose a different gallery address', 'The one you typed is taken or not allowed.'); return }
       if (!isHex(draft.brandColor)) { toast.error('Brand colour isn’t valid', 'Use a 6-digit hex colour, like #8C2F39.'); return }
+      // The API stores image addresses (https://…), not file contents; picked files stay in the preview until uploads exist.
+      const storable = (url?: string) => (url && (mode === 'demo' || /^https?:\/\//.test(url)) ? url : undefined)
+      const logoUrl = storable(draft.logoUrl), coverUrl = storable(draft.coverUrl)
       await saveStudio.mutateAsync({
-        logoUrl: draft.logoUrl, brandColor: draft.brandColor, handle: draft.handle.trim(),
+        brandColor: draft.brandColor, handle: draft.handle.trim(),
         phone: draft.phone.trim(), instagram: draft.instagram.trim() || undefined,
+        ...(logoUrl ? { logoUrl } : {}), ...(coverUrl ? { coverUrl } : {}),
       })
+      if ((draft.logoUrl && !logoUrl) || (draft.coverUrl && !coverUrl)) {
+        toast.toast({ kind: 'info', title: 'Logo and cover not saved yet', body: 'Add them again in Settings → Studio profile once image uploads are available.' })
+      }
       next()
     } else {
       const ev = await createEvent.mutateAsync({

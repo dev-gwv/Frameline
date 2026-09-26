@@ -1,13 +1,19 @@
 import { useState } from 'react'
 import { ArrowLeft, CheckCircle2, Eye, EyeOff, Lock, Mail } from 'lucide-react'
 import { Button, Field, Input, Tip } from '@frameline/ui'
-import { CodeStep } from './CodeStep'
-import { isEmail, pause } from './mockAuth'
+import { useAuth, type VerifyResult } from '../../../lib/auth'
+import { CodeStep, type CodeSent } from './CodeStep'
+import { describeAuthError, isEmail } from './authHelpers'
 
 type Step = 'email' | 'code' | 'password' | 'done'
+const MIN_PASSWORD = 8
 
-/** Forgot password: email → 6-digit code → new password → done. */
-export function ForgotPassword({ initialEmail, onBack }: { initialEmail: string; onBack: (email: string) => void }) {
+/**
+ * Forgot password: email → 6-digit code (this signs you in) → new password → done.
+ * `onDone` continues into the app with the session from the code.
+ */
+export function ForgotPassword({ initialEmail, onBack, onDone }: { initialEmail: string; onBack: (email: string) => void; onDone: (r: VerifyResult) => void }) {
+  const auth = useAuth()
   const [step, setStep] = useState<Step>('email')
   const [email, setEmail] = useState(initialEmail)
   const [emailError, setEmailError] = useState<string | null>(null)
@@ -16,19 +22,29 @@ export function ForgotPassword({ initialEmail, onBack }: { initialEmail: string;
   const [show, setShow] = useState(false)
   const [pwError, setPwError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [sent, setSent] = useState<CodeSent | null>(null)
+  const [session, setSession] = useState<VerifyResult | null>(null)
+  const address = email.trim().toLowerCase()
 
   const sendCode = async () => {
     if (!isEmail(email)) { setEmailError('Enter a valid email address, like studio@example.com.'); return }
-    setEmailError(null); setBusy(true); await pause(); setBusy(false); setStep('code')
+    setEmailError(null); setBusy(true)
+    try { setSent(await auth.requestCode(address)); setStep('code') } catch (err) { setEmailError(describeAuthError(err).message) } finally { setBusy(false) }
   }
   const savePassword = async () => {
-    if (pw.length < 6) { setPwError('Use at least 6 characters.'); return }
+    if (pw.length < MIN_PASSWORD) { setPwError(`Use at least ${MIN_PASSWORD} characters.`); return }
     if (pw !== pw2) { setPwError('The two passwords don’t match. Type the same password twice.'); return }
-    setPwError(null); setBusy(true); await pause(); setBusy(false); setStep('done')
+    setPwError(null); setBusy(true)
+    try { await auth.setPassword(pw); setStep('done') } catch (err) { setPwError(describeAuthError(err).message) } finally { setBusy(false) }
   }
 
-  if (step === 'code') {
-    return <CodeStep email={email} title="Check your email" verifyLabel="Continue" onVerified={() => setStep('password')} onChangeEmail={() => setStep('email')} />
+  if (step === 'code' && sent) {
+    return (
+      <CodeStep email={address} title="Check your email" verifyLabel="Continue" sent={sent!}
+        onVerify={async (code) => { setSession(await auth.verifyCode(address, code)); setStep('password') }}
+        onResend={() => auth.requestCode(address)}
+        onChangeEmail={() => setStep('email')} />
+    )
   }
 
   if (step === 'done') {
@@ -37,18 +53,24 @@ export function ForgotPassword({ initialEmail, onBack }: { initialEmail: string;
         <span className="grid size-12 place-items-center rounded-full bg-ok-soft text-ok"><CheckCircle2 size={24} /></span>
         <div>
           <h1 className="font-display text-[28px] font-semibold leading-tight">Password updated</h1>
-          <p className="mt-1 text-[13px] text-ink-2">Sign in to <b className="text-ink">{email}</b> with your new password.</p>
+          <p className="mt-1 text-[13px] text-ink-2">Next time, sign in to <b className="text-ink">{address}</b> with your new password or an email code.</p>
         </div>
-        <Button variant="primary" size="lg" className="w-full justify-center" onClick={() => onBack(email)}>Back to sign in</Button>
+        <Button variant="primary" size="lg" className="w-full justify-center" onClick={() => session && onDone(session)}>Continue to Frameline</Button>
       </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-4">
-      <button type="button" onClick={() => onBack(email)} className="inline-flex w-fit items-center gap-1.5 text-[12px] font-bold text-ink-2 hover:text-ink">
-        <ArrowLeft size={14} /> Back to sign in
-      </button>
+      {step === 'email' ? (
+        <button type="button" onClick={() => onBack(email)} className="inline-flex w-fit items-center gap-1.5 text-[12px] font-bold text-ink-2 hover:text-ink">
+          <ArrowLeft size={14} /> Back to sign in
+        </button>
+      ) : (
+        <button type="button" onClick={() => session && onDone(session)} className="inline-flex w-fit items-center gap-1.5 text-[12px] font-bold text-ink-2 hover:text-ink">
+          Skip for now, keep using email codes
+        </button>
+      )}
       {step === 'email' ? (
         <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); void sendCode() }}>
           <div>
@@ -56,7 +78,7 @@ export function ForgotPassword({ initialEmail, onBack }: { initialEmail: string;
             <p className="mt-1 text-[13px] text-ink-2">We’ll email you a 6-digit code to confirm it’s you.</p>
           </div>
           <Field label="Email address" htmlFor="fp-email" error={emailError}>
-            <Input id="fp-email" type="email" autoComplete="email" autoFocus icon={<Mail size={14} />} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="studio@example.com" />
+            <Input id="fp-email" type="email" autoComplete="email" autoFocus icon={<Mail size={14} />} value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(null) }} placeholder="studio@example.com" />
           </Field>
           <Button type="submit" variant="primary" size="lg" className="justify-center" loading={busy}>Email me a code</Button>
         </form>
@@ -64,9 +86,9 @@ export function ForgotPassword({ initialEmail, onBack }: { initialEmail: string;
         <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); void savePassword() }}>
           <div>
             <h1 className="font-display text-[28px] font-semibold leading-tight">Choose a new password</h1>
-            <p className="mt-1 text-[13px] text-ink-2">At least 6 characters. You can still sign in with an email code any time.</p>
+            <p className="mt-1 text-[13px] text-ink-2">You’re signed in. Choose a password with at least {MIN_PASSWORD} characters. Email codes keep working too.</p>
           </div>
-          <Field label="New password" htmlFor="fp-pw" hint="6 or more characters">
+          <Field label="New password" htmlFor="fp-pw" hint={`${MIN_PASSWORD} or more characters`}>
             <Input id="fp-pw" type={show ? 'text' : 'password'} autoComplete="new-password" autoFocus icon={<Lock size={14} />} value={pw} onChange={(e) => setPw(e.target.value)}
               suffix={<Tip label={show ? 'Hide password' : 'Show password'}><button type="button" aria-label={show ? 'Hide password' : 'Show password'} className="text-ink-3 hover:text-ink" onClick={() => setShow((v) => !v)}>{show ? <EyeOff size={14} /> : <Eye size={14} />}</button></Tip>} />
           </Field>

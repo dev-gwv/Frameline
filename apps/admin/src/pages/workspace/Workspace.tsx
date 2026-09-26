@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, ImagePlus, Images, Upload } from 'lucide-react'
 import { fmt, type ID, type Photo, type PhotoFilter, type PhotoSort } from '@frameline/shared'
-import { Button, EmptyState, Select, Skeleton } from '@frameline/ui'
-import { useApi } from '../../lib/api'
+import { Button, EmptyState, Select, Skeleton, useToast } from '@frameline/ui'
+import { errorMessage, useApi } from '../../lib/api'
 import { useAlbums, useEvent, usePeople, usePhotos } from '../../lib/queries'
 import { QueryError } from '../system'
 import { AlbumRail } from './AlbumRail'
@@ -31,6 +31,7 @@ export default function Workspace() {
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
   const api = useApi()
+  const toast = useToast()
   const eventQ = useEvent(eventParam)
   const event = eventQ.data
   const id = event?.id
@@ -74,10 +75,13 @@ export default function Workspace() {
   const pages = Math.max(1, Math.ceil(total / view.perPage))
   useEffect(() => { if (page > pages - 1) setPage(pages - 1) }, [page, pages])
 
-  // Capture-time range for the section title.
-  const firstQ = usePhotos(id, { ...baseQ, sort: 'capture', limit: 1 })
-  const lastQ = usePhotos(total > 1 ? id : undefined, { ...baseQ, sort: 'capture', offset: Math.max(0, (firstQ.data?.total ?? 1) - 1), limit: 1 })
-  const range = captureRange(firstQ.data?.items[0]?.capturedAt, (lastQ.data?.items[0] ?? firstQ.data?.items[0])?.capturedAt)
+  // Capture-time range for the section title, from the albums' first/last capture.
+  const range = useMemo(() => {
+    const scope = albumId ? albums.filter((a) => a.id === albumId) : albums.filter((a) => a.kind === 'album')
+    const firsts = scope.map((a) => a.firstCapture).filter((x): x is string => !!x).sort()
+    const lasts = scope.map((a) => a.lastCapture).filter((x): x is string => !!x).sort()
+    return captureRange(firsts[0], lasts[lasts.length - 1])
+  }, [albums, albumId])
 
   // Endless scroll: load the next batch when the sentinel comes into view.
   const sentinel = useRef<HTMLDivElement>(null)
@@ -111,7 +115,9 @@ export default function Workspace() {
   const selectAll = async () => {
     if (!id) return
     setSelectingAll(true)
-    try { const all = await api.listPhotos(id, baseQ); setSelected(new Set(all.items.map((p) => p.id))) } finally { setSelectingAll(false) }
+    try { setSelected(new Set(await api.listPhotoIds(id, baseQ))) }
+    catch (e) { toast.error('Couldn’t select every photo', errorMessage(e)) }
+    finally { setSelectingAll(false) }
   }
   // Drop ids that no longer exist (deleted / moved out) — keep only what's loaded or explicitly all-selected.
   const [hiddenMap, setHiddenMap] = useState<Map<string, boolean>>(new Map())

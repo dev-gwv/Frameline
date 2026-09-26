@@ -1,11 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CalendarDays, Mail, Phone } from 'lucide-react'
-import { DEMO_NOW, fmt, PLANS, PRESETS, type EventType, type PresetId } from '@frameline/shared'
+import { DEMO_NOW, EVENT_TYPES, fmt, PLANS, PRESETS, type EventType, type PresetId } from '@frameline/shared'
 import { Button, Card, Drawer, Field, Input, Select, cn } from '@frameline/ui'
 import { useApi } from '../../lib/api'
 import { useAction, useUsage } from '../../lib/queries'
-import { EMAIL_RE, EVENT_TYPES, PHONE_RE, toDateInput } from './lib'
+import { EMAIL_RE, PHONE_RE, toDateInput } from './lib'
 
 interface Form {
   name: string; date: string; city: string; type: EventType; preset: PresetId
