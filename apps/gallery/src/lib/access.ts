@@ -1,4 +1,4 @@
-import type { Photo, PublicEvent } from '@frameline/shared'
+import { DOWNLOAD_ALL_LIMIT, type Photo, type PublicEvent } from '@frameline/shared'
 import { authValid, type EventSession } from './guest'
 
 /**
@@ -7,8 +7,8 @@ import { authValid, type EventSession } from './guest'
  * matching gate when it answers that way.
  */
 
-/** Not tracked by the API: counted per guest on this device. */
-export const MAX_DOWNLOAD_ALL = 5
+/** "Download all" uses per guest (counted by the API: api.verifyDownloadPin). */
+export const MAX_DOWNLOAD_ALL = DOWNLOAD_ALL_LIMIT
 /** Bigger batches are offered as an emailed ZIP instead of one-by-one downloads. */
 export const DIRECT_DOWNLOAD_LIMIT = 12
 
@@ -45,17 +45,15 @@ export function canDownload(e: PublicEvent, s: EventSession, photo: Photo, own: 
 }
 
 /**
- * Download all (an album or the whole event): 5 uses per guest on this device. PIN galleries ask for the PIN
- * each time (checked by api.verifyPin) unless it came embedded in a VIP link. Galleries without a PIN gate skip
- * the PIN step: the API can only check a PIN for 'link-pin' galleries.
+ * Download all (an album or the whole event): api.verifyDownloadPin checks the PIN and uses one of the guest's
+ * uses; it asks for the PIN each time unless it came embedded in a VIP link.
  */
 export function canDownloadAll(e: PublicEvent, s: EventSession): Verdict & { needsPin?: boolean; left?: number } {
   if (e.settings.downloads === 'none') {
     return { ok: false, reason: 'The photographer has turned off downloads for this event.', buy: e.settings.storeEnabled }
   }
-  const left = MAX_DOWNLOAD_ALL - s.downloadAllUses
-  if (left <= 0) return { ok: false, reason: `Download all has been used ${MAX_DOWNLOAD_ALL} times on this device. Ask the studio to send you a ZIP.` }
-  return { ok: true, needsPin: e.settings.access === 'link-pin' && s.pin !== 'embedded', left }
+  if (s.downloadsLeft === 0) return { ok: false, reason: `Download all has been used ${MAX_DOWNLOAD_ALL} times. Download single photos, or ask the studio to send you a ZIP.` }
+  return { ok: true, needsPin: s.pin !== 'embedded', left: s.downloadsLeft }
 }
 
 /** Returns white or near-black, whichever reads better on the given hex colour. */

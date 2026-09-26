@@ -6,8 +6,8 @@ import type { GuestSession, ID, Photo, Tone } from '@frameline/shared'
  * sessions), face matches, favourites, orders, enquiries and follows; this store only keeps what the API has
  * no per-guest endpoint for, plus caches for instant UI:
  * - the guest session's meta (the token itself lives in the HTTP client's guest token store)
- * - favourites (ids + photo snapshots: there's no "list my favourites" endpoint)
- * - Download-all uses (not tracked by the API), photos bought on this device, recent events, follows
+ * - favourites (ids + photo snapshots): instant cache; registered guests reload them from api.listMyFavourites
+ * - photos bought (refreshed from api.listMyOrders), recent events, follows
  * Keyed by the event's shortId (upper-case).
  */
 const KEY = 'frameline.guest.v2'
@@ -46,8 +46,8 @@ export interface EventSession {
   favourites: ID[]
   /** Snapshots of favourited photos (for the Favourites page; no per-guest list endpoint). */
   favPhotos: Record<ID, Photo>
-  /** Not tracked by the API: counted on this device. */
-  downloadAllUses: number
+  /** Last "Download all" uses left reported by api.verifyDownloadPin (display only; the API counts). */
+  downloadsLeft?: number
   purchased: ID[]
   uploads: number
 }
@@ -66,7 +66,7 @@ export interface GuestState {
 
 const empty = (): GuestState => ({ events: {}, recent: [], follows: [] })
 
-export const emptySession = (): EventSession => ({ favourites: [], favPhotos: {}, downloadAllUses: 0, purchased: [], uploads: 0 })
+export const emptySession = (): EventSession => ({ favourites: [], favPhotos: {}, purchased: [], uploads: 0 })
 
 function read(key: string): Partial<GuestState> | null {
   try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as Partial<GuestState>) : null } catch { return null }

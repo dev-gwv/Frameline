@@ -1,16 +1,33 @@
 import type { Photo, PublicEvent, PublicStudio, WatermarkSettings } from '@frameline/shared'
 
 /**
- * Real downloads without a backend: each photo is rendered to a canvas (its tone gradient, or its uploaded
- * image when one exists), watermarked with the studio's watermark settings, and saved as a JPEG.
- * TODO(api): swap for signed R2 URLs of the web/original rendition (watermarked server-side); downloads are
- * counted with api.recordDownload by the callers.
+ * Downloads: first the API's rendition (api.getPhotoDownloadUrl — watermarked server-side, counted by the API).
+ * When there is none, the photo is rendered to a canvas (its tone gradient, or its uploaded image), watermarked
+ * with the gallery's watermark settings, saved as a JPEG and counted with api.recordDownload.
  */
 export interface RenderOptions {
   watermark?: WatermarkSettings
   applyWatermark: boolean
   original: boolean
   studio: PublicStudio
+  /** Rendition URL from the API, or null to render locally. */
+  getUrl?: (photo: Photo) => Promise<string | null>
+  /** Called for photos rendered locally (the API counts its own renditions). */
+  onLocal?: (photo: Photo) => void
+}
+
+/** Saves one photo: the API rendition when there is one, else the canvas render. */
+export async function savePhoto(photo: Photo, event: PublicEvent, opts: RenderOptions) {
+  const name = downloadName(opts.studio, event, photo, opts.original)
+  const url = opts.getUrl ? await opts.getUrl(photo).catch(() => null) : null
+  if (url) {
+    try {
+      const res = await fetch(url)
+      if (res.ok) { saveBlob(await res.blob(), name); return }
+    } catch { /* fall back to the local render */ }
+  }
+  saveBlob(await renderPhoto(photo, opts), name)
+  opts.onLocal?.(photo)
 }
 
 const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
@@ -112,8 +129,7 @@ export async function downloadPhotos(
   let done = 0
   for (const p of photos) {
     if (signal?.aborted) break
-    const blob = await renderPhoto(p, opts)
-    saveBlob(blob, downloadName(opts.studio, event, p, opts.original))
+    await savePhoto(p, event, opts)
     done++
     onProgress(done)
     if (photos.length > 1) await new Promise((r) => setTimeout(r, 350))

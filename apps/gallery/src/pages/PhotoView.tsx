@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Lock, ScanFace, Share2, ShoppingBag } from 'lucide-react'
 import { Button, cn, Tip, useToast } from '@frameline/ui'
 import { fmt, toneCss, type Photo } from '@frameline/shared'
+import { useQueryClient } from '@tanstack/react-query'
 import { useHighlights, usePhotoList } from '../lib/queries'
 import { useApi } from '../lib/api'
 import { guest, snapshot } from '../lib/guest'
@@ -22,6 +23,7 @@ export function PhotoView() {
   const albumParam = params.get('album') ?? ''
   const navigate = useNavigate()
   const api = useApi()
+  const qc = useQueryClient()
   const { toast } = useToast()
   const { event, studio, session, base, seeAll, matches, matchesLoading, ownIds } = useEventCtx()
 
@@ -99,6 +101,7 @@ export function PhotoView() {
     toast({ kind: 'success', title: on ? 'Added to favourites' : 'Removed from favourites', body: on ? `${studio.name} can see your picks.` : undefined })
     try {
       await api.setFavourite(id, on, event.shortId)
+      void qc.invalidateQueries({ queryKey: ['photos', 'favs', event.shortId.toUpperCase()] })
     } catch (err) {
       apply(!on)
       const f = friendlyError(err, 'Favourite not saved')

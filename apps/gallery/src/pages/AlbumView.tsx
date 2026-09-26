@@ -80,7 +80,7 @@ export function AlbumView() {
         </div>
       </Container>
 
-      <DownloadSheet open={dlOpen} onOpenChange={setDlOpen} all photos={downloadList} loading={!isHighlights && full.isLoading} event={event} studio={studio} session={session}
+      <DownloadSheet open={dlOpen} onOpenChange={setDlOpen} all photos={downloadList} zip={album ? { albumId: album.id } : undefined} loading={!isHighlights && full.isLoading} event={event} studio={studio} session={session}
         title={`Download ${title === 'All photos' ? 'all photos' : title}`} />
     </div>
   )

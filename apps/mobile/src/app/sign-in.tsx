@@ -19,7 +19,8 @@ const validEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())
  */
 export default function SignIn() {
   const { c } = useTheme()
-  const [step, setStep] = useState<'email' | 'code' | 'password'>('email')
+  const [step, setStep] = useState<'email' | 'code' | 'password' | 'reset'>('email')
+  const [newPassword, setNewPassword] = useState('')
   const [email, setEmail] = useState('studio@northlight.in')
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
@@ -52,7 +53,7 @@ export default function SignIn() {
     } finally { setGoogleBusy(false) }
   }
 
-  const sendCode = async (resend = false) => {
+  const sendCode = async (resend = false, next: 'code' | 'reset' = 'code') => {
     if (!validEmail(email)) { setError('Enter an email address like name@studio.in'); return }
     setError(undefined); setBusy(true)
     try {
@@ -64,7 +65,7 @@ export default function SignIn() {
         await new Promise((r) => setTimeout(r, 600))
         toast.info(resend ? 'New code sent' : 'Code sent', `Check ${email.trim()} — for this demo use ${DEMO_CODE}`)
       }
-      setStep('code')
+      setStep(next)
       setTimeout(() => codeRef.current?.focus(), 250)
     } catch (e) {
       setError(errorText(e))
@@ -87,6 +88,30 @@ export default function SignIn() {
     } finally { setBusy(false) }
   }
 
+  /** Forgot password: code from requestOtp + a new password → auth.resetPassword (returns a session), then me(). */
+  const resetPassword = async () => {
+    if (code.length !== 6) { setError('Enter all 6 digits from the email'); return }
+    if (newPassword.length < 8) { setError('Use at least 8 characters for the new password'); return }
+    setBusy(true); setError(undefined)
+    try {
+      if (!http) {
+        await new Promise((r) => setTimeout(r, 400))
+        if (code !== DEMO_CODE) { setError('That code doesn’t match. Use 123456 in this demo.'); return }
+        toast.success('Password changed')
+        finish(email)
+        return
+      }
+      await http.auth.resetPassword(email.trim().toLowerCase(), code, newPassword)
+      const me = await http.auth.me()
+      queryClient.clear()
+      actions.signIn(me.user.email, { name: me.user.name, studioName: me.memberships[0]?.studioName })
+      toast.success('Password changed', 'You’re signed in. Other devices were signed out.')
+      router.replace('/home')
+    } catch (e) {
+      setError(errorText(e))
+    } finally { setBusy(false) }
+  }
+
   const withPassword = async () => {
     if (!validEmail(email)) { setError('Enter an email address like name@studio.in'); return }
     if (password.length < (http ? 1 : 6)) { setError(http ? 'Enter your password' : 'Passwords have at least 6 characters'); return }
@@ -105,8 +130,8 @@ export default function SignIn() {
         <Txt style={{ fontFamily: font.display, fontSize: 30, lineHeight: 34 }}>Deliver every guest their photos <GoldText size={30}>by tonight.</GoldText></Txt>
 
         <View style={{ marginTop: 18, gap: 4 }}>
-          <Txt v="h2">{step === 'code' ? 'Check your email' : 'Welcome back'}</Txt>
-          <Txt v="small">{step === 'code' ? `We sent a 6-digit code to ${email.trim()}.` : 'New here? The same steps create your studio.'}</Txt>
+          <Txt v="h2">{step === 'code' ? 'Check your email' : step === 'reset' ? 'Set a new password' : 'Welcome back'}</Txt>
+          <Txt v="small">{step === 'code' || step === 'reset' ? `We sent a 6-digit code to ${email.trim()}.` : 'New here? The same steps create your studio.'}</Txt>
         </View>
 
         {step === 'email' || step === 'password' ? (
@@ -131,10 +156,27 @@ export default function SignIn() {
                 <Txt v="label" color={c.accentText}>{step === 'email' ? 'Use password instead' : 'Email me a code instead'}</Txt>
               </Pressable>
               <Pressable accessibilityRole="button" hitSlop={12} style={{ minHeight: 44, justifyContent: 'center' }}
-                onPress={() => http
-                  ? toast.info('Sign in with an email code', 'Then set a new password under More → Set password')
-                  : validEmail(email) ? toast.success('Reset link sent', `Check ${email.trim()} for a link to set a new password`) : setError('Enter your email first, then tap Forgot password')}>
+                onPress={() => { setCode(''); setNewPassword(''); if (validEmail(email)) sendCode(false, 'reset'); else setError('Enter your email first, then tap Forgot password') }}>
                 <Txt v="small" color={c.ink3}>Forgot password?</Txt>
+              </Pressable>
+            </View>
+          </>
+        ) : step === 'reset' ? (
+          <>
+            <Field label="6-digit code" hint={http ? hint : `Demo code: ${DEMO_CODE}`}>
+              <Input ref={codeRef} mono value={code} maxLength={6} keyboardType="number-pad" autoComplete="one-time-code" textContentType="oneTimeCode" placeholder="••••••"
+                onChangeText={(t) => { setCode(t.replace(/\D/g, '')); setError(undefined) }} style={{ fontSize: 24, letterSpacing: 8 }} />
+            </Field>
+            <Field label="New password" error={error}>
+              <Input icon="lock" value={newPassword} onChangeText={(t) => { setNewPassword(t); setError(undefined) }} secureTextEntry autoComplete="new-password" textContentType="newPassword" placeholder="At least 8 characters" onSubmitEditing={resetPassword} returnKeyType="go" invalid={!!error} />
+            </Field>
+            <Button label="Save password and sign in" variant="primary" size="lg" loading={busy} onPress={resetPassword} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Pressable accessibilityRole="button" hitSlop={12} onPress={() => { setStep('password'); setCode(''); setNewPassword(''); setError(undefined) }} style={{ minHeight: 44, justifyContent: 'center' }}>
+                <Txt v="label" color={c.accentText}>Back to sign in</Txt>
+              </Pressable>
+              <Pressable accessibilityRole="button" hitSlop={12} onPress={() => { if (!busy) sendCode(true, 'reset') }} style={{ minHeight: 44, justifyContent: 'center' }}>
+                <Txt v="small" color={c.ink3}>Resend code</Txt>
               </Pressable>
             </View>
           </>

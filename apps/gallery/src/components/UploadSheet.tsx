@@ -24,7 +24,8 @@ async function toDataUrl(file: File, max = 900): Promise<{ url?: string; width?:
 }
 
 /**
- * "Add your photos" — guest uploads into the event's guest album with api.uploadPhotos({ source: 'guest' }).
+ * "Add your photos" — api.uploadGuestPhotos puts them in the event's "Guest uploads" album (403
+ * guest_uploads_disabled / 409 guest_upload_limit are shown inline).
  * When the studio reviews guest uploads the API returns them as pending ("sent for review").
  */
 export function UploadSheet({ open, onOpenChange, event, studio, guestAlbum, session }: {
@@ -63,7 +64,7 @@ export function UploadSheet({ open, onOpenChange, event, studio, guestAlbum, ses
   }
 
   async function upload() {
-    if (!guestAlbum || !picked.length) return
+    if (!picked.length) return
     setStage('uploading'); setProgress(0)
     try {
       const files: HttpUploadFile[] = []
@@ -74,22 +75,22 @@ export function UploadSheet({ open, onOpenChange, event, studio, guestAlbum, ses
         setProgress(i + 1)
       }
       const uploadedBy = session.registration?.name ?? profileName ?? session.greeting ?? 'Guest'
-      const created = await api.uploadPhotos(event.id, guestAlbum.id, files, {
-        quality: 'web', source: 'guest', uploadedBy, watermark: event.settings.watermarkGuestUploads,
-      })
+      const created = await api.uploadGuestPhotos(event.shortId, files, { uploadedBy })
       guest.patchSession(event.shortId, (s) => ({ uploads: s.uploads + created.length }))
       setSent(created.length)
       setPending(created.some((c) => c.reviewStatus === 'pending'))
       setStage('done')
     } catch (e) {
       const f = friendlyError(e, 'Upload failed')
-      error(f.title, f.body)
+      // Limits and "uploads are off" are shown in the sheet; anything else as a toast.
+      if (f.code === 'guest_upload_limit' || f.code === 'guest_uploads_disabled' || f.code === 'no_guest_album') setNote(`${f.title}. ${f.body}`)
+      else error(f.title, f.body)
       setStage('pick')
     }
   }
 
   const footer = stage === 'pick' ? (
-    <Button variant="primary" size="lg" className="w-full justify-center" disabled={!picked.length || !guestAlbum} onClick={upload}>
+    <Button variant="primary" size="lg" className="w-full justify-center" disabled={!picked.length} onClick={upload}>
       {picked.length ? `Send ${picked.length} ${picked.length === 1 ? 'photo' : 'photos'}` : 'Choose photos first'}
     </Button>
   ) : undefined
@@ -110,7 +111,7 @@ export function UploadSheet({ open, onOpenChange, event, studio, guestAlbum, ses
               <b className="text-[14px]">{picked.length ? 'Add more photos' : 'Choose photos'}</b>
               <span className="text-[12px] text-ink-3">Up to {cap} at a time · {fmt.count(remaining)} spots left for guests</span>
             </button>
-            {note && <p role="status" className="text-[12.5px] font-semibold text-warn">{note}</p>}
+            {note && <p role="alert" className="text-[12.5px] font-semibold text-warn">{note}</p>}
             {picked.length > 0 && (
               <ul className="grid grid-cols-4 gap-1.5" aria-label="Photos to send">
                 {picked.map((p, i) => (

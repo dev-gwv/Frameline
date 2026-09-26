@@ -3,18 +3,25 @@ import { Link } from 'react-router-dom'
 import { Download, Heart } from 'lucide-react'
 import { Button, EmptyState } from '@frameline/ui'
 import { fmt } from '@frameline/shared'
-import { Container, PhotoGrid, TopBar } from '../components/common'
+import { Container, GridSkeleton, PhotoGrid, TopBar } from '../components/common'
+import { useMyFavourites } from '../lib/queries'
 import { DownloadSheet } from '../components/DownloadSheet'
 import { useEventCtx } from './EventLayout'
 
 /**
- * The guest's picks. Each tap is sent to the API (api.setFavourite → the studio's "Who favourited" list);
- * this list is the device's copy because the API has no "my favourites" endpoint for guests.
+ * The guest's picks. Registered guests load them from api.listMyFavourites (the source of truth; it also
+ * refreshes the device copy). Guests who haven't registered only have the device copy (each tap still reaches
+ * the studio via api.setFavourite).
  */
 export function Favourites() {
   const { event, studio, session, base, seeAll, ownIds } = useEventCtx()
   const [dl, setDl] = useState(false)
-  const photos = useMemo(() => session.favourites.map((id) => session.favPhotos[id]).filter((p) => !!p).reverse(), [session.favourites, session.favPhotos])
+  const registered = !!session.auth?.guestId
+  const remote = useMyFavourites(event.shortId, registered)
+  const local = useMemo(() => session.favourites.map((id) => session.favPhotos[id]).filter((p) => !!p).reverse(), [session.favourites, session.favPhotos])
+  // The API list replaces the device copy when it loads (see useMyFavourites); until then, or if it fails,
+  // the device copy shows instantly.
+  const photos = local
   const downloadable = photos.filter((p) => session.purchased.includes(p.id) || (event.settings.downloads === 'all') || (event.settings.downloads === 'own' && ownIds.has(p.id)))
 
   return (
@@ -29,7 +36,7 @@ export function Favourites() {
           {downloadable.length > 0 && <Button icon={<Download size={15} />} onClick={() => setDl(true)}>Download {downloadable.length}</Button>}
         </div>
         <div className="mt-4">
-          {photos.length ? (
+          {remote.isLoading && !photos.length ? <GridSkeleton n={9} /> : photos.length ? (
             <PhotoGrid photos={photos} hrefFor={(p) => `${base}/p/${p.id}?from=fav`} />
           ) : (
             <EmptyState icon={<Heart size={26} />} title="No favourites yet" body="Open a photo and tap Favourite. Your picks help the studio choose prints and album pages."

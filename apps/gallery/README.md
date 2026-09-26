@@ -13,8 +13,10 @@ Data comes from the `FramelineApi` guest endpoints (`src/lib/api.tsx`): `createH
 persisted under `localStorage['frameline.gallery.v1']`. Errors are mapped to plain words in `src/lib/errors.ts`.
 
 `localStorage['frameline.guest.v2']` (`src/lib/guest.ts`) keeps only what the API has no per-guest endpoint for:
-guest-session meta (expiry, see-all), gate choices, the face match, favourites (ids + photo snapshots; each tap is
-sent with `setFavourite`), Download-all uses, photos bought on this device, recent events, follows and form pre-fill.
+guest-session meta (expiry, see-all), gate choices, the face match, favourites (ids + photo snapshots as an instant
+cache; registered guests reload them from `listMyFavourites`), last-known Download-all uses left, photos bought
+(refreshed from `listMyOrders`), recent events, follows and form pre-fill. The device id for per-guest limits is
+`localStorage['frameline.device']` (sent as `guestDeviceId`).
 
 ## Routes
 
@@ -26,6 +28,7 @@ sent with `setFavourite`), Download-all uses, photos bought on this device, rece
 | `/:shortId/a/:albumId` | Album grid with infinite loading. `all` = every album, `highlights` = most-favourited |
 | `/:shortId/p/:photoId?from=me\|fav\|all\|highlights\|<albumId>` | Photo viewer (dark): swipe/arrow keys, Favourite, Download, Share, Buy print, enquiry |
 | `/:shortId/favourites` | The guest's favourites |
+| `/:shortId/orders` | The guest's orders (`listMyOrders`) |
 | `/s/:token`, `/v/:token` | Personal links (below) |
 | `/studio/:followCode` | Studio profile: featured galleries, services, questions, contact, Follow |
 
@@ -77,11 +80,15 @@ locally and its VIP flags are ignored. Face links without `p` look the person up
   Otherwise albums open filtered to the guest's matches (`listPublicPhotos({ personId })`).
 - Single download: `all` → yes; `own` → only photos they're in; `none` → explains why (+ Buy if the store is on).
   Bought photos are always downloadable.
-- Download all: PIN each time on PIN galleries (checked by `verifyPin`, unless embedded), 5 uses per guest per
-  device (counted locally — the API doesn't track it).
-- Files: rendered on a canvas at 2048 px (web) or 3072 px (`originalDownloads`), watermarked from `getWatermark()`
-  (falls back to the studio name when the API won't serve it to guests) unless `watermarkOff`; counted with
-  `recordDownload`. >12 photos offers an emailed ZIP (`requestZip`; simulated when the API refuses guests).
+- Download all: `verifyDownloadPin(shortId, pin?)` checks the PIN (every gallery; skipped input for VIP embedded PINs)
+  and uses one of 5 uses per guest, counted by the API (`remaining` is shown; 429 `download_limit` explains).
+- Files: `getPhotoDownloadUrl` (API rendition, watermarked and counted server-side) first; when it's null, rendered
+  on a canvas at 2048 px (web) or 3072 px (`originalDownloads`), watermarked from `getPublicWatermark` (respects
+  `enabled: false`; studio-name fallback if it fails to load) and counted with `recordDownload`. >12 photos offers an
+  emailed ZIP (`requestPublicZip`, following the download policy).
+- Buying: prices from `listPublicPrices`; prints collect a shipping address; `createOrder` → if the order has
+  `checkout` and `VITE_RAZORPAY_KEY` is set, "Pay now" loads checkout.razorpay.com on demand and `confirmOrder`
+  completes it; otherwise the API's simulated payment.
 
 ## PWA
 
@@ -92,6 +99,5 @@ The worker registers only in production builds (`src/lib/pwa.ts`).
 
 ## Still simulated / TODO(api)
 
-Razorpay Checkout for pending orders, print delivery address (not in `OrderInput`), guest ZIP requests, unfollow,
-the guest's purchased-photo list, and a face embedding for `searchFaces` (the dev match uses the selfie key
-`${event.id}:${file.name}:${file.size}`).
+A face embedding for `searchFaces` (the dev match uses the selfie key `${event.id}:${file.name}:${file.size}`), and
+favourites for guests who haven't registered (device copy only; taps still reach the studio's counts).

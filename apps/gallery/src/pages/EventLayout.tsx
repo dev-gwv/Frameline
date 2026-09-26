@@ -3,7 +3,7 @@ import { Link, Outlet, useOutletContext, useParams } from 'react-router-dom'
 import { Archive, CalendarX, Clock, EyeOff, SearchX, WifiOff } from 'lucide-react'
 import { Button, Skeleton } from '@frameline/ui'
 import { fmt, type Photo, type PublicEvent, type PublicStudio } from '@frameline/shared'
-import { useMatches, usePublicEvent } from '../lib/queries'
+import { useMatches, useMyOrders, usePublicEvent } from '../lib/queries'
 import { rememberEvent, useSession, type EventSession } from '../lib/guest'
 import { useBrandColor } from '../lib/brand'
 import { canSeeAll, needsAppChoice, needsPin, needsRegistration } from '../lib/access'
@@ -34,6 +34,8 @@ export function EventLayout() {
   const event = eventQ.data
   const gated = !event || !!event.blocked || needsAppChoice(event, session) || needsPin(event, session) || needsRegistration(event, session)
   const matchQ = useMatches(shortId, session.match, !gated)
+  // Refreshes which photos this guest bought (unlocks their downloads on any device the orders show up on).
+  useMyOrders(shortId, !gated && !!event?.settings.storeEnabled)
   useBrandColor(event?.studio.brandColor)
 
   useEffect(() => {

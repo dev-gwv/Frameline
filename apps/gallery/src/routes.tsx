@@ -56,6 +56,7 @@ export const router = createBrowserRouter([
           { index: true, element: <EventHome /> },
           { path: 'me', element: page(() => import('./pages/MyPhotos'), 'MyPhotos') },
           { path: 'favourites', element: page(() => import('./pages/Favourites'), 'Favourites') },
+          { path: 'orders', element: page(() => import('./pages/MyOrders'), 'MyOrders') },
           { path: 'a/:albumId', element: page(() => import('./pages/AlbumView'), 'AlbumView') },
           { path: 'p/:photoId', element: page(() => import('./pages/PhotoView'), 'PhotoView') },
           { path: '*', element: <NotFound /> },

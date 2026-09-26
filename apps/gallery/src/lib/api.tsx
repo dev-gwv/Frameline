@@ -21,12 +21,27 @@ export const isLiveApi = !!API_URL
  */
 export function createApi(): FramelineApi {
   if (API_URL) {
-    return createHttpApi({ baseUrl: API_URL, tokens: memoryTokenStore(), guestTokens: storageGuestTokenStore(GUEST_TOKENS_KEY) })
+    return createHttpApi({
+      baseUrl: API_URL, tokens: memoryTokenStore(), guestTokens: storageGuestTokenStore(GUEST_TOKENS_KEY), guestDeviceId: deviceId,
+    })
   }
   return createMockApi({
     load: () => { try { return localStorage.getItem(STORAGE_KEY) } catch { return null } },
     save: (d) => { try { localStorage.setItem(STORAGE_KEY, d) } catch { /* quota or private mode */ } },
   })
+}
+
+const DEVICE_KEY = 'frameline.device'
+let device: string | undefined
+/** Random id for this browser (per-guest limits and "my galleries"), persisted in localStorage. */
+export function deviceId(): string {
+  if (device) return device
+  try { device = localStorage.getItem(DEVICE_KEY) ?? undefined } catch { /* storage unavailable */ }
+  if (!device) {
+    device = `dev_${typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID().replace(/-/g, '') : Math.random().toString(36).slice(2) + Date.now().toString(36)}`
+    try { localStorage.setItem(DEVICE_KEY, device) } catch { /* private mode: this page session only */ }
+  }
+  return device
 }
 
 /** Guest calls and where their gallery short id is, so a lost session can reopen the right gate. */
@@ -38,6 +53,12 @@ const SHORT_ID_ARG: Partial<Record<keyof FramelineApi, (args: unknown[]) => unkn
   setFavourite: (a) => a[2],
   recordDownload: (a) => a[1],
   createEnquiry: (a) => (a[0] as { shortId?: string } | undefined)?.shortId,
+  listPublicPrices: (a) => a[0],
+  getPublicWatermark: (a) => a[0],
+  uploadGuestPhotos: (a) => a[0],
+  requestPublicZip: (a) => a[0],
+  // Not verifyDownloadPin / listMyFavourites / listMyOrders: their 401s are about the PIN or registration for that
+  // feature, not a lost gallery session.
 }
 
 /**

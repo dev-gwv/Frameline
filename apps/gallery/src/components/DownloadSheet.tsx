@@ -2,41 +2,45 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, Download, KeyRound, Mail, ShoppingBag } from 'lucide-react'
 import { Button, Field, Input, Meter, Skeleton, useToast } from '@frameline/ui'
-import { fmt, type FramelineApi, type Photo, type PublicEvent, type PublicStudio, type WatermarkSettings } from '@frameline/shared'
+import { fmt, type DownloadAllowance, type FramelineApi, type Photo, type PublicEvent, type PublicStudio, type PublicWatermark } from '@frameline/shared'
 import { useApi } from '../lib/api'
 import { ensureWatermark, fallbackWatermark, useWatermark } from '../lib/queries'
-import { authFrom, guest, useGuest, type EventSession } from '../lib/guest'
+import { guest, useGuest, type EventSession } from '../lib/guest'
 import { canDownloadAll, DIRECT_DOWNLOAD_LIMIT, MAX_DOWNLOAD_ALL } from '../lib/access'
-import { errorCode, friendlyError, isStudioOnly } from '../lib/errors'
-import { downloadName, downloadPhotos, renderPhoto, saveBlob, type RenderOptions } from '../lib/download'
+import { errorCode, friendlyError } from '../lib/errors'
+import { downloadPhotos, savePhoto, type RenderOptions } from '../lib/download'
 import { Sheet } from './Sheet'
 
-function renderOptions(event: PublicEvent, studio: PublicStudio, fetched: WatermarkSettings | null | undefined): RenderOptions {
-  // No watermark from the API (guests can't read it on the HTTP API yet): fall back to the studio name.
-  const wm = fetched ?? (fetched === null ? fallbackWatermark(studio) : undefined)
+/** Tells the studio about locally rendered downloads; a failure here never blocks the guest. */
+const countDownloads = (api: FramelineApi, ids: string[], shortId: string) => { if (ids.length) api.recordDownload(ids, shortId).catch(() => {}) }
+
+function renderOptions(api: FramelineApi, event: PublicEvent, studio: PublicStudio, fetched: PublicWatermark | null | undefined): RenderOptions {
+  // `enabled: false` = no watermark on this gallery; the watermark didn't load (null) = studio-name fallback.
+  const wm = fetched ? (fetched.enabled ? fetched.settings : undefined) : fetched === null ? fallbackWatermark(studio) : undefined
   const original = event.settings.originalDownloads
   const applyWatermark = !!wm && !event.settings.watermarkOff && (original ? wm.applyTo.originals : wm.applyTo.downloads)
-  return { watermark: wm, applyWatermark, original, studio }
+  return {
+    watermark: wm, applyWatermark, original, studio,
+    getUrl: (p) => api.getPhotoDownloadUrl(p.id, { size: original ? 3072 : 2048, shortId: event.shortId }),
+    onLocal: (p) => countDownloads(api, [p.id], event.shortId),
+  }
 }
 
 /** Render options for the sheet's description (may still be loading). */
 export function useRenderOptions(event: PublicEvent, studio: PublicStudio): RenderOptions {
-  return renderOptions(event, studio, useWatermark().data)
+  const api = useApi()
+  return renderOptions(api, event, studio, useWatermark(event.shortId).data)
 }
 
 /** Resolves the watermark before generating files, so nothing downloads unwatermarked while it loads. */
 function useResolveOptions(event: PublicEvent, studio: PublicStudio) {
   const qc = useQueryClient()
   const api = useApi()
-  return async () => renderOptions(event, studio, await ensureWatermark(qc, api))
+  return async () => renderOptions(api, event, studio, await ensureWatermark(qc, api, event.shortId))
 }
-
-/** Tells the studio (Reports / photo stats); a failure here never blocks the guest. */
-const countDownloads = (api: FramelineApi, ids: string[], shortId: string) => { if (ids.length) api.recordDownload(ids, shortId).catch(() => {}) }
 
 /** Downloads a single photo immediately, with toasts. */
 export function useDownloadOne(event: PublicEvent, studio: PublicStudio) {
-  const api = useApi()
   const resolve = useResolveOptions(event, studio)
   const { success, error } = useToast()
   const [busy, setBusy] = useState(false)
@@ -44,10 +48,8 @@ export function useDownloadOne(event: PublicEvent, studio: PublicStudio) {
     setBusy(true)
     try {
       const opts = await resolve()
-      const blob = await renderPhoto(photo, opts)
-      saveBlob(blob, downloadName(studio, event, photo, opts.original))
+      await savePhoto(photo, event, opts)
       success('Downloaded', `${photo.filename} · ${opts.original ? 'original quality' : 'web quality'}`)
-      countDownloads(api, [photo.id], event.shortId)
     } catch (e) {
       error('Download failed', e instanceof Error ? e.message : 'Try again in a moment.')
     } finally { setBusy(false) }
@@ -58,12 +60,14 @@ export function useDownloadOne(event: PublicEvent, studio: PublicStudio) {
 type Stage = 'pin' | 'choose' | 'running' | 'done' | 'emailed' | 'blocked'
 
 /**
- * Downloads several photos. `all` = "Download all" (PIN-gated, 5 uses per guest).
+ * Downloads several photos. `all` = "Download all": api.verifyDownloadPin checks the PIN (or the VIP link's
+ * embedded PIN) and uses one of the guest's 5 uses, counted by the API.
+ * `zip` says what an emailed ZIP should contain (default: these photo ids).
  * Up to DIRECT_DOWNLOAD_LIMIT files download one by one; bigger sets offer an emailed ZIP.
  */
-export function DownloadSheet({ open, onOpenChange, photos, event, studio, session, all, title, onBuy, loading }: {
+export function DownloadSheet({ open, onOpenChange, photos, event, studio, session, all, title, onBuy, loading, zip }: {
   open: boolean; onOpenChange: (v: boolean) => void; photos: Photo[]; event: PublicEvent; studio: PublicStudio; session: EventSession
-  all?: boolean; title?: string; onBuy?: () => void; loading?: boolean
+  all?: boolean; title?: string; onBuy?: () => void; loading?: boolean; zip?: { albumId?: string; personId?: string }
 }) {
   const api = useApi()
   const opts = useRenderOptions(event, studio)
@@ -81,12 +85,13 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
   const [pinBusy, setPinBusy] = useState(false)
   const [zipBusy, setZipBusy] = useState(false)
   const [emailError, setEmailError] = useState<string | null>(null)
+  const [allowance, setAllowance] = useState<DownloadAllowance | null>(null)
+  const [unlockError, setUnlockError] = useState<string | null>(null)
   const abort = useRef<AbortController | null>(null)
-  const counted = useRef(false)
   const { error } = useToast()
 
   useEffect(() => {
-    if (open) { setStage(initial); setPin(''); setPinError(null); setDone(0); counted.current = false }
+    if (open) { setStage(initial); setPin(''); setPinError(null); setDone(0); setAllowance(null); setUnlockError(null); setEmailError(null) }
     else abort.current?.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -94,62 +99,65 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
   const n = photos.length
   const big = n > DIRECT_DOWNLOAD_LIMIT
 
-  function countUse() {
-    if (all && !counted.current) { counted.current = true; guest.patchSession(event.shortId, (s) => ({ downloadAllUses: s.downloadAllUses + 1 })) }
+  /** Uses one "Download all" (once per opening of the sheet). Returns false and explains when it can't. */
+  async function unlock(withPin?: string): Promise<boolean> {
+    if (!all || allowance) return true
+    try {
+      const a = await api.verifyDownloadPin(event.shortId, withPin)
+      setAllowance(a)
+      guest.patchSession(event.shortId, { downloadsLeft: a.remaining })
+      return true
+    } catch (err) {
+      const code = errorCode(err)
+      const f = friendlyError(err, 'We couldn’t unlock the download')
+      if (code === 'download_limit') { guest.patchSession(event.shortId, { downloadsLeft: 0 }); setStage('blocked') }
+      else if (code === 'pin_required') { setStage('pin'); setPinError(null) }
+      else if (code === 'invalid_pin') setPinError('That PIN didn\'t match. Check the message from the host.')
+      else if (withPin !== undefined) setPinError(`${f.title}. ${f.body}`)
+      else setUnlockError(`${f.title}. ${f.body}`)
+      return false
+    }
   }
 
-  /** The API checks the PIN (wrong tries count toward the 15-minute lock). */
   async function submitPin(e: FormEvent) {
     e.preventDefault()
     if (pin.length < 4) { setPinError('Enter all 4 digits.'); return }
     setPinBusy(true)
-    try {
-      const s = await api.verifyPin(event.shortId, pin)
-      guest.patchSession(event.shortId, (cur) => ({ pin: cur.pin ?? 'typed', auth: authFrom(s, cur.auth) }))
-      setPinError(null); setStage('choose')
-    } catch (err) {
-      const f = friendlyError(err, 'We couldn’t check the PIN')
-      setPinError(errorCode(err) === 'invalid_pin' ? `That PIN didn't match. ${f.body}` : `${f.title}. ${f.body}`)
-      setPin('')
-    } finally { setPinBusy(false) }
+    const ok = await unlock(pin)
+    setPinBusy(false)
+    if (ok) { setPinError(null); setStage('choose') } else setPin('')
   }
 
   async function start() {
-    countUse()
+    setUnlockError(null)
+    if (!(await unlock())) return
     setStage('running'); setDone(0)
     abort.current = new AbortController()
-    let saved = 0
     try {
       const resolved = await resolve()
-      saved = await downloadPhotos(photos, event, resolved, (d) => { saved = d; setDone(d) }, abort.current.signal)
+      await downloadPhotos(photos, event, resolved, setDone, abort.current.signal)
       if (!abort.current.signal.aborted) setStage('done')
     } catch (e) {
       error('Download stopped', e instanceof Error ? e.message : 'Try again.')
       setStage('choose')
-    } finally {
-      countDownloads(api, photos.slice(0, saved).map((p) => p.id), event.shortId)
     }
   }
 
   async function emailZip(e: FormEvent) {
     e.preventDefault()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) { setEmailError('Enter an email like name@example.com.'); return }
-    setZipBusy(true)
+    setZipBusy(true); setEmailError(null)
     try {
-      await api.requestZip(event.id, email.trim(), { photoIds: photos.map((p) => p.id) })
+      if (!(await unlock())) return
+      // Whole album / person only when every photo may be downloaded; otherwise the exact photo ids ("own" policy).
+      const target = event.settings.downloads === 'all' && (zip?.albumId || zip?.personId) ? zip : { photoIds: photos.map((p) => p.id) }
+      await api.requestPublicZip(event.shortId, email.trim(), target)
+      guest.setProfile({ email: email.trim() })
+      setStage('emailed')
     } catch (err) {
-      // TODO(api): requestZip is studio-only on the HTTP API; guests get the simulated confirmation until a guest ZIP endpoint exists.
-      if (!isStudioOnly(err)) {
-        const f = friendlyError(err, 'We couldn’t request the ZIP')
-        setEmailError(`${f.title}. ${f.body}`)
-        setZipBusy(false)
-        return
-      }
-    }
-    setZipBusy(false)
-    countUse()
-    guest.setProfile({ email: email.trim() })
-    setStage('emailed')
+      const f = friendlyError(err, 'We couldn’t request the ZIP')
+      setEmailError(`${f.title}. ${f.body}`)
+    } finally { setZipBusy(false) }
   }
 
   const quality = opts.original ? 'Original quality' : 'Web quality, 2048 px'
@@ -166,7 +174,7 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
       )}
       {stage === 'pin' && (
         <form onSubmit={submitPin} className="flex flex-col gap-3" noValidate>
-          <p className="flex items-start gap-2 text-[13px] text-ink-2"><KeyRound size={15} className="mt-0.5 shrink-0 text-accent-text" />Download all needs the gallery PIN. You can use it {MAX_DOWNLOAD_ALL} times on this device — <b className="text-ink">{verdict.left} left</b>.</p>
+          <p className="flex items-start gap-2 text-[13px] text-ink-2"><KeyRound size={15} className="mt-0.5 shrink-0 text-accent-text" />Download all needs the gallery PIN. You can use it {MAX_DOWNLOAD_ALL} times{verdict.left !== undefined ? <> — <b className="text-ink">{verdict.left} left</b></> : ''}.</p>
           <Field label="Gallery PIN" htmlFor="dl-pin" error={pinError}>
             <Input id="dl-pin" inputMode="numeric" autoComplete="off" maxLength={4} value={pin} autoFocus
               onChange={(e) => { setPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setPinError(null) }}
@@ -180,7 +188,10 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
       )}
       {stage === 'choose' && !loading && (
         <div className="flex flex-col gap-3">
-          {all && verdict.left !== undefined && <p className="text-[12.5px] text-ink-3">This uses 1 of your {verdict.left} remaining Download all.</p>}
+          {all && (allowance
+            ? <p className="text-[12.5px] text-ink-3">Unlocked. You have {allowance.remaining} of {allowance.limit} Download all left after this one.</p>
+            : <p className="text-[12.5px] text-ink-3">This uses 1 of your {verdict.left ?? MAX_DOWNLOAD_ALL} Download all.</p>)}
+          {unlockError && <p role="alert" className="rounded-card bg-bad-soft p-3 text-[13px] font-semibold text-bad">{unlockError}</p>}
           {big ? (
             <>
               <form onSubmit={emailZip} className="flex flex-col gap-2.5 rounded-card border border-line p-3.5" noValidate>

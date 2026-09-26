@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ChevronRight, Film, Heart, ImagePlus, Images, Lock, MessageCircle, RotateCcw, ScanFace, Share2, Sparkles, Store } from 'lucide-react'
+import { ChevronRight, Film, Heart, ImagePlus, Images, Lock, MessageCircle, RotateCcw, ScanFace, Share2, ShoppingBag, Sparkles, Store } from 'lucide-react'
 import { Button, Tip, cn, useToast } from '@frameline/ui'
 import { fmt, toneCss, type Album, type Tone } from '@frameline/shared'
 import { guestAlbums, useAlbumCover, useHighlights } from '../lib/queries'
@@ -131,6 +131,9 @@ export function EventHome() {
           )}
           {s.allowEnquiries && (
             <ActionRow icon={<MessageCircle size={17} />} title={`Want photos like these?`} body={`Enquire with ${studio.name}`} onClick={() => setEnquire(true)} />
+          )}
+          {s.storeEnabled && (
+            <ActionRow icon={<ShoppingBag size={17} />} title="Your orders" body="Photos and prints you bought" onClick={() => navigate(`${base}/orders`)} />
           )}
           <ActionRow icon={<Store size={17} />} title={`More from ${studio.name}`} body="Galleries, services and contact" onClick={() => navigate(`/studio/${studio.followCode.toLowerCase()}`)} />
         </section>

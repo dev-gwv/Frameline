@@ -66,6 +66,15 @@ export function friendlyError(err: unknown, fallbackTitle = 'Something went wron
     case 'store_disabled': return { code: e.code, title: 'Photos aren’t for sale here', body: 'This gallery isn’t selling photos or prints.' }
     case 'enquiries_disabled': return { code: e.code, title: 'Enquiries are off', body: 'This gallery doesn’t take enquiries. Contact the studio directly.' }
     case 'wrong_event': return { code: e.code, title: 'This link is for another gallery', body: 'Open the gallery from its own link or enter its code.' }
+    case 'guest_uploads_disabled': return { code: e.code, title: 'Guest uploads are off', body: 'The photographer isn’t taking guest photos for this gallery.' }
+    case 'no_guest_album': return { code: e.code, title: 'Guest uploads aren’t set up', body: 'This gallery has no album for guest photos yet. Ask the studio.' }
+    case 'guest_upload_limit': {
+      const left = typeof e.problem.remaining === 'number' ? e.problem.remaining : undefined
+      return { code: e.code, title: 'That’s more than the gallery can take', body: left === 0 ? 'This gallery has reached its limit of guest photos.' : left !== undefined ? `There’s room for ${left} more ${left === 1 ? 'photo' : 'photos'}. Remove some and try again.` : e.detail }
+    }
+    case 'download_limit': return { code: e.code, title: 'Download all is used up', body: 'You’ve used all your “Download all” tries. Download single photos, or ask the studio for a ZIP.' }
+    case 'downloads_disabled': return { code: e.code, title: 'Downloads are off', body: 'The photographer has turned off downloads for this gallery.' }
+    case 'downloads_own_only': return { code: e.code, title: 'Only your photos can be downloaded', body: 'Find your photos with a selfie first, then download those.' }
     case 'validation_failed': return { code: e.code, title: 'Check your details', body: e.fieldErrors[0]?.message ?? e.detail }
   }
   if (isNotFound(e)) return { code: 'not_found', title: 'We couldn’t find that', body: e.detail || 'The link may be out of date.' }

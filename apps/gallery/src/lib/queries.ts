@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery, type QueryClient } from '@tanstack/react-query'
-import type { Album, FramelineApi, Photo, PublicEvent, PublicStudio, WatermarkSettings } from '@frameline/shared'
+import type { Album, FramelineApi, Photo, PublicEvent, PublicStudio, PublicWatermark, WatermarkSettings } from '@frameline/shared'
 import { useApi } from './api'
-import { guest, type FaceMatch } from './guest'
+import { guest, snapshot, type FaceMatch } from './guest'
 
 const up = (shortId: string | undefined) => (shortId ?? '').toUpperCase()
 
@@ -16,27 +16,62 @@ export function usePublicEvent(shortId: string | undefined) {
   })
 }
 
-export function usePrices() {
+export function usePrices(shortId: string) {
   const api = useApi()
-  return useQuery({ queryKey: ['prices'], queryFn: () => api.listPrices(), retry: false })
+  return useQuery({ queryKey: ['prices', up(shortId)], queryFn: () => api.listPublicPrices(shortId), retry: false })
 }
 
-/**
- * Watermark for generated downloads. `null` when the API won't give it to a guest (the HTTP API only serves
- * it to the studio today) — callers then fall back to a text watermark with the studio name.
- */
-export const loadWatermark = (api: FramelineApi) => api.getWatermark().catch(() => null)
-export const watermarkQuery = (api: FramelineApi) => ({ queryKey: ['watermark'], queryFn: () => loadWatermark(api), staleTime: 10 * 60_000 })
-export const ensureWatermark = (qc: QueryClient, api: FramelineApi) => qc.ensureQueryData(watermarkQuery(api))
-export function useWatermark() {
+/** Watermark for generated downloads (canvas fallback). `enabled: false` = no watermark on this gallery. */
+export const watermarkQuery = (api: FramelineApi, shortId: string) => ({
+  queryKey: ['watermark', up(shortId)],
+  queryFn: () => api.getPublicWatermark(shortId).catch((): PublicWatermark | null => null),
+  staleTime: 10 * 60_000,
+})
+export const ensureWatermark = (qc: QueryClient, api: FramelineApi, shortId: string) => qc.ensureQueryData(watermarkQuery(api, shortId))
+export function useWatermark(shortId: string) {
   const api = useApi()
-  return useQuery(watermarkQuery(api))
+  return useQuery(watermarkQuery(api, shortId))
 }
+/** Used only when the watermark didn't load: a text mark with the studio name, so downloads are never left bare. */
 export function fallbackWatermark(studio: PublicStudio): WatermarkSettings {
   return {
     mode: 'text', text: studio.name, subtitle: '', position: 'br', size: 'normal', opacity: 70, font: 'Fraunces', edgeOffset: 3,
     applyTo: { previews: false, downloads: true, guestUploads: false, originals: true },
   }
+}
+
+/**
+ * Registered guests' favourites from the API (source of truth). The result also refreshes the device copy,
+ * which stays the instant cache and the only list for guests who haven't registered.
+ */
+export function useMyFavourites(shortId: string, enabled: boolean) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['photos', 'favs', up(shortId)],
+    enabled,
+    retry: false,
+    queryFn: async () => {
+      const items = await api.listMyFavourites(shortId)
+      guest.patchSession(shortId, { favourites: items.map((p) => p.id), favPhotos: Object.fromEntries(items.map((p) => [p.id, snapshot(p)])) })
+      return items
+    },
+  })
+}
+
+/** Orders placed from this device / by this registered guest. Paid digital orders (no shipping) unlock their photos for download. */
+export function useMyOrders(shortId: string, enabled = true) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['orders', up(shortId)],
+    enabled,
+    retry: false,
+    queryFn: async () => {
+      const orders = await api.listMyOrders(shortId)
+      const paid = orders.filter((o) => !o.shipping && (o.status === 'paid' || o.status === 'paid-direct')).flatMap((o) => o.photoIds ?? [])
+      if (paid.length) guest.patchSession(shortId, (s) => ({ purchased: [...new Set([...s.purchased, ...paid])] }))
+      return orders
+    },
+  })
 }
 
 /**

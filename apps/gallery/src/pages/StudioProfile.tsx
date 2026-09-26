@@ -46,21 +46,22 @@ export function StudioProfile() {
   const following = follows.includes(studio.followCode.toUpperCase())
   const featured = profile.featured
 
-  /** Following is sent to the API (the studio's follower count); there is no unfollow endpoint, so unfollow is local. */
+  /** Follow / unfollow go to the API (the studio's follower count); the device remembers which studios it follows. */
   async function toggleFollow() {
-    if (following) {
-      setFollowing(studio.followCode, false)
-      toast({ title: `Unfollowed ${studio.name}` })
-      return
-    }
     setFollowBusy(true)
     try {
-      await api.followStudio(studio.followCode)
-      setFollowing(studio.followCode, true)
+      if (following) {
+        await api.unfollowStudio(studio.followCode)
+        setFollowing(studio.followCode, false)
+        toast({ title: `Unfollowed ${studio.name}` })
+      } else {
+        await api.followStudio(studio.followCode)
+        setFollowing(studio.followCode, true)
+        toast({ title: `Following ${studio.name}`, body: 'New events from this studio will show up on your home screen.' })
+      }
       void profileQ.refetch()
-      toast({ title: `Following ${studio.name}`, body: 'New events from this studio will show up on your home screen.' })
     } catch (err) {
-      const f = friendlyError(err, 'Couldn’t follow the studio')
+      const f = friendlyError(err, following ? 'Couldn’t unfollow the studio' : 'Couldn’t follow the studio')
       toast({ kind: 'error', title: f.title, body: f.body })
     } finally { setFollowBusy(false) }
   }
