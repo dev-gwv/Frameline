@@ -20,6 +20,8 @@ interface AuthCtx {
   verifyCode(email: string, code: string, extra?: { name?: string; studioName?: string }): Promise<VerifyResult>
   signInWithPassword(email: string, password: string): Promise<VerifyResult>
   setPassword(newPassword: string, currentPassword?: string): Promise<void>
+  /** Forgot password: after requestCode(email), set a new password with the emailed code. Signs you in. */
+  resetPassword(email: string, code: string, newPassword: string): Promise<VerifyResult>
   googleUrl(redirectPath?: string): string | null
   /** Low-level: set the session directly (demo flows such as Google in sample mode). */
   signIn(user: SessionUser): void
@@ -116,6 +118,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async setPassword(newPassword, currentPassword) {
       if (http) return http.auth.setPassword(newPassword, currentPassword)
       if (newPassword.length < 8) throw new Error('Use at least 8 characters.')
+    },
+    async resetPassword(email, code, newPassword) {
+      if (http) {
+        await http.auth.resetPassword(email, code, newPassword)
+        const u = (await loadMe())!
+        set(u); queryClient.clear()
+        return { user: u, isNewUser: false }
+      }
+      if (code !== DEMO_CODE) throw new Error('That code didn’t match. Check the email and try again.')
+      if (newPassword.length < 8) throw new Error('Use at least 8 characters.')
+      const isDemo = email.trim().toLowerCase() === DEMO_USER.email
+      const u = isDemo ? DEMO_USER : { id: 'u_' + email, name: nameFromEmail(email), email, role: 'owner' as const }
+      set(u)
+      return { user: u, isNewUser: false }
     },
     googleUrl(redirectPath) { return http ? http.auth.googleStartUrl(redirectPath) : null },
     signIn: set,
