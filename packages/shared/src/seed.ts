@@ -35,10 +35,10 @@ export function rng(seed: number) {
 }
 
 export const PLANS: Plan[] = [
-  { id: 'starter', name: 'Starter', pricePerYear: 8490, photos: 50_000, seats: 2 },
-  { id: 'studio', name: 'Studio', pricePerYear: 15990, photos: 100_000, seats: 3 },
-  { id: 'pro', name: 'Pro', pricePerYear: 38490, photos: 250_000, seats: 5 },
-  { id: 'agency', name: 'Agency', pricePerYear: 57990, photos: 500_000, seats: 5 },
+  { id: 'starter', name: 'Starter', pricePerYear: 8490, photos: 50_000, seats: 5 },
+  { id: 'studio', name: 'Studio', pricePerYear: 15990, photos: 100_000, seats: 8 },
+  { id: 'pro', name: 'Pro', pricePerYear: 38490, photos: 250_000, seats: 15 },
+  { id: 'agency', name: 'Agency', pricePerYear: 57990, photos: 500_000, seats: 25 },
 ]
 
 export const PACKS = [
