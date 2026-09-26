@@ -1,6 +1,7 @@
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import type { Tone } from '@frameline/shared'
 import { toneCss } from '@frameline/shared'
+import { encode } from 'uqr'
 import { cn } from './primitives'
 
 /* ---------------- Photo tile ---------------- */
@@ -18,8 +19,11 @@ export interface PhotoTileProps {
   onClick?: () => void
   alt?: string
 }
-export function PhotoTile({ tone, url, label, selected, processing, hidden, aspect = '3 / 2', className, rounded = 'rounded-md', overlay, onClick, alt = '' }: PhotoTileProps) {
+export function PhotoTile({ tone, url: givenUrl, label, selected, processing, hidden, aspect = '3 / 2', className, rounded = 'rounded-md', overlay, onClick, alt = '' }: PhotoTileProps) {
   const Comp = onClick ? 'button' : 'div'
+  // Fall back to the colour tone when the file is gone (e.g. a stale object URL after reload).
+  const [broken, setBroken] = useState(false)
+  const url = givenUrl && !broken ? givenUrl : undefined
   return (
     <Comp
       type={onClick ? 'button' : undefined}
@@ -27,7 +31,7 @@ export function PhotoTile({ tone, url, label, selected, processing, hidden, aspe
       className={cn('group relative block w-full overflow-hidden text-left', rounded, processing ? 'shimmer bg-sunk' : 'vignette', selected && 'outline outline-[3px] -outline-offset-[3px] outline-marker', className)}
       style={{ aspectRatio: aspect, background: processing ? undefined : url ? undefined : toneCss(tone) }}
     >
-      {url && !processing && <img src={url} alt={alt} className="absolute inset-0 size-full object-cover" loading="lazy" />}
+      {url && !processing && <img src={url} alt={alt} className="absolute inset-0 size-full object-cover" loading="lazy" onError={() => setBroken(true)} />}
       {hidden && !processing && <span className="absolute inset-0 z-[1] bg-black/45" aria-hidden />}
       {label && <span className={cn('absolute bottom-1 left-1.5 z-[2] font-mono text-[9.5px] tracking-wide', processing ? 'text-ink-3' : 'text-white/85')}>{processing ? 'processing' : label}</span>}
       {hidden && !processing && <span className="absolute left-1.5 top-1.5 z-[2] rounded bg-black/60 px-1.5 py-0.5 text-[9.5px] font-bold text-white">Hidden</span>}
@@ -137,33 +141,50 @@ export function LogoMark({ size = 26, className }: { size?: number; className?: 
   )
 }
 
-/* ---------------- QR code (decorative until a real encoder is wired) ---------------- */
-export function QRCode({ seed, size = 120, color = '#1B1712', rounded = false }: { seed: number; size?: number; color?: string; rounded?: boolean }) {
-  const cells = useMemo(() => {
-    let x = seed * 9301 + 49297
-    const r = () => (x = (x * 9301 + 49297) % 233280) / 233280
-    const out: [number, number][] = []
-    for (let i = 0; i < 21; i++) for (let j = 0; j < 21; j++) {
-      const inFinder = (i < 8 && j < 8) || (i > 12 && j < 8) || (i < 8 && j > 12)
-      if (!inFinder && r() > 0.52) out.push([i, j])
-    }
-    return out
-  }, [seed])
-  const c = size / 21
-  const finder = (a: number, b: number) => (
-    <g key={`${a}-${b}`}>
-      <rect x={a * c} y={b * c} width={7 * c} height={7 * c} rx={rounded ? c * 2 : 0} fill={color} />
-      <rect x={(a + 1) * c} y={(b + 1) * c} width={5 * c} height={5 * c} rx={rounded ? c * 1.4 : 0} fill="#fff" />
-      <rect x={(a + 2) * c} y={(b + 2) * c} width={3 * c} height={3 * c} rx={rounded ? c : 0} fill={color} />
+/* ---------------- QR code (real, scannable) ---------------- */
+/**
+ * Scannable QR code. Pass `value` (the URL to encode). `seed` is accepted for
+ * backwards compatibility and encodes a placeholder URL when no value is given.
+ * Error correction "Q" keeps it readable with a centre logo.
+ */
+export function QRCode({ value, seed = 0, size = 120, color = '#1B1712', rounded = false, logo }: {
+  value?: string; seed?: number; size?: number; color?: string; rounded?: boolean; logo?: string
+}) {
+  const text = value ?? `https://frameline.in/q/${seed.toString(36)}`
+  const qr = useMemo(() => encode(text, { ecc: logo ? 'H' : 'Q', border: 1 }), [text, logo])
+  const n = qr.size
+  const c = size / n
+  const b = 1 // border modules
+  const isFinder = (x: number, y: number) => {
+    const inner = n - 2 * b
+    const fx = x - b, fy = y - b
+    return (fx >= 0 && fy >= 0 && fx < 7 && fy < 7) || (fx >= inner - 7 && fx < inner && fy >= 0 && fy < 7) || (fx >= 0 && fx < 7 && fy >= inner - 7 && fy < inner)
+  }
+  const finder = (fx: number, fy: number) => (
+    <g key={`f-${fx}-${fy}`}>
+      <rect x={fx * c} y={fy * c} width={7 * c} height={7 * c} rx={rounded ? c * 2 : 0} fill={color} />
+      <rect x={(fx + 1) * c} y={(fy + 1) * c} width={5 * c} height={5 * c} rx={rounded ? c * 1.4 : 0} fill="#fff" />
+      <rect x={(fx + 2) * c} y={(fy + 2) * c} width={3 * c} height={3 * c} rx={rounded ? c : 0} fill={color} />
     </g>
   )
+  const inner = n - 2 * b
+  const logoSize = size * 0.22
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="QR code">
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`QR code for ${text}`}>
       <rect width={size} height={size} fill="#fff" />
-      {cells.map(([i, j]) => rounded
-        ? <circle key={`${i}-${j}`} cx={i * c + c / 2} cy={j * c + c / 2} r={c * 0.45} fill={color} />
-        : <rect key={`${i}-${j}`} x={i * c} y={j * c} width={c} height={c} fill={color} />)}
-      {finder(0, 0)}{finder(14, 0)}{finder(0, 14)}
+      {qr.data.flatMap((row, y) => row.map((on, x) => {
+        if (!on || isFinder(x, y)) return null
+        return rounded
+          ? <circle key={`${x}-${y}`} cx={x * c + c / 2} cy={y * c + c / 2} r={c * 0.46} fill={color} />
+          : <rect key={`${x}-${y}`} x={x * c} y={y * c} width={c + 0.2} height={c + 0.2} fill={color} />
+      }))}
+      {finder(b, b)}{finder(b + inner - 7, b)}{finder(b, b + inner - 7)}
+      {logo && (
+        <g>
+          <rect x={(size - logoSize) / 2 - 4} y={(size - logoSize) / 2 - 4} width={logoSize + 8} height={logoSize + 8} rx={6} fill="#fff" />
+          <image href={logo} x={(size - logoSize) / 2} y={(size - logoSize) / 2} width={logoSize} height={logoSize} preserveAspectRatio="xMidYMid meet" />
+        </g>
+      )}
     </svg>
   )
 }
