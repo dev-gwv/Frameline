@@ -40,6 +40,10 @@ const CreateUploadBody = z.object({
   albumId: z.string().max(128),
   quality: z.enum(['web', 'original']).default('web'),
   files: z.array(UploadFileInput).min(1).max(MAX_FILES),
+  source: z.enum(['web', 'camera', 'drive', 'guest', 'desktop']).optional().openapi({ description: 'Default: guest for the guest album, else web. Guest uploads don’t use plan capacity and go to review when the event asks for it.' }),
+  uploadedBy: z.string().trim().min(1).max(120).optional(),
+  watermark: z.boolean().optional().openapi({ description: 'Burn the studio watermark into the rendition.' }),
+  fast: z.boolean().optional().openapi({ description: 'Skip heavier processing steps (live camera sync).' }),
 }).openapi('CreateUpload')
 
 const UploadSession = z.object({
@@ -69,8 +73,9 @@ uploadRoutes.openapi(createRoute({
   if (!album) throw new ValidationFailed([{ field: 'albumId', in: 'body', message: 'Album not found in this event', code: 'unknown_album' }])
 
   const [studio] = await db.select().from(schema.studios).where(eq(schema.studios.id, m.studioId)).limit(1)
-  const cost = input.files.length * (input.quality === 'original' ? 2 : 1)
-  if (studio.photosUsed + cost > studio.photosLimit) {
+  const guestUpload = (input.source ?? (album.kind === 'guest' ? 'guest' : 'web')) === 'guest'
+  const cost = guestUpload ? 0 : input.files.length * (input.quality === 'original' ? 2 : 1)
+  if (cost && studio.photosUsed + cost > studio.photosLimit) {
     throw new AppError(402, 'quota_exceeded', 'Photo quota exceeded', `This upload needs ${cost} photo credits but only ${Math.max(0, studio.photosLimit - studio.photosUsed)} are left on your plan. Add a photo pack or upgrade.`)
   }
 
@@ -102,6 +107,7 @@ uploadRoutes.openapi(createRoute({
   }
   await db.insert(schema.uploads).values({
     id: uploadId, studioId: m.studioId, eventId: ev.id, albumId: album.id, userId: me.id, quality: input.quality, mode, files: records,
+    options: { source: input.source, uploadedBy: input.uploadedBy, watermark: input.watermark, fast: input.fast },
     status: 'pending', createdAt: nowIso(), expiresAt,
   }).run()
   return c.json({ uploadId, mode, partSize: PART_SIZE, expiresAt, files: out }, 201)
@@ -174,14 +180,17 @@ uploadRoutes.openapi(createRoute({
   const [{ top }] = await db.select({ top: max(p.index) }).from(p).where(eq(p.albumId, up.albumId))
   const now = nowIso()
   const [album] = await db.select({ kind: schema.albums.kind }).from(schema.albums).where(eq(schema.albums.id, up.albumId)).limit(1)
+  const opts = up.options ?? {}
+  const source = opts.source ?? (album?.kind === 'guest' ? 'guest' : 'web')
+  const reviewStatus = source === 'guest' ? (ev.settings.reviewGuestUploads ? 'pending' as const : 'approved' as const) : null
   const rows: (typeof p.$inferInsert)[] = done.map((f, i) => ({
     id: f.photoId, eventId: up.eventId, albumId: up.albumId, studioId: up.studioId, filename: f.filename, index: (top ?? 0) + i + 1,
     capturedAt: f.capturedAt && !Number.isNaN(Date.parse(f.capturedAt)) ? new Date(f.capturedAt).toISOString() : now,
     tone: tone(hash(f.filename)), url: f.url ?? null, r2Key: f.key, status: 'processing', hidden: false, favourites: 0, downloads: 0, faces: [],
-    exif: { width: f.width ?? 0, height: f.height ?? 0, sizeBytes: f.size }, uploadedBy: me.name || me.email,
-    source: album?.kind === 'guest' ? 'guest' : 'web', quality: up.quality, createdAt: now,
+    exif: { width: f.width ?? 0, height: f.height ?? 0, sizeBytes: f.size }, uploadedBy: opts.uploadedBy ?? (me.name || me.email),
+    source, quality: up.quality, createdAt: now, reviewStatus,
   }))
-  const cost = rows.length * (up.quality === 'original' ? 2 : 1)
+  const cost = source === 'guest' ? 0 : rows.length * (up.quality === 'original' ? 2 : 1)
   if (rows.length) {
     await db.batch([
       db.update(schema.uploads).set({ status: 'completed' }).where(eq(schema.uploads.id, up.id)),
@@ -190,7 +199,7 @@ uploadRoutes.openapi(createRoute({
       db.update(schema.events).set({ status: 'uploading' }).where(and(eq(schema.events.id, up.eventId), eq(schema.events.status, 'draft'))),
       ...recountStatements(db, up.eventId),
     ])
-    const jobs: { body: PhotoJob }[] = rows.map((r) => ({ body: { kind: 'process-photo', photoId: r.id, eventId: up.eventId, studioId: up.studioId, key: r.r2Key ?? null, quality: up.quality } }))
+    const jobs: { body: PhotoJob }[] = rows.map((r) => ({ body: { kind: 'process-photo', photoId: r.id, eventId: up.eventId, studioId: up.studioId, key: r.r2Key ?? null, quality: up.quality, ...(opts.watermark ? { watermark: true } : {}) } }))
     for (let i = 0; i < jobs.length; i += 100) await c.env.PHOTO_QUEUE.sendBatch(jobs.slice(i, i + 100))
   } else {
     await db.update(schema.uploads).set({ status: 'aborted' }).where(eq(schema.uploads.id, up.id)).run()

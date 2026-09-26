@@ -1,6 +1,7 @@
 import type {
-  AccessRequest, ActivityItem, Album, Broadcast, Camera, Enquiry, EventSettings, Film, Guest, LedgerEntry,
-  Order, Person, Photo, PhotoEvent, Plan, SmartQR, Studio, TeamMember, Ticket, Tone, Usage, WatermarkSettings, Website,
+  AccessRequest, ActivityItem, Album, Broadcast, Camera, CameraUpload, Enquiry, EventSettings, Film, Guest, LedgerEntry,
+  NotificationPrefs, Order, Person, Photo, PhotoEvent, Plan, Purchase, SmartQR, StoreSettings, Studio, TeamMember, Ticket, Tone,
+  Usage, WatermarkSettings, Website, ZipRequest,
 } from './types'
 
 /** Warm, event-photography palette used as placeholder photos until real files exist. */
@@ -40,6 +41,21 @@ export const PLANS: Plan[] = [
   { id: 'pro', name: 'Pro', pricePerYear: 38490, photos: 250_000, seats: 15 },
   { id: 'agency', name: 'Agency', pricePerYear: 57990, photos: 500_000, seats: 25 },
 ]
+
+/** Price for one billing period. Quarterly costs half the yearly price, so yearly saves 50%. */
+export const planPrice = (p: Plan, period: 'yearly' | 'quarterly') => (period === 'yearly' ? p.pricePerYear : Math.round((p.pricePerYear / 4) * 2))
+export const PERIOD_DAYS = { yearly: 365, quarterly: 91 } as const
+
+/** Base price a client pays to renew one event for a year, before the studio's multiplier. */
+export const BASE_RENEWAL = 1000
+/** Renewing with wallet credits costs half. */
+export const RENEWAL_CREDIT_DISCOUNT = 0.5
+/** Credits charged per AI-enhanced photo. */
+export const ENHANCE_COST = 8
+/** Frameline's commission on store sales (the studio keeps the rest). */
+export const STORE_COMMISSION = 0.1
+/** One-time coupons: code → wallet credits (rupees). */
+export const COUPONS: Record<string, number> = { WELCOME500: 500 }
 
 export const PACKS = [
   { photos: 1000, price: 700 },
@@ -91,6 +107,11 @@ export const PRESETS: Record<'private-family' | 'open-corporate' | 'race', { lab
 
 export interface SeedState {
   studio: Studio
+  storeSettings: StoreSettings
+  notificationPrefs: NotificationPrefs
+  purchases: Purchase[]
+  cameraUploads: CameraUpload[]
+  zipRequests: ZipRequest[]
   usage: Usage
   events: PhotoEvent[]
   albums: Album[]
@@ -145,6 +166,11 @@ export function createSeed(): SeedState {
     list.forEach(([name, photoCount], i) => albums.push({ id: `${eventId}_al${i}`, eventId, name, order: i, photoCount, kind: 'album' }))
     albums.push({ id: `${eventId}_guest`, eventId, name: 'Guest uploads', order: 99, photoCount: eventId === 'ev_riya' ? 12 : 0, kind: 'guest' })
   }
+  for (const a of albums) {
+    const event = events.find((e) => e.id === a.eventId)!
+    const ps = generatePhotos(a, event)
+    if (ps.length) { a.firstCapture = ps[0].capturedAt; a.lastCapture = ps[ps.length - 1].capturedAt }
+  }
 
   const people: Person[] = [
     { id: 'p_riya', eventId: 'ev_riya', name: 'Riya', photoCount: 214, tone: tone(6) },
@@ -169,7 +195,42 @@ export function createSeed(): SeedState {
       id: 'st_northlight', name: 'Northlight Studio', handle: 'northlight', brandColor: '#8C2F39',
       phone: '+91 98200 41177', email: 'studio@northlight.in', website: 'https://northlight.in', instagram: '@northlight.studio',
       city: 'Mumbai', followCode: 'FA-KCGWHY', about: 'Wedding and event photography from Mumbai, since 2014.',
+      studioType: 'wedding', referralSource: 'Instagram',
+      services: [
+        { id: 'sv1', name: 'Wedding coverage', price: 'From ₹1,50,000', description: '2 photographers, all functions, edited gallery in 3 weeks' },
+        { id: 'sv2', name: 'Pre-wedding shoot', price: 'From ₹35,000', description: 'Half day, 2 locations, 60 edited photos' },
+        { id: 'sv3', name: 'Events and corporate', price: 'From ₹25,000 / day', description: 'Live gallery with face search for every guest' },
+        { id: 'sv4', name: 'Family and baby', price: 'From ₹12,000', description: 'At home or in studio, 40 edited photos' },
+      ],
+      testimonials: [
+        { id: 'tm1', quote: 'Our guests found their photos the same night. Nobody had to ask twice.', name: 'Riya & Kabir', detail: 'Udaipur, 2026' },
+        { id: 'tm2', quote: 'Calm, invisible, and the album made my parents cry (the good kind).', name: 'Aditi Kapoor', detail: 'Delhi, 2026' },
+      ],
+      faq: [
+        { id: 'fq1', q: 'How long until we get our photos?', a: 'A preview gallery goes live within 48 hours. The full edited set follows in about 3 weeks.' },
+        { id: 'fq2', q: 'Do you travel for weddings?', a: 'Yes, anywhere in India and abroad. Travel and stay are billed at cost.' },
+        { id: 'fq3', q: 'Can guests find their own photos?', a: 'Yes. Guests take a selfie in the gallery and see the photos they are in.' },
+        { id: 'fq4', q: 'Can guests order prints?', a: 'Yes. Prints can be ordered from the gallery; we print on matte paper and ship in about 5 days.' },
+        { id: 'fq5', q: 'How do we book a date?', a: 'Send an enquiry with your date and city. A 30% advance confirms the booking.' },
+      ],
+      socialLinks: [
+        { platform: 'instagram', url: 'https://instagram.com/northlight.studio' },
+        { platform: 'youtube', url: 'https://youtube.com/@northlightstudio' },
+        { platform: 'whatsapp', url: 'https://wa.me/919820041177' },
+      ],
+      portfolioLinks: ['https://northlight.in/portfolio'],
+      app: { featuredEventIds: ['ev_riya', 'ev_kapoor', 'ev_marathon', 'ev_portfolio'], showServices: true, showFaq: true, showPrivate: false },
+      followers: 1920,
     },
+    storeSettings: defaultStoreSettings(),
+    notificationPrefs: { enquiryEmails: ['studio@northlight.in'], eventExpiry: true, planExpiry: true, weeklySummary: false },
+    purchases: [
+      { id: 'pu3', at: iso('2026-09-21T11:30:00'), description: '3,000-photo pack', kind: 'pack', amount: 1350, method: 'credits', invoiceNumber: 'FL-2026-0193' },
+      { id: 'pu2', at: iso('2026-06-02T10:00:00'), description: 'AI enhance · 40 photos', kind: 'enhance', amount: 320, method: 'credits', invoiceNumber: 'FL-2026-0121' },
+      { id: 'pu1', at: iso('2026-03-03T09:00:00'), description: 'Starter plan · yearly', kind: 'plan', amount: 8490, method: 'card', invoiceNumber: 'FL-2026-0042' },
+    ],
+    cameraUploads: cameraUploads(),
+    zipRequests: [],
     usage: {
       planId: 'starter', period: 'yearly', validTill: iso('2027-03-03'), photosUsed: 12480, photosLimit: 50000,
       guestReserved: 1200, walletCredits: 1200, renewalMultiplier: 2,
@@ -244,7 +305,7 @@ export function createSeed(): SeedState {
     ],
     watermark: {
       mode: 'text', text: 'Northlight Studio', subtitle: '', position: 'br', size: 'normal', opacity: 70, font: 'Fraunces',
-      applyTo: { previews: true, downloads: true, guestUploads: false, originals: false },
+      applyTo: { previews: true, downloads: true, guestUploads: false, originals: false }, edgeOffset: 3,
     },
     website: {
       published: false, template: 'editorial', headline: 'Weddings photographed like films.',
@@ -257,10 +318,10 @@ export function createSeed(): SeedState {
       ],
     },
     enquiries: [
-      { id: 'e1', name: 'Anjali Desai', phone: '+91 98331 20455', email: 'anjali.d@gmail.com', message: 'Looking for wedding coverage on 14 Feb 2027 in Goa, about 250 guests.', source: 'Website', at: iso('2026-09-26T13:20:00') },
-      { id: 'e2', name: 'Farhan Ali', phone: '+91 99200 18833', email: 'farhan@alico.in', message: 'Corporate offsite, 2 days in November.', source: 'Riya & Kabir gallery', at: iso('2026-09-24T17:45:00'), note: 'Sent quote' },
-      { id: 'e3', name: 'Meenal Joshi', phone: '+91 97022 61190', email: 'meenal.j@gmail.com', message: 'Baby shoot for my daughter, 6 months.', source: 'Website', at: iso('2026-09-22T10:05:00') },
-      { id: 'e4', name: 'Tarun Bhatia', phone: '+91 98670 44100', email: 'tarun.b@gmail.com', message: 'Pre-wedding shoot in Udaipur?', source: 'Studio app', at: iso('2026-09-20T21:40:00') },
+      { id: 'e1', status: 'new', name: 'Anjali Desai', phone: '+91 98331 20455', email: 'anjali.d@gmail.com', message: 'Looking for wedding coverage on 14 Feb 2027 in Goa, about 250 guests.', source: 'Website', at: iso('2026-09-26T13:20:00') },
+      { id: 'e2', status: 'replied', name: 'Farhan Ali', phone: '+91 99200 18833', email: 'farhan@alico.in', message: 'Corporate offsite, 2 days in November.', source: 'Riya & Kabir gallery', at: iso('2026-09-24T17:45:00'), note: 'Sent quote' },
+      { id: 'e3', status: 'new', name: 'Meenal Joshi', phone: '+91 97022 61190', email: 'meenal.j@gmail.com', message: 'Baby shoot for my daughter, 6 months.', source: 'Website', at: iso('2026-09-22T10:05:00') },
+      { id: 'e4', status: 'new', name: 'Tarun Bhatia', phone: '+91 98670 44100', email: 'tarun.b@gmail.com', message: 'Pre-wedding shoot in Udaipur?', source: 'Studio app', at: iso('2026-09-20T21:40:00') },
     ],
     prices: [
       { id: 'single', label: 'Single photo', detail: 'Full resolution', price: 149 },
@@ -337,6 +398,7 @@ export function generatePhotos(album: Album, event: PhotoEvent): Photo[] {
       },
       uploadedBy: album.kind === 'guest' ? 'Guest' : SHOOTERS[Math.floor(r() * SHOOTERS.length)],
       source: album.kind === 'guest' ? 'guest' : r() < 0.3 ? 'camera' : 'web',
+      ...(album.kind === 'guest' ? { reviewStatus: i < 5 ? 'pending' as const : 'approved' as const } : {}),
     })
   }
   return out
@@ -346,4 +408,64 @@ export function hash(s: string) {
   let h = 2166136261
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) }
   return h >>> 0
+}
+
+export const DEFAULT_STORE_TERMS = `Photo-selling terms
+
+1. What you buy. Digital downloads are full-resolution JPG files for personal use: sharing with family and friends and posting on social media with credit to the studio. Commercial use (ads, resale, publications) needs written permission from the studio.
+
+2. Delivery. Downloads are available right after payment and stay in your account for 12 months. Prints ship within 5 working days of payment.
+
+3. Refunds. You can ask for a refund within 3 days of purchase if a download is broken or a print arrives damaged. Refunds go back to the original payment method within 7 working days.
+
+4. Watermarks. Preview photos carry a watermark. Purchased photos are delivered without it.
+
+5. Privacy. Your email and phone number are used only to deliver your order and send its receipt.
+
+6. Contact. Questions about an order go to the studio first; you can also reach Frameline support from your receipt.`
+
+export function defaultStoreSettings(): StoreSettings {
+  return {
+    kyc: {
+      legalName: 'Northlight Studio LLP', pan: 'AAKFN4521Q', gstRegistered: true, gstin: '27AAKFN4521Q1Z8',
+      address: { street: '14 Hill Road, Bandra West', city: 'Mumbai', state: 'Maharashtra', postal: '400050' },
+      documents: [
+        { kind: 'pan', status: 'verified', fileName: 'pan-card.pdf' },
+        { kind: 'id', status: 'verified', fileName: 'aadhaar.jpg' },
+        { kind: 'gst', status: 'review', fileName: 'gst-cert.pdf' },
+        { kind: 'cheque', status: 'needed', fileName: '' },
+      ],
+    },
+    payout: { holder: 'Northlight Studio LLP', accountLast4: '4471', ifsc: 'HDFC0001234', bank: 'HDFC Bank', branch: 'Andheri West', verified: true },
+    saleWatermark: { template: 'forsale', text: 'FOR SALE · NORTHLIGHT', orientation: 'diagonal', size: 2, opacity: 35, color: '#FFFFFF' },
+    international: { enabled: false, plan: 'starter', paymentLink: '', upiQrUrl: '', upiQrName: '', email: 'studio@northlight.in', whatsapp: '+91 98200 41177' },
+    terms: DEFAULT_STORE_TERMS,
+  }
+}
+
+/** Empty studio-level settings for a brand-new studio. */
+export function blankStoreSettings(email = ''): StoreSettings {
+  return {
+    kyc: { legalName: '', pan: '', gstRegistered: false, gstin: '', address: { street: '', city: '', state: '', postal: '' },
+      documents: (['pan', 'id', 'gst', 'cheque'] as const).map((kind) => ({ kind, status: 'needed' as const, fileName: '' })) },
+    payout: { holder: '', accountLast4: '', ifsc: '', bank: '', branch: '', verified: false },
+    saleWatermark: { template: 'forsale', text: 'FOR SALE', orientation: 'diagonal', size: 2, opacity: 35, color: '#FFFFFF' },
+    international: { enabled: false, email },
+    terms: DEFAULT_STORE_TERMS,
+  }
+}
+
+function cameraUploads(): CameraUpload[] {
+  const out: CameraUpload[] = []
+  const base = new Date('2026-09-26T16:40:00Z').getTime()
+  for (let i = 0; i < 12; i++) {
+    out.push({
+      id: `cu1_${i}`, cameraId: 'c1', filename: `IMG_${4172 - i}.JPG`, at: new Date(base - i * 95_000).toISOString(),
+      sizeBytes: 9_400_000 + ((i * 7919) % 2_000_000), status: i === 4 ? 'failed' : 'uploaded', ...(i === 4 ? { error: 'Connection dropped; the camera will resend it' } : {}),
+    })
+  }
+  for (let i = 0; i < 6; i++) {
+    out.push({ id: `cu2_${i}`, cameraId: 'c2', filename: `DSC0${8812 - i}.JPG`, at: new Date(base - 3_600_000 - i * 140_000).toISOString(), sizeBytes: 11_200_000, status: i === 2 ? 'skipped' : 'uploaded' })
+  }
+  return out
 }

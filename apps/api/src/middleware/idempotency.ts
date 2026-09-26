@@ -5,6 +5,7 @@ import { getDb, schema } from '../db/client'
 import { AppError, Conflict } from '../lib/errors'
 import { sha256Hex } from '../lib/crypto'
 import { background, clientIp } from '../lib/http'
+import { guestFromRequest } from './auth'
 
 const TTL_MS = 24 * 3600_000
 const KEY_RE = /^[A-Za-z0-9_\-:.]{8,255}$/
@@ -31,7 +32,9 @@ export const idempotent = createMiddleware<AppEnv>(async (c, next) => {
   }
   const db = getDb(c.env.DB)
   const t = schema.idempotencyKeys
-  const principal = c.get('user')?.id ?? c.get('guest')?.guestId ?? `ip:${clientIp(c)}`
+  // Studio user, else the guest session (clients can retry from a different IP), else the IP.
+  const guest = c.get('user') ? null : await guestFromRequest(c).catch(() => null)
+  const principal = c.get('user')?.id ?? (guest ? `guest:${guest.eventId}:${guest.guestId ?? 'anon'}` : `ip:${clientIp(c)}`)
   const path = new URL(c.req.url).pathname
   const scopeKey = `${principal}:${c.req.method}:${path}:${key}`
   const contentType = c.req.header('content-type') ?? ''

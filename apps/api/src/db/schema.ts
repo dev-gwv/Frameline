@@ -1,8 +1,17 @@
 import { sql } from 'drizzle-orm'
 import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import type {
-  EventHost, EventSettings, Exif, Tone, WatermarkSettings, WebsiteSection,
+  EventHost, EventSettings, Exif, GuestLinkPayload, NotificationPrefs, StoreSettings, StudioAppConfig, StudioFaq, StudioService,
+  StudioTestimonial, SocialLink, Tone, WatermarkSettings, WebsiteSection,
 } from '@frameline/shared'
+
+export interface StudioProfileJson {
+  services: StudioService[]
+  testimonials: StudioTestimonial[]
+  faq: StudioFaq[]
+  socialLinks: SocialLink[]
+  portfolioLinks: string[]
+}
 
 /**
  * D1 schema. Conventions:
@@ -76,7 +85,15 @@ export const studios = sqliteTable('studios', {
   walletPaise: integer('wallet_paise').notNull().default(0),
   renewalMultiplier: real('renewal_multiplier').notNull().default(2),
   createdAt: ts('created_at').notNull(),
-}, (t) => [uniqueIndex('studios_handle_uq').on(t.handle)])
+  coverUrl: text('cover_url'),
+  studioType: text('studio_type'),
+  referralSource: text('referral_source'),
+  profile: json<StudioProfileJson>('profile'),
+  app: json<StudioAppConfig>('app'),
+  followers: integer('followers').notNull().default(0),
+  couponsRedeemed: json<string[]>('coupons_redeemed').notNull().default(sql`'[]'`),
+  storeSettings: json<StoreSettings>('store_settings'),
+}, (t) => [uniqueIndex('studios_handle_uq').on(t.handle), uniqueIndex('studios_follow_uq').on(t.followCode)])
 
 export const memberships = sqliteTable('memberships', {
   id: text('id').primaryKey(),
@@ -87,6 +104,7 @@ export const memberships = sqliteTable('memberships', {
   eventIds: json<string[]>('event_ids').notNull().default(sql`'[]'`),
   createdAt: ts('created_at').notNull(),
   lastActiveAt: ts('last_active_at'),
+  notificationPrefs: json<NotificationPrefs>('notification_prefs'),
 }, (t) => [uniqueIndex('memberships_uq').on(t.studioId, t.userId), index('memberships_user_idx').on(t.userId)])
 
 export const teamInvites = sqliteTable('team_invites', {
@@ -162,7 +180,10 @@ export const photos = sqliteTable('photos', {
   source: text('source', { enum: ['web', 'camera', 'drive', 'guest', 'desktop'] }).notNull().default('web'),
   quality: text('quality', { enum: ['web', 'original'] }).notNull().default('web'),
   createdAt: ts('created_at').notNull(),
+  reviewStatus: text('review_status', { enum: ['pending', 'approved'] }),
+  enhancedFrom: text('enhanced_from'),
 }, (t) => [
+  index('photos_r2key_idx').on(t.r2Key),
   index('photos_event_capture_idx').on(t.eventId, t.capturedAt, t.id),
   index('photos_album_capture_idx').on(t.albumId, t.capturedAt, t.id),
   index('photos_album_name_idx').on(t.albumId, t.filename, t.id),
@@ -206,10 +227,13 @@ export const uploads = sqliteTable('uploads', {
   quality: text('quality', { enum: ['web', 'original'] }).notNull(),
   mode: text('mode', { enum: ['s3', 'proxy'] }).notNull(),
   files: json<UploadFileRecord[]>('files').notNull(),
+  options: json<UploadSessionOptions>('options'),
   status: text('status', { enum: ['pending', 'completed', 'aborted'] }).notNull().default('pending'),
   createdAt: ts('created_at').notNull(),
   expiresAt: ts('expires_at').notNull(),
 })
+
+export interface UploadSessionOptions { source?: 'web' | 'camera' | 'drive' | 'guest' | 'desktop'; uploadedBy?: string; watermark?: boolean; fast?: boolean }
 
 export interface UploadFileRecord {
   photoId: string
@@ -274,6 +298,9 @@ export const orders = sqliteTable('orders', {
   sharePaise: integer('share_paise').notNull(),
   status: text('status', { enum: ['paid', 'printing', 'refunded', 'pending', 'paid-direct'] }).notNull(),
   providerRef: text('provider_ref'),
+  photoIds: json<string[]>('photo_ids'),
+  buyerEmail: text('buyer_email'),
+  method: text('method', { enum: ['upi', 'card', 'netbanking', 'international'] }),
   at: ts('at').notNull(),
 }, (t) => [index('orders_studio_idx').on(t.studioId, t.at), uniqueIndex('orders_number_uq').on(t.studioId, t.number)])
 
@@ -309,6 +336,7 @@ export const cameras = sqliteTable('cameras', {
   today: integer('today').notNull().default(0),
   lastFile: text('last_file'),
   createdAt: ts('created_at').notNull(),
+  passwordHash: text('password_hash'),
 }, (t) => [index('cameras_studio_idx').on(t.studioId), uniqueIndex('cameras_ftp_uq').on(t.ftpUser)])
 
 export const smartQrs = sqliteTable('smart_qrs', {
@@ -321,6 +349,10 @@ export const smartQrs = sqliteTable('smart_qrs', {
   scans: integer('scans').notNull().default(0),
   color: text('color').notNull().default('#1B1712'),
   createdAt: ts('created_at').notNull(),
+  scheduledEventId: text('scheduled_event_id'),
+  scheduledAt: ts('scheduled_at'),
+  dotStyle: text('dot_style', { enum: ['square', 'rounded', 'dots'] }),
+  logoUrl: text('logo_url'),
 }, (t) => [uniqueIndex('qrs_slug_uq').on(t.studioId, t.slug)])
 
 export const broadcasts = sqliteTable('broadcasts', {
@@ -333,6 +365,8 @@ export const broadcasts = sqliteTable('broadcasts', {
   scheduledAt: ts('scheduled_at'),
   openRate: real('open_rate'),
   createdAt: ts('created_at').notNull(),
+  imageUrl: text('image_url'),
+  cancelledAt: ts('cancelled_at'),
 }, (t) => [index('broadcasts_studio_idx').on(t.studioId, t.createdAt)])
 
 export const tickets = sqliteTable('tickets', {
@@ -381,6 +415,8 @@ export const enquiries = sqliteTable('enquiries', {
   source: text('source').notNull(),
   note: text('note'),
   at: ts('at').notNull(),
+  status: text('status', { enum: ['new', 'replied'] }).notNull().default('new'),
+  eventId: text('event_id'),
 }, (t) => [index('enquiries_studio_idx').on(t.studioId, t.at)])
 
 // ── Platform ────────────────────────────────────────────────────────────────
@@ -408,3 +444,74 @@ export const auditLog = sqliteTable('audit_log', {
   requestId: text('request_id'),
   at: ts('at').notNull(),
 }, (t) => [index('audit_studio_idx').on(t.studioId, t.at)])
+
+// ── Added in 0001 ───────────────────────────────────────────────────────────
+export const purchases = sqliteTable('purchases', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  at: ts('at').notNull(),
+  description: text('description').notNull(),
+  kind: text('kind', { enum: ['plan', 'pack', 'credits', 'renewal', 'enhance', 'coupon'] }).notNull(),
+  amountPaise: integer('amount_paise').notNull(),
+  method: text('method', { enum: ['card', 'upi', 'credits', 'coupon'] }).notNull(),
+  invoiceNumber: text('invoice_number').notNull(),
+}, (t) => [index('purchases_studio_idx').on(t.studioId, t.at)])
+
+export const zipRequests = sqliteTable('zip_requests', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  eventId: text('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  albumId: text('album_id'),
+  photoIds: json<string[]>('photo_ids'),
+  email: text('email').notNull(),
+  photoCount: integer('photo_count').notNull(),
+  status: text('status', { enum: ['queued', 'ready', 'failed'] }).notNull().default('queued'),
+  requestedAt: ts('requested_at').notNull(),
+  readyAt: ts('ready_at'),
+  url: text('url'),
+}, (t) => [index('zips_event_idx').on(t.eventId, t.requestedAt)])
+
+export const cameraUploads = sqliteTable('camera_uploads', {
+  id: text('id').primaryKey(),
+  cameraId: text('camera_id').notNull().references(() => cameras.id, { onDelete: 'cascade' }),
+  filename: text('filename').notNull(),
+  at: ts('at').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  status: text('status', { enum: ['uploaded', 'failed', 'skipped'] }).notNull(),
+  photoId: text('photo_id'),
+  error: text('error'),
+}, (t) => [index('camera_uploads_idx').on(t.cameraId, t.at)])
+
+export const usageReports = sqliteTable('usage_reports', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  status: text('status', { enum: ['processing', 'ready'] }).notNull(),
+  requestedAt: ts('requested_at').notNull(),
+  readyAt: ts('ready_at'),
+  csv: text('csv'),
+}, (t) => [index('usage_reports_idx').on(t.studioId, t.requestedAt)])
+
+export const guestLinks = sqliteTable('guest_links', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  eventId: text('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  payload: json<GuestLinkPayload>('payload').notNull(),
+  createdBy: text('created_by'),
+  createdAt: ts('created_at').notNull(),
+})
+
+export const studioFollows = sqliteTable('studio_follows', {
+  studioId: text('studio_id').notNull(),
+  followerKey: text('follower_key').notNull(),
+  at: ts('at').notNull(),
+}, (t) => [primaryKey({ columns: [t.studioId, t.followerKey] })])
+
+export const renewalLinks = sqliteTable('renewal_links', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  eventId: text('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  pricePaise: integer('price_paise').notNull(),
+  createdAt: ts('created_at').notNull(),
+  expiresAt: ts('expires_at').notNull(),
+  paidAt: ts('paid_at'),
+})

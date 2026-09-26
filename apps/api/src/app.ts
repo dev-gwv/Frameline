@@ -13,6 +13,7 @@ import { limits } from './middleware/rate-limit'
 import { requestId } from './middleware/request-id'
 import { userFromToken } from './middleware/auth'
 import { apiVersionHeader } from './middleware/versioning'
+import { accountRoutes } from './routes/account'
 import { authRoutes } from './routes/auth'
 import { businessRoutes } from './routes/business'
 import { eventRoutes } from './routes/events'
@@ -102,6 +103,7 @@ export function createApp() {
 
   v1.route('/auth', authRoutes)
   v1.route('/', studioRoutes)
+  v1.route('/', accountRoutes)
   v1.route('/', eventRoutes)
   v1.route('/', photoRoutes)
   v1.route('/', uploadRoutes)

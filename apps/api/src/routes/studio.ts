@@ -1,7 +1,8 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm'
 import { getDb, schema } from '../db/client'
-import { studioOut, usageOut, websiteOut } from '../db/mappers'
+import { appConfig, studioOut, usageOut, watermarkOut, websiteOut } from '../db/mappers'
+import { creditWallet, recordPurchase } from '../services/billing'
 import { Conflict, NotFound } from '../lib/errors'
 import { newId, nowIso } from '../lib/ids'
 import { toMinor, toMajor } from '../lib/money'
@@ -77,7 +78,18 @@ studioRoutes.openapi(createRoute({
     const [taken] = await db.select({ id: schema.studios.id }).from(schema.studios).where(eq(schema.studios.handle, patch.handle)).limit(1)
     if (taken && taken.id !== m.studioId) throw new Conflict(`The handle "${patch.handle}" is taken. Try another.`, 'handle_taken')
   }
-  if (Object.keys(patch).length) await db.update(schema.studios).set(patch).where(eq(schema.studios.id, m.studioId)).run()
+  const { services, testimonials, faq, socialLinks, portfolioLinks, app, ...columns } = patch
+  const current = await loadStudio(db, m.studioId)
+  const set: Partial<typeof schema.studios.$inferInsert> = { ...columns }
+  if (services || testimonials || faq || socialLinks || portfolioLinks) {
+    const prev = studioOut(current)
+    set.profile = {
+      services: services ?? prev.services, testimonials: testimonials ?? prev.testimonials, faq: faq ?? prev.faq,
+      socialLinks: socialLinks ?? prev.socialLinks, portfolioLinks: portfolioLinks ?? prev.portfolioLinks,
+    }
+  }
+  if (app) set.app = { ...appConfig(current.app), ...app }
+  if (Object.keys(set).length) await db.update(schema.studios).set(set).where(eq(schema.studios.id, m.studioId)).run()
   audit(c, 'studio.update', { type: 'studio', id: m.studioId }, { fields: Object.keys(patch) })
   emit(c, m.studioId, 'studio')
   return c.json(studioOut(await loadStudio(db, m.studioId)), 200)
@@ -99,11 +111,11 @@ studioRoutes.openapi(createRoute({
   const m = membershipOf(c)
   const { amount } = c.req.valid('json')
   const db = getDb(c.env.DB)
-  const s = schema.studios
-  await db.update(s).set({ walletPaise: sql`${s.walletPaise} + ${toMinor(amount)}` }).where(eq(s.id, m.studioId)).run()
+  await creditWallet(db, m.studioId, toMinor(amount), `Wallet top-up · ₹${amount}`)
+  await recordPurchase(db, m.studioId, { description: `Wallet credits · ₹${amount}`, kind: 'credits', amountPaise: toMinor(amount), method: 'card' })
   const row = await loadStudio(db, m.studioId)
   audit(c, 'billing.credits_added', { type: 'studio', id: m.studioId }, { amountPaise: toMinor(amount) })
-  emit(c, m.studioId, 'usage')
+  emit(c, m.studioId, 'usage', 'misc')
   return c.json({ walletCredits: toMajor(row.walletPaise) }, 200)
 })
 
@@ -115,7 +127,7 @@ studioRoutes.openapi(createRoute({
 }), async (c) => {
   const [row] = await getDb(c.env.DB).select().from(schema.watermarks).where(eq(schema.watermarks.studioId, membershipOf(c).studioId)).limit(1)
   if (!row) throw new NotFound('Watermark')
-  return c.json(row.settings, 200)
+  return c.json(watermarkOut(row.settings), 200)
 })
 
 studioRoutes.openapi(createRoute({
@@ -129,7 +141,7 @@ studioRoutes.openapi(createRoute({
   const db = getDb(c.env.DB)
   const [row] = await db.select().from(schema.watermarks).where(eq(schema.watermarks.studioId, m.studioId)).limit(1)
   if (!row) throw new NotFound('Watermark')
-  const next = { ...row.settings, ...patch, applyTo: { ...row.settings.applyTo, ...(patch.applyTo ?? {}) } }
+  const next = watermarkOut({ ...row.settings, ...patch, applyTo: { ...row.settings.applyTo, ...(patch.applyTo ?? {}) } })
   await db.update(schema.watermarks).set({ settings: next, updatedAt: nowIso() }).where(eq(schema.watermarks.studioId, m.studioId)).run()
   emit(c, m.studioId, 'misc')
   return c.json(next, 200)
@@ -164,7 +176,7 @@ studioRoutes.openapi(createRoute({
 })
 
 // ── Team ───────────────────────────────────────────────────────────────────
-function accessLabel(role: 'owner' | 'editor' | 'uploader', eventNames: string[]): string {
+export function accessLabel(role: 'owner' | 'editor' | 'uploader', eventNames: string[]): string {
   if (role === 'owner') return 'All events, billing, payouts'
   if (role === 'editor') return 'All events'
   return eventNames.length ? `${eventNames.join(', ')} only` : 'Assigned events only'
@@ -189,8 +201,8 @@ studioRoutes.openapi(createRoute({
   }
   const label = (role: 'owner' | 'editor' | 'uploader', ids: string[]) => accessLabel(role, ids.map((id) => names.get(id)).filter((x): x is string => !!x))
   const items = [
-    ...members.map((r) => ({ id: r.u.id, name: r.u.name, email: r.u.email, role: r.m.role, access: label(r.m.role, r.m.eventIds), lastActive: r.m.lastActiveAt ?? r.u.lastActiveAt ?? '' })),
-    ...invites.map((i) => ({ id: i.id, name: i.email.split('@')[0], email: i.email, role: i.role, access: `${label(i.role, i.eventIds)} · invite pending`, lastActive: '' })),
+    ...members.map((r) => ({ id: r.u.id, name: r.u.name, email: r.u.email, role: r.m.role, access: label(r.m.role, r.m.eventIds), lastActive: r.m.lastActiveAt ?? r.u.lastActiveAt ?? '', eventIds: r.m.eventIds })),
+    ...invites.map((i) => ({ id: i.id, name: i.email.split('@')[0], email: i.email, role: i.role, access: `${label(i.role, i.eventIds)} · invite pending`, lastActive: '', eventIds: i.eventIds, pending: true })),
   ]
   return c.json({ items, nextCursor: null }, 200)
 })
@@ -221,7 +233,7 @@ studioRoutes.openapi(createRoute({
     await db.insert(schema.memberships).values({ id: newId('mem'), studioId: m.studioId, userId: existingUser.id, role, eventIds: assigned, createdAt: nowIso() }).run()
     audit(c, 'team.member_added', { type: 'user', id: existingUser.id }, { role })
     emit(c, m.studioId, 'misc')
-    return c.json({ id: existingUser.id, name: existingUser.name, email, role, access: accessLabel(role, []), lastActive: existingUser.lastActiveAt ?? '' }, 201)
+    return c.json({ id: existingUser.id, name: existingUser.name, email, role, access: accessLabel(role, []), lastActive: existingUser.lastActiveAt ?? '', eventIds: assigned }, 201)
   }
   const [pending] = await db.select().from(schema.teamInvites)
     .where(and(eq(schema.teamInvites.studioId, m.studioId), eq(schema.teamInvites.email, email), isNull(schema.teamInvites.acceptedAt), gt(schema.teamInvites.expiresAt, nowIso()))).limit(1)
@@ -239,5 +251,5 @@ studioRoutes.openapi(createRoute({
   })
   audit(c, 'team.invited', { type: 'invite', id }, { email, role })
   emit(c, m.studioId, 'misc')
-  return c.json({ id, name: email.split('@')[0], email, role, access: `${accessLabel(role, [])} · invite pending`, lastActive: '' }, 201)
+  return c.json({ id, name: email.split('@')[0], email, role, access: `${accessLabel(role, [])} · invite pending`, lastActive: '', eventIds: assigned, pending: true }, 201)
 })

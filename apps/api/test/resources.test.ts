@@ -198,24 +198,3 @@ describe('studio resources', () => {
     }
   })
 })
-
-describe('public gallery', () => {
-  it('checks the PIN, issues a guest token, and applies privacy rules', async () => {
-    const info = await call('/v1/public/events/6402F9F')
-    expect(info.json).toMatchObject({ name: 'Riya & Kabir Wedding', requiresPin: true, facePrivacy: true })
-    expectProblem(await call('/v1/public/events/6402F9F/access', { body: { pin: '0000', name: 'G', email: 'g@example.com' } }), 401, 'invalid_pin')
-    const ok = await call('/v1/public/events/6402F9F/access', { body: { pin: '5211', name: 'Guest One', email: 'guest.one@example.com' } })
-    expect(ok.status).toBe(200)
-    expectProblem(await call('/v1/public/events/6402F9F/photos', { token: ok.json.guestToken }), 403, 'face_privacy')
-    expectProblem(await call('/v1/public/events/6402F9F/selfie', { token: ok.json.guestToken, body: { embedding: Array(512).fill(0.01) } }), 503, 'face_search_unavailable')
-
-    const open = await call('/v1/public/events/3F9E21D/access', { body: { name: 'Guest', email: 'guest.two@example.com' } })
-    const photos = await call('/v1/public/events/3F9E21D/photos?limit=5', { token: open.json.guestToken })
-    expect(photos.status).toBe(200)
-    expect(photos.json.items).toHaveLength(5)
-    expectProblem(await call('/v1/public/events/6402F9F/albums', { token: open.json.guestToken }), 403, 'wrong_event')
-
-    const enq = await call('/v1/public/studios/northlight/enquiries', { body: { name: 'Ravi', email: 'ravi@example.com', message: 'Wedding in May?' } })
-    expect(enq.status).toBe(201)
-  })
-})

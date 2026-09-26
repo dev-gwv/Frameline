@@ -44,6 +44,7 @@ export const SEED_STUDIO_ID = 'st_northlight'
 export const SEED_USERS = { owner: 'u1', editor: 'u2', uploader: 'u3' } as const
 
 const TABLES_IN_DELETE_ORDER = [
+  'guest_links', 'renewal_links', 'zip_requests', 'camera_uploads', 'usage_reports', 'purchases', 'studio_follows',
   'ticket_messages', 'tickets', 'faces', 'photos', 'people', 'films', 'guests', 'access_requests', 'uploads', 'albums',
   'cameras', 'smart_qrs', 'broadcasts', 'enquiries', 'activity', 'orders', 'ledger_entries', 'prices', 'watermarks', 'websites',
   'team_invites', 'memberships', 'events', 'refresh_tokens', 'otp_codes', 'idempotency_keys', 'audit_log', 'studios', 'users',
@@ -68,12 +69,16 @@ export function buildSeedSql(opts: { photoCap?: number; reset?: boolean; seed?: 
     plan_id: s.usage.planId, plan_period: s.usage.period, valid_till: s.usage.validTill, photos_used: s.usage.photosUsed,
     photos_limit: s.usage.photosLimit, guest_reserved: s.usage.guestReserved, wallet_paise: paise(s.usage.walletCredits),
     renewal_multiplier: s.usage.renewalMultiplier, created_at: created,
+    cover_url: s.studio.coverUrl ?? null, studio_type: s.studio.studioType ?? null, referral_source: s.studio.referralSource ?? null,
+    profile: { services: s.studio.services, testimonials: s.studio.testimonials, faq: s.studio.faq, socialLinks: s.studio.socialLinks, portfolioLinks: s.studio.portfolioLinks },
+    app: s.studio.app, followers: s.studio.followers, coupons_redeemed: [], store_settings: s.storeSettings,
   }]))
 
   const assigned: Record<string, string[]> = { uploader: ['ev_tessera'] }
   stmts.push(...inserts('memberships', s.team.map((m, i) => ({
     id: `mem_${m.id}`, studio_id: sid, user_id: m.id, role: m.role, event_ids: assigned[m.role] ?? [],
     created_at: new Date(Date.parse(created) + i * 1000).toISOString(), last_active_at: m.lastActive,
+    notification_prefs: m.role === 'owner' ? s.notificationPrefs : null,
   }))))
 
   stmts.push(...inserts('events', s.events.map((e) => ({
@@ -104,6 +109,7 @@ export function buildSeedSql(opts: { photoCap?: number; reset?: boolean; seed?: 
     id: p.id, event_id: p.eventId, album_id: p.albumId, studio_id: sid, filename: p.filename, seq: p.index, captured_at: p.capturedAt,
     tone: p.tone, url: p.url ?? null, r2_key: null, status: p.status, hidden: p.hidden, favourites: p.favourites, downloads: p.downloads,
     faces: p.faces, exif: p.exif, uploaded_by: p.uploadedBy, source: p.source, quality: 'web', created_at: p.capturedAt,
+    review_status: p.reviewStatus ?? null, enhanced_from: null,
   }))))
   stmts.push(...inserts('faces', photos.flatMap((p) => p.faces.map((f, k) => ({
     id: `${p.id}_f${k}`, photo_id: p.id, event_id: p.eventId, person_id: f.personId, box: f.box, vector_id: null,
@@ -151,6 +157,13 @@ export function buildSeedSql(opts: { photoCap?: number; reset?: boolean; seed?: 
   }]))
   stmts.push(...inserts('enquiries', s.enquiries.map((e) => ({
     id: e.id, studio_id: sid, name: e.name, phone: e.phone, email: e.email, message: e.message, source: e.source, note: e.note ?? null, at: e.at,
+    status: e.status, event_id: e.eventId ?? null,
+  }))))
+  stmts.push(...inserts('purchases', s.purchases.map((p) => ({
+    id: p.id, studio_id: sid, at: p.at, description: p.description, kind: p.kind, amount_paise: paise(p.amount), method: p.method, invoice_number: p.invoiceNumber,
+  }))))
+  stmts.push(...inserts('camera_uploads', s.cameraUploads.map((u) => ({
+    id: u.id, camera_id: u.cameraId, filename: u.filename, at: u.at, size_bytes: u.sizeBytes, status: u.status, photo_id: u.photoId ?? null, error: u.error ?? null,
   }))))
   return stmts
 }

@@ -1,8 +1,11 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { and, asc, count, eq, gt, inArray, max, ne, sql, type SQL } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, max, ne, sql, type SQL } from 'drizzle-orm'
+import { ENHANCE_COST, hash, tone } from '@frameline/shared'
 import type { Env } from '../env'
 import { getDb, schema, type DB } from '../db/client'
-import { albumOut, photoOut } from '../db/mappers'
+import { albumOut, photoOut, zipOut } from '../db/mappers'
+import { toMinor } from '../lib/money'
+import { debitWallet } from '../services/billing'
 import { BadRequest, NotFound, ValidationFailed } from '../lib/errors'
 import { background } from '../lib/http'
 import { newId, nowIso } from '../lib/ids'
@@ -10,7 +13,7 @@ import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, proble
 import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
 import { membershipOf, requireStudio } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
-import { Album, Photo } from '../schemas/domain'
+import { Album, Photo, ZipRequest } from '../schemas/domain'
 import { assertEventVisible, type Membership } from '../services/access'
 import { audit } from '../services/audit'
 import { albumForMember, eventForMember, recountStatements } from '../services/events'
@@ -109,8 +112,13 @@ async function deletePhotoRows(c: Parameters<typeof background>[0], db: DB, wher
     vectorIds.push(...f.map((x) => x.v).filter((v): v is string => !!v))
     await db.delete(p).where(inArray(p.id, ids)).run()
   }
-  const keys = doomed.flatMap((d) => (d.key ? [d.key] : []))
-  background(c, purgeObjects(c.env, keys, vectorIds))
+  // Copies share the original's file: only purge objects no remaining photo points at.
+  const keys = [...new Set(doomed.flatMap((d) => (d.key ? [d.key] : [])))]
+  const stillUsed = new Set<string>()
+  for (const part of chunk(keys)) {
+    for (const r of await db.select({ k: p.r2Key }).from(p).where(inArray(p.r2Key, part))) if (r.k) stillUsed.add(r.k)
+  }
+  background(c, purgeObjects(c.env, keys.filter((k) => !stillUsed.has(k)), vectorIds))
   return new Set(doomed.map((d) => d.eventId))
 }
 
@@ -131,6 +139,22 @@ photoRoutes.openapi(createRoute({
 })
 
 // ── Photos ─────────────────────────────────────────────────────────────────
+type PhotoFilterQuery = { albumId?: string; filter?: 'all' | 'people' | 'favourites' | 'hidden'; personId?: string }
+
+/** Shared WHERE for the photo list and the id list. No albumId = every regular album (guest uploads excluded). */
+export function photoFilter(eventId: string, q: PhotoFilterQuery): SQL {
+  const p = schema.photos
+  const conds: (SQL | undefined)[] = [eq(p.eventId, eventId)]
+  if (q.albumId) conds.push(eq(p.albumId, q.albumId))
+  else conds.push(sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${eventId} AND kind = 'album')`)
+  if (q.filter === 'hidden') conds.push(eq(p.hidden, true))
+  else if (q.filter === 'favourites') conds.push(gt(p.favourites, 0))
+  else if (q.filter === 'people') conds.push(ne(p.faces, '[]' as never))
+  if (q.personId) conds.push(sql`${p.id} IN (SELECT photo_id FROM faces WHERE person_id = ${q.personId})`)
+  return and(...conds)!
+}
+
+export const sortColumn = (sort?: 'capture' | 'name' | 'sequence') => sort === 'name' ? schema.photos.filename : sort === 'sequence' ? schema.photos.index : schema.photos.capturedAt
 const PhotoQuery = PageQuery.extend({
   albumId: z.string().max(128).optional().openapi({ description: 'Omit for all regular albums (guest uploads excluded).' }),
   sort: z.enum(['capture', 'name', 'sequence']).default('capture'),
@@ -154,15 +178,8 @@ photoRoutes.openapi(createRoute({
   const ev = await eventForMember(db, m, c.req.valid('param').id)
   const q = c.req.valid('query')
   const p = schema.photos
-  const conds: (SQL | undefined)[] = [eq(p.eventId, ev.id)]
-  if (q.albumId) conds.push(eq(p.albumId, q.albumId))
-  else conds.push(sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${ev.id} AND kind = 'album')`)
-  if (q.filter === 'hidden') conds.push(eq(p.hidden, true))
-  else if (q.filter === 'favourites') conds.push(gt(p.favourites, 0))
-  else if (q.filter === 'people') conds.push(ne(p.faces, '[]' as never))
-  if (q.personId) conds.push(sql`${p.id} IN (SELECT photo_id FROM faces WHERE person_id = ${q.personId})`)
-  const base = and(...conds)
-  const sortCol = q.sort === 'name' ? p.filename : q.sort === 'sequence' ? p.index : p.capturedAt
+  const base = photoFilter(ev.id, q)
+  const sortCol = sortColumn(q.sort)
   const keyOf = (r: typeof p.$inferSelect): [string | number, string] => [q.sort === 'name' ? r.filename : q.sort === 'sequence' ? r.index : r.capturedAt, r.id]
 
   const [{ total }] = await db.select({ total: count() }).from(p).where(base)
@@ -264,3 +281,171 @@ photoRoutes.openapi(createRoute({
   return c.body(null, 204)
 })
 
+
+const MAX_IDS = 20_000
+
+photoRoutes.openapi(createRoute({
+  method: 'get', path: '/events/{id}/photo-ids', tags: ['Photos'], summary: 'Every matching photo id (select-all, viewer navigation)', security,
+  description: `Same filters and sort as the photo list, ids only, up to ${MAX_IDS}.`,
+  middleware: [requireStudio('uploader')] as const,
+  request: { params: IdParam, query: PhotoQuery.omit({ limit: true, cursor: true, offset: true }) },
+  responses: { 200: json(z.object({ ids: z.array(z.string()), truncated: z.boolean() })), ...problems(401, 403, 404, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id)
+  const q = c.req.valid('query')
+  const p = schema.photos
+  const sortCol = sortColumn(q.sort)
+  const rows = await db.select({ id: p.id }).from(p).where(photoFilter(ev.id, q)).orderBy(asc(sortCol), asc(p.id)).limit(MAX_IDS + 1)
+  return c.json({ ids: rows.slice(0, MAX_IDS).map((r) => r.id), truncated: rows.length > MAX_IDS }, 200)
+})
+
+photoRoutes.openapi(createRoute({
+  method: 'post', path: '/photos/copy', tags: ['Photos'], summary: 'Copy photos into another album of the same event', security,
+  description: 'Copies share the original file (no extra storage, no extra photo credits).',
+  middleware: [requireStudio('editor', 'copy photos'), idempotent] as const,
+  request: { headers: IdempotencyHeader, body: body(z.object({ ids: Ids, albumId: z.string().max(128) })) },
+  responses: { 201: json(z.object({ items: z.array(Photo) }), 'Copied'), ...problems(401, 403, 404, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const { ids, albumId } = c.req.valid('json')
+  const target = await albumForMember(db, m, albumId)
+  const found = await photosOwned(db, m, ids)
+  if (found.some((f) => f.eventId !== target.eventId)) {
+    throw new ValidationFailed([{ field: 'albumId', in: 'body', message: 'Photos can only be copied to an album of the same event', code: 'cross_event_copy' }])
+  }
+  const p = schema.photos
+  const [{ top }] = await db.select({ top: max(p.index) }).from(p).where(eq(p.albumId, target.id))
+  const sources: (typeof p.$inferSelect)[] = []
+  for (const part of chunk(found.map((f) => f.id))) sources.push(...await db.select().from(p).where(inArray(p.id, part)))
+  const order = new Map(ids.map((id, i) => [id, i]))
+  sources.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+  const now = nowIso()
+  const copies = sources.map((src, i) => ({ ...src, id: newId('ph'), albumId: target.id, index: (top ?? 0) + i + 1, favourites: 0, downloads: 0, createdAt: now }))
+  const faceRows = copies.flatMap((cp, i) => sources[i].faces.map((f) => ({ id: newId('fc'), photoId: cp.id, eventId: cp.eventId, personId: f.personId, box: f.box, vectorId: null })))
+  if (copies.length) {
+    const [first, ...rest] = recountStatements(db, target.eventId)
+    await db.batch([...copies.map((r) => db.insert(p).values(r)), ...faceRows.map((f) => db.insert(schema.faces).values(f)), first, ...rest] as unknown as [typeof first])
+  }
+  emit(c, m.studioId, 'photos', 'albums', 'events')
+  return c.json({ items: copies.map((r) => photoOut(r, c.env.PUBLIC_MEDIA_BASE)) }, 201)
+})
+
+photoRoutes.openapi(createRoute({
+  method: 'post', path: '/photos/review', tags: ['Photos'], summary: 'Approve guest uploads (or send them back to review)', security,
+  middleware: [requireStudio('editor', 'review guest uploads')] as const,
+  request: { body: body(z.object({ ids: Ids, status: z.enum(['approved', 'pending']) })) },
+  responses: { 200: json(z.object({ updated: z.number().int() })), ...problems(401, 403, 404, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const { ids, status } = c.req.valid('json')
+  const found = await photosOwned(db, m, ids)
+  for (const part of chunk(found.map((f) => f.id))) await db.update(schema.photos).set({ reviewStatus: status }).where(inArray(schema.photos.id, part)).run()
+  audit(c, `photos.review_${status}`, undefined, { count: found.length })
+  emit(c, m.studioId, 'photos', 'albums')
+  return c.json({ updated: found.length }, 200)
+})
+
+photoRoutes.openapi(createRoute({
+  method: 'post', path: '/photos/{id}/enhance', tags: ['Photos'], summary: 'AI-enhance a photo', security,
+  description: `Debits ${ENHANCE_COST} credits (ledger \`credits-used\`, 402 when short). \`saveAs: new\` adds an enhanced copy next to the original; \`replace\` re-renders the photo in place. The processor applies the preset/prompt (simulated in dev).`,
+  middleware: [requireStudio('editor', 'enhance photos'), idempotent] as const,
+  request: {
+    params: IdParam, headers: IdempotencyHeader,
+    body: body(z.object({ preset: z.string().max(40).optional(), prompt: z.string().max(500).optional(), saveAs: z.enum(['new', 'replace']) })
+      .refine((b) => b.preset || b.prompt, { message: 'Pick a preset or describe the edit', path: ['preset'] })),
+  },
+  responses: { 200: json(Photo), ...problems(401, 402, 403, 404, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const id = c.req.valid('param').id
+  const o = c.req.valid('json')
+  const p = schema.photos
+  const [src] = await db.select().from(p).where(and(eq(p.id, id), eq(p.studioId, m.studioId))).limit(1)
+  if (!src) throw new NotFound('Photo', id)
+  const label = o.prompt ? `“${o.prompt.slice(0, 40)}”` : o.preset!
+  await debitWallet(db, m.studioId, toMinor(ENHANCE_COST), `AI enhance · ${src.filename} (${label})`)
+  const shifted = tone(hash(`${id}:${label}`))
+  let resultId = id
+  if (o.saveAs === 'new') {
+    const [{ top }] = await db.select({ top: max(p.index) }).from(p).where(eq(p.albumId, src.albumId))
+    resultId = newId('ph')
+    await db.insert(p).values({
+      ...src, id: resultId, index: (top ?? 0) + 1, filename: src.filename.replace(/(\.[^.]+)?$/, '-enhanced$1'), tone: shifted,
+      favourites: 0, downloads: 0, enhancedFrom: id, status: 'processing', createdAt: nowIso(),
+    }).run()
+    await db.batch(recountStatements(db, src.eventId))
+  } else {
+    await db.update(p).set({ tone: shifted, enhancedFrom: id, status: 'processing' }).where(eq(p.id, id)).run()
+  }
+  await c.env.PHOTO_QUEUE.send({ kind: 'process-photo', photoId: resultId, eventId: src.eventId, studioId: m.studioId, key: src.r2Key, quality: src.quality, enhance: { preset: o.preset, prompt: o.prompt } })
+  audit(c, 'photos.enhance', { type: 'photo', id }, { saveAs: o.saveAs, label })
+  emit(c, m.studioId, 'photos', 'albums', 'usage', 'misc')
+  const [out] = await db.select().from(p).where(eq(p.id, resultId)).limit(1)
+  return c.json(photoOut(out, c.env.PUBLIC_MEDIA_BASE), 200)
+})
+
+photoRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{id}/faces/reindex', tags: ['People'], summary: 'Re-run face recognition for an event', security,
+  middleware: [requireStudio('editor', 'reindex faces')] as const,
+  request: { params: IdParam },
+  responses: { 202: json(z.object({ queued: z.number().int() }), 'Queued'), ...problems(401, 403, 404) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id)
+  const p = schema.photos
+  const rows = await db.select({ id: p.id, key: p.r2Key, quality: p.quality }).from(p).where(and(eq(p.eventId, ev.id), eq(p.status, 'ready'), isNotNull(p.r2Key)))
+  const jobs = rows.map((r) => ({ body: { kind: 'process-photo' as const, photoId: r.id, eventId: ev.id, studioId: m.studioId, key: r.key, quality: r.quality, reindex: true } }))
+  for (let i = 0; i < jobs.length; i += 100) await c.env.PHOTO_QUEUE.sendBatch(jobs.slice(i, i + 100))
+  audit(c, 'faces.reindex', { type: 'event', id: ev.id }, { queued: jobs.length })
+  emit(c, m.studioId, 'photos')
+  return c.json({ queued: jobs.length }, 202)
+})
+
+photoRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{id}/zips', tags: ['Photos'], summary: 'Email a ZIP of an event, album or selection', security,
+  middleware: [requireStudio('editor', 'export photos'), idempotent] as const,
+  request: {
+    params: IdParam, headers: IdempotencyHeader,
+    body: body(z.object({ email: z.email().max(254), albumId: z.string().max(128).optional(), photoIds: z.array(z.string().max(128)).max(5000).optional() })),
+  },
+  responses: { 202: json(ZipRequest, 'Queued'), ...problems(401, 403, 404, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id)
+  const input = c.req.valid('json')
+  let photoCount = input.photoIds?.length ?? 0
+  if (!input.photoIds) {
+    const [{ n }] = await db.select({ n: count() }).from(schema.photos).where(photoFilter(ev.id, { albumId: input.albumId }))
+    photoCount = n
+  }
+  const row = {
+    id: newId('zip'), studioId: m.studioId, eventId: ev.id, albumId: input.albumId ?? null, photoIds: input.photoIds ?? null, email: input.email,
+    photoCount, status: 'queued' as const, requestedAt: nowIso(), readyAt: null, url: null,
+  }
+  await db.insert(schema.zipRequests).values(row).run()
+  await c.env.PHOTO_QUEUE.send({ kind: 'build-zip', zipId: row.id, studioId: m.studioId })
+  emit(c, m.studioId, 'misc')
+  return c.json(zipOut(row), 202)
+})
+
+photoRoutes.openapi(createRoute({
+  method: 'get', path: '/events/{id}/zips', tags: ['Photos'], summary: 'ZIP requests for an event', security,
+  middleware: [requireStudio('editor', 'export photos')] as const,
+  request: { params: IdParam, query: PageQuery },
+  responses: { 200: json(pageOf(ZipRequest, 'ZipPage')), ...problems(401, 403, 404) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id)
+  const { limit, cursor } = c.req.valid('query')
+  const t = schema.zipRequests
+  const rows = await db.select().from(t).where(and(eq(t.eventId, ev.id), afterCursor(t.requestedAt, t.id, 'desc', cursor))).orderBy(desc(t.requestedAt), desc(t.id)).limit(limit + 1)
+  return c.json(toPage(rows, limit, (r) => [r.requestedAt, r.id], zipOut), 200)
+})

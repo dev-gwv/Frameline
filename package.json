@@ -9,7 +9,8 @@
     "dev:admin": "pnpm --filter @frameline/admin dev",
     "dev:mobile": "pnpm --filter @frameline/mobile start",
     "dev:gallery": "pnpm --filter @frameline/gallery dev",
-    "dev:api": "pnpm --filter @frameline/api dev"
+    "dev:api": "pnpm --filter @frameline/api dev",
+    "test": "turbo run test"
   },
   "devDependencies": {
     "turbo": "^2.5.0",

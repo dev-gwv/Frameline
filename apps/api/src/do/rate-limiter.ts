@@ -32,6 +32,14 @@ export class RateLimiter extends DurableObject<Env> {
     return { success: true, limit, remaining: limit - log.length, reset: Math.max(1, Math.ceil((log[0] + windowMs - now) / 1000)) }
   }
 
+  /** Reports whether one more hit would be allowed, without recording it. */
+  async peek(limit: number, windowMs: number): Promise<RateLimitDecision> {
+    const now = Date.now()
+    const log = (this.log ??= (await this.ctx.storage.get<number[]>('log')) ?? []).filter((t) => t > now - windowMs)
+    const reset = log.length ? Math.max(1, Math.ceil((log[0] + windowMs - now) / 1000)) : 0
+    return { success: log.length < limit, limit, remaining: Math.max(0, limit - log.length), reset }
+  }
+
   /** Clears the window (used by tests and support tooling). */
   async reset(): Promise<void> {
     this.log = []

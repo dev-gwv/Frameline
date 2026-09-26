@@ -1,6 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import { and, asc, desc, eq, inArray, isNotNull } from 'drizzle-orm'
-import { PRESETS, defaultSettings, hash, tone } from '@frameline/shared'
+import { BASE_RENEWAL, PRESETS, RENEWAL_CREDIT_DISCOUNT, defaultSettings, hash, tone } from '@frameline/shared'
 import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
 import { accessRequestOut, eventOut, filmOut, guestOut, personOut } from '../db/mappers'
@@ -11,8 +11,11 @@ import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
 import { membershipOf, requireStudio } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
 import {
-  AccessRequest, EventPatch, EventSettingsPatch, EventStatus, Film, Guest, NewEventInput, Person, PhotoEvent,
+  AccessRequest, EventPatch, EventSettingsPatch, EventStatus, Film, Guest, GuestLinkPayload, NewEventInput, Person, PhotoEvent,
 } from '../schemas/domain'
+import { debitWallet, recordPurchase } from '../services/billing'
+import { createSignedLink } from '../services/guest-links'
+import { toMinor } from '../lib/money'
 import { audit } from '../services/audit'
 import { eventForMember, newPin } from '../services/events'
 import { background } from '../lib/http'
@@ -292,4 +295,84 @@ eventRoutes.openapi(createRoute({
   audit(c, approve ? 'access.approved' : 'access.declined', { type: 'access_request', id: req.id })
   emit(c, m.studioId, 'guests')
   return c.body(null, 204)
+})
+
+eventRoutes.openapi(createRoute({
+  method: 'patch', path: '/films/{id}', tags: ['Films'], summary: 'Rename a film or change its link', security,
+  middleware: [requireStudio('editor', 'edit films')] as const,
+  request: { params: IdParam, body: body(z.object({ name: z.string().trim().min(1).max(160), url: z.url().max(2048) }).partial().strict()) },
+  responses: { 200: json(Film), ...problems(401, 403, 404, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const id = c.req.valid('param').id
+  const [film] = await db.select().from(schema.films).where(eq(schema.films.id, id)).limit(1)
+  if (!film) throw new NotFound('Film', id)
+  await eventForMember(db, m, film.eventId)
+  const patch = c.req.valid('json')
+  if (Object.keys(patch).length) await db.update(schema.films).set(patch).where(eq(schema.films.id, id)).run()
+  emit(c, m.studioId, 'misc')
+  return c.json(filmOut({ ...film, ...patch }), 200)
+})
+
+// ── Renewals & personal links ──────────────────────────────────────────────
+eventRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{id}/renew', tags: ['Events'], summary: 'Renew an event for another year — owner', security,
+  description: `Base price ₹${BASE_RENEWAL}. Paying with wallet credits costs half. Card capture is simulated until Razorpay keys are configured.`,
+  middleware: [requireStudio('owner', 'renew events'), idempotent] as const,
+  request: { params: IdParam, headers: IdempotencyHeader, body: body(z.object({ payWith: z.enum(['credits', 'card']) })) },
+  responses: { 200: json(z.object({ event: PhotoEvent, charged: z.number(), payWith: z.enum(['credits', 'card']) })), ...problems(401, 402, 403, 404, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id)
+  const { payWith } = c.req.valid('json')
+  const charged = payWith === 'credits' ? BASE_RENEWAL * (1 - RENEWAL_CREDIT_DISCOUNT) : BASE_RENEWAL
+  if (payWith === 'credits') await debitWallet(db, m.studioId, toMinor(charged), `Renewal · ${ev.name} (+1 year)`)
+  await recordPurchase(db, m.studioId, { description: `Event renewal · ${ev.name}`, kind: 'renewal', amountPaise: toMinor(charged), method: payWith === 'credits' ? 'credits' : 'card' })
+  const expiresAt = new Date(Math.max(Date.now(), Date.parse(ev.expiresAt)) + 365 * 86_400_000).toISOString()
+  await db.update(schema.events).set({ expiresAt, ...(ev.status === 'expiring' || ev.status === 'archived' ? { status: 'live' as const } : {}) }).where(eq(schema.events.id, ev.id)).run()
+  audit(c, 'event.renewed', { type: 'event', id: ev.id }, { payWith, charged })
+  emit(c, m.studioId, 'events', 'usage', 'misc')
+  return c.json({ event: eventOut(await eventForMember(db, m, ev.id)), charged, payWith }, 200)
+})
+
+eventRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{id}/renewal-link', tags: ['Events'], summary: 'Create a renewal payment link for the client', security,
+  description: 'Price = base renewal × the studio’s renewal multiplier. The client pays on the gallery site (checkout TODO with Razorpay).',
+  middleware: [requireStudio('editor', 'create renewal links')] as const,
+  request: { params: IdParam },
+  responses: { 201: json(z.object({ url: z.string(), price: z.number(), expiresAt: z.string() }), 'Created'), ...problems(401, 403, 404) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id)
+  const [st] = await db.select({ mult: schema.studios.renewalMultiplier }).from(schema.studios).where(eq(schema.studios.id, m.studioId)).limit(1)
+  const price = BASE_RENEWAL * (st?.mult ?? 1)
+  const row = { id: newId('rl'), studioId: m.studioId, eventId: ev.id, pricePaise: toMinor(price), createdAt: nowIso(), expiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString() }
+  await db.insert(schema.renewalLinks).values(row).run()
+  return c.json({ url: `${c.env.GALLERY_URL.replace(/\/$/, '')}/renew/${row.id}`, price, expiresAt: row.expiresAt }, 201)
+})
+
+eventRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{id}/guest-links', tags: ['Events'], summary: 'Create a signed personal link (/s/ or /v/)', security,
+  middleware: [requireStudio('editor', 'create personal links')] as const,
+  request: { params: IdParam, body: body(GuestLinkPayload.omit({ e: true })) },
+  responses: {
+    201: json(z.object({ code: z.string(), kind: z.enum(['s', 'v']), path: z.string(), url: z.string(), payload: GuestLinkPayload }), 'Created'),
+    ...problems(401, 403, 404, 422),
+  },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id)
+  const input = c.req.valid('json')
+  if (input.album) {
+    const [a] = await db.select({ id: schema.albums.id }).from(schema.albums).where(and(eq(schema.albums.id, input.album), eq(schema.albums.eventId, ev.id))).limit(1)
+    if (!a) throw new NotFound('Album', input.album)
+  }
+  const link = await createSignedLink(c.env, m.studioId, ev.id, { ...input, e: ev.shortId }, c.get('user')?.id)
+  const path = `/${link.kind}/${link.code}`
+  audit(c, 'event.guest_link', { type: 'event', id: ev.id }, { kind: link.kind })
+  return c.json({ ...link, path, url: `${c.env.GALLERY_URL.replace(/\/$/, '')}${path}` }, 201)
 })

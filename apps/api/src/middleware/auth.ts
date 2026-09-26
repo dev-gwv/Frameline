@@ -81,7 +81,7 @@ export async function guestFromRequest(c: Context<AppEnv>): Promise<GuestClaims 
       ? new Unauthorized('Your gallery session has expired. Enter the PIN again.', 'guest_token_expired')
       : new Unauthorized('The gallery token is invalid.', 'invalid_guest_token')
   }
-  return { eventId: String(r.claims.sub), guestId: r.claims.gid as string | undefined, studioId: String(r.claims.sid) }
+  return { eventId: String(r.claims.sub), guestId: r.claims.gid as string | undefined, studioId: String(r.claims.sid), all: r.claims.all === true }
 }
 
 /** Handlers call these after middleware has run; they narrow the optional context vars. */

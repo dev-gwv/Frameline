@@ -49,7 +49,7 @@ export interface Env {
 
 export interface AuthUser { id: string; email: string; name: string; familyId?: string }
 
-export interface GuestClaims { eventId: string; guestId?: string; studioId: string }
+export interface GuestClaims { eventId: string; guestId?: string; studioId: string; /** May browse every photo (typed PIN / VIP). */ all?: boolean }
 
 /** Per-request context variables. */
 export interface Variables {
@@ -62,12 +62,22 @@ export interface Variables {
 
 export type AppEnv = { Bindings: Env; Variables: Variables }
 
-/** Message sent to the photo-processing queue after an upload completes. */
-export interface PhotoJob {
+/** Messages on the photo queue. */
+export type PhotoJob = ProcessPhotoJob | BuildZipJob
+
+export interface ProcessPhotoJob {
   kind: 'process-photo'
   photoId: string
   eventId: string
   studioId: string
   key: string | null
   quality: 'web' | 'original'
+  /** AI enhance request (preset or prompt) for the processor. */
+  enhance?: { preset?: string; prompt?: string }
+  /** Face re-index only: keep renditions, redo detection/embeddings. */
+  reindex?: boolean
+  /** Burn the studio watermark into the rendition (guest uploads with watermarkGuestUploads). */
+  watermark?: boolean
 }
+
+export interface BuildZipJob { kind: 'build-zip'; zipId: string; studioId: string }

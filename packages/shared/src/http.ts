@@ -1,6 +1,10 @@
-import type { ChangeTopic, FramelineApi, ListPhotosQuery, UploadFile } from './api'
 import type {
-  Album, Broadcast, Camera, EventSettings, Photo, PhotoEvent, SmartQR, Studio, TeamMember, Ticket, WatermarkSettings, Website,
+  ChangeTopic, FramelineApi, GuestLinkResult, ListPhotosQuery, PlanChange, RenewalLink, RenewalResult, ResolvedGuestLink, UploadFile, UploadOptions,
+} from './api'
+import type {
+  Album, Broadcast, Camera, CameraUpload, Enquiry, EventSettings, Guest, GuestSession, LedgerEntry, NotificationPrefs, Order, Photo, PhotoEvent,
+  Price, PublicEvent, Purchase, SmartQR, StoreSettings, Studio, StudioProfile, TeamMember, Ticket, Usage, UsageBreakdown, UsageReport,
+  WatermarkSettings, Website, ZipRequest,
 } from './types'
 import type { SeedState } from './seed'
 
@@ -143,6 +147,30 @@ export interface HttpApiOptions {
   onUploadProgress?: (p: UploadProgress) => void
   /** Files uploaded in parallel (default 3). */
   uploadConcurrency?: number
+  /** Where guest (gallery) session tokens are kept, per event short id. Defaults to memory. */
+  guestTokens?: GuestTokenStore
+}
+
+/** Guest sessions per gallery (key = upper-case event short id). Sync so it can wrap localStorage / MMKV. */
+export interface GuestTokenStore {
+  get(shortId: string): string | null
+  set(shortId: string, token: string): void
+  clear(shortId: string): void
+}
+
+export function memoryGuestTokenStore(): GuestTokenStore {
+  const m = new Map<string, string>()
+  return { get: (k) => m.get(k) ?? null, set: (k, v) => { m.set(k, v) }, clear: (k) => { m.delete(k) } }
+}
+
+/** Web helper: guest tokens in localStorage under `${prefix}.${SHORTID}`. */
+export function storageGuestTokenStore(prefix = 'frameline.guest', storage?: StorageLike): GuestTokenStore {
+  const s = (): StorageLike | undefined => storage ?? (globalThis as unknown as { localStorage?: StorageLike }).localStorage
+  return {
+    get: (k) => { try { return s()?.getItem(`${prefix}.${k}`) ?? null } catch { return null } },
+    set: (k, v) => { try { s()?.setItem(`${prefix}.${k}`, v) } catch { /* storage unavailable */ } },
+    clear: (k) => { try { s()?.removeItem(`${prefix}.${k}`) } catch { /* storage unavailable */ } },
+  }
 }
 
 export interface SessionResponse extends AuthTokensResponse {
@@ -181,6 +209,8 @@ interface RequestOptions {
   idempotent?: boolean | string
   /** Attach the bearer token and refresh on 401 (default true). */
   auth?: boolean
+  /** Guest call for this gallery short id: sends its guest token instead of the studio session. */
+  guest?: string
 }
 
 interface Page<T> { items: T[]; nextCursor: string | null }
@@ -199,7 +229,9 @@ const LOCAL_URL = /^(blob|file|content|ph|assets-library|data):/i
 
 const STUDIO_KEYS = ['name', 'handle', 'logoUrl', 'brandColor', 'phone', 'email', 'website', 'instagram', 'city', 'about'] as const
 const EVENT_KEYS = ['name', 'type', 'date', 'endDate', 'city', 'status', 'photoLimit', 'expiresAt', 'coverTones', 'hosts', 'highlights', 'plan'] as const
-const QR_KEYS = ['name', 'slug', 'eventId', 'target', 'color'] as const
+const QR_KEYS = ['name', 'slug', 'eventId', 'target', 'color', 'scheduledEventId', 'scheduledAt', 'dotStyle', 'logoUrl'] as const
+const STUDIO_PROFILE_KEYS = ['coverUrl', 'studioType', 'referralSource', 'services', 'testimonials', 'faq', 'socialLinks', 'portfolioLinks', 'app'] as const
+const WATERMARK_KEYS = ['mode', 'text', 'subtitle', 'position', 'size', 'opacity', 'font', 'applyTo', 'logoUrl', 'edgeOffset'] as const
 const WEBSITE_KEYS = ['published', 'template', 'headline', 'sections', 'customDomain'] as const
 
 export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
@@ -209,6 +241,15 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
   const maxRetryAfter = options.maxRetryAfterSeconds ?? 20
   const tokens = options.tokens
   const studioId = () => (typeof options.studioId === 'function' ? options.studioId() : options.studioId)
+  const guestTokens = options.guestTokens ?? memoryGuestTokenStore()
+  /** Last gallery a guest call went to (for calls that only carry a photo id). */
+  let lastGallery: string | undefined
+  const rememberSession = (session: GuestSession) => {
+    const k = session.shortId.toUpperCase()
+    guestTokens.set(k, session.token)
+    lastGallery = k
+  }
+  const g = (shortId: string) => { lastGallery = shortId.toUpperCase(); return lastGallery }
 
   // ── Session handling ──────────────────────────────────────────────────────
   let refreshing: Promise<boolean> | null = null
@@ -258,7 +299,8 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
   }
 
   async function request<T>(method: HttpMethod, path: string, opts: RequestOptions = {}): Promise<T> {
-    const auth = opts.auth ?? true
+    const guestKey = opts.guest !== undefined ? opts.guest.toUpperCase() : undefined
+    const auth = guestKey !== undefined ? false : (opts.auth ?? true)
     const idemKey = opts.idempotent === true ? uuid() : typeof opts.idempotent === 'string' ? opts.idempotent : undefined
     const retryable = method === 'GET' || method === 'PUT' || method === 'DELETE' || !!idemKey
     let attempt = 0
@@ -272,6 +314,9 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
       if (auth) {
         const at = await accessToken()
         if (at) headers.Authorization = `Bearer ${at}`
+      } else if (guestKey) {
+        const gt = guestTokens.get(guestKey)
+        if (gt) headers.Authorization = `Bearer ${gt}`
       }
       let res: Response
       try {
@@ -297,7 +342,11 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
         await sleep(Math.max(backoff(attempt++), (ra ?? 0) * 1000))
         continue
       }
-      if (!res.ok) throw await ApiError.fromResponse(res)
+      if (!res.ok) {
+        const err = await ApiError.fromResponse(res)
+        if (guestKey && (err.code === 'guest_token_expired' || err.code === 'invalid_guest_token')) guestTokens.clear(guestKey)
+        throw err
+      }
       if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T
       const text = await res.text()
       return (text ? JSON.parse(text) : undefined) as T
@@ -355,12 +404,13 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     files: { photoId: string; filename: string; key: string | null; parts: { partNumber: number; url: string }[] }[]
   }
 
-  async function uploadBatch(eventId: string, albumId: string, files: HttpUploadFile[], quality: 'web' | 'original'): Promise<Photo[]> {
+  async function uploadBatch(eventId: string, albumId: string, files: HttpUploadFile[], opts: UploadOptions): Promise<Photo[]> {
+    const quality = opts.quality
     const blobs = await Promise.all(files.map(fileBytes))
     const session = await request<UploadSession>('POST', `/v1/events/${enc(eventId)}/uploads`, {
       idempotent: true,
       body: {
-        albumId, quality,
+        albumId, quality, source: opts.source, uploadedBy: opts.uploadedBy, watermark: opts.watermark, fast: opts.fast,
         files: files.map((f, i) => ({
           filename: f.filename, size: blobs[i]?.size ?? f.size, contentType: f.contentType ?? (blobs[i]?.type || 'image/jpeg'),
           width: f.width, height: f.height, capturedAt: f.capturedAt,
@@ -475,7 +525,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     },
 
     getStudio: () => get<Studio>('/v1/studio'),
-    updateStudio: (patch) => request<Studio>('PATCH', '/v1/studio', { body: pick(patch, STUDIO_KEYS) }),
+    updateStudio: (patch) => request<Studio>('PATCH', '/v1/studio', { body: { ...pick(patch, STUDIO_KEYS), ...pick(patch, STUDIO_PROFILE_KEYS) } }),
     getUsage: () => get<SeedState['usage']>('/v1/studio/usage'),
 
     listEvents: () => listAll<PhotoEvent>('/v1/events'),
@@ -522,7 +572,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
       const skip = new Set(opts.skipIds ?? [])
       const list = (files as HttpUploadFile[]).filter((f) => !skip.has(f.filename))
       const created: Photo[] = []
-      for (const batch of chunks(list, 100)) created.push(...await uploadBatch(eventId, albumId, batch, opts.quality))
+      for (const batch of chunks(list, 100)) created.push(...await uploadBatch(eventId, albumId, batch, opts))
       return created
     },
 
@@ -546,18 +596,117 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     updateQR: (id, patch) => request<SmartQR>('PATCH', `/v1/qrs/${enc(id)}`, { body: pick(patch, QR_KEYS) }),
     createQR: (name, eventId) => request<SmartQR>('POST', '/v1/qrs', { body: { name, eventId }, idempotent: true }),
     listBroadcasts: () => listAll<Broadcast>('/v1/broadcasts'),
-    sendBroadcast: (input) => request<Broadcast>('POST', '/v1/broadcasts', { body: pick(input, ['title', 'body', 'audience', 'scheduledAt'] as const), idempotent: true }),
+    sendBroadcast: (input) => request<Broadcast>('POST', '/v1/broadcasts', { body: pick(input, ['title', 'body', 'audience', 'scheduledAt', 'imageUrl'] as const), idempotent: true }),
     listTickets: () => listAll<Ticket>('/v1/tickets'),
     createTicket: (input) => request<Ticket>('POST', '/v1/tickets', { body: pick(input, ['subject', 'eventId', 'platform', 'body'] as const), idempotent: true }),
     replyTicket: (id, body) => request<Ticket>('POST', `/v1/tickets/${enc(id)}/messages`, { body: { body }, idempotent: true }),
     listTeam: async () => (await get<Page<TeamMember>>('/v1/team')).items,
-    inviteMember: (email, role) => request<TeamMember>('POST', '/v1/team/invites', { body: { email, role }, idempotent: true }),
+    inviteMember: (email, role, eventIds) => request<TeamMember>('POST', '/v1/team/invites', { body: { email, role, eventIds }, idempotent: true }),
     getWatermark: () => get<WatermarkSettings>('/v1/watermark'),
-    updateWatermark: (patch) => request<WatermarkSettings>('PATCH', '/v1/watermark', { body: patch }),
+    updateWatermark: (patch) => request<WatermarkSettings>('PATCH', '/v1/watermark', { body: pick(patch, WATERMARK_KEYS) }),
     getWebsite: () => get<Website>('/v1/website'),
     updateWebsite: (patch) => request<Website>('PATCH', '/v1/website', { body: pick(patch, WEBSITE_KEYS) }),
     listEnquiries: () => listAll('/v1/enquiries'),
     addCredits: async (amount) => (await request<{ walletCredits: number }>('POST', '/v1/studio/credits', { body: { amount }, idempotent: true })).walletCredits,
+
+    // ── Studio: usage, billing ──────────────────────────────────────────────
+    getUsageBreakdown: () => get<UsageBreakdown>('/v1/studio/usage/breakdown'),
+    requestUsageReport: () => request<UsageReport>('POST', '/v1/studio/usage/report', { idempotent: true }),
+    getUsageReport: async () => (await get<{ report: UsageReport | null }>('/v1/studio/usage/report')).report,
+    updatePrices: async (prices) => (await request<{ items: Price[] }>('PUT', '/v1/prices', { body: { items: prices.map((p) => pick(p, ['id', 'label', 'detail', 'price'] as const)) } })).items,
+    getStoreSettings: () => get<StoreSettings>('/v1/store/settings'),
+    updateStoreSettings: (patch) => request<StoreSettings>('PATCH', '/v1/store/settings', { body: patch }),
+    requestPayout: (amount) => request<LedgerEntry>('POST', '/v1/payouts', { body: { amount }, idempotent: true }),
+    listPurchases: () => listAll<Purchase>('/v1/purchases'),
+    changePlan: (planId, period) => request<PlanChange>('POST', '/v1/studio/plan', { body: { planId, period }, idempotent: true }),
+    setRenewalMultiplier: (multiplier) => request<Usage>('PUT', '/v1/studio/renewal-multiplier', { body: { multiplier } }),
+    redeemCoupon: (code) => request<{ credits: number; walletCredits: number }>('POST', '/v1/studio/coupons', { body: { code }, idempotent: true }),
+    spendCredits: (amount, description) => request<{ walletCredits: number; entry: LedgerEntry }>('POST', '/v1/studio/credits/spend', { body: { amount, description }, idempotent: true }),
+
+    // ── Events: renewals, links ────────────────────────────────────────────
+    renewEvent: (eventId, opts) => request<RenewalResult>('POST', `/v1/events/${enc(eventId)}/renew`, { body: { payWith: opts.payWith }, idempotent: true }),
+    createRenewalLink: (eventId) => request<RenewalLink>('POST', `/v1/events/${enc(eventId)}/renewal-link`, { idempotent: true }),
+    createGuestLink: (eventId, payload) => request<GuestLinkResult>('POST', `/v1/events/${enc(eventId)}/guest-links`, { body: payload, idempotent: true }),
+
+    // ── Photos ─────────────────────────────────────────────────────────────
+    listPhotoIds: async (eventId, q = {}) => (await get<{ ids: string[] }>(`/v1/events/${enc(eventId)}/photo-ids`, { albumId: q.albumId, sort: q.sort, filter: q.filter, personId: q.personId })).ids,
+    async copyPhotosToAlbum(ids, albumId) {
+      const out: Photo[] = []
+      for (const part of chunks(ids, 500)) out.push(...(await request<{ items: Photo[] }>('POST', '/v1/photos/copy', { body: { ids: part, albumId }, idempotent: true })).items)
+      return out
+    },
+    async setPhotoReview(ids, status) {
+      for (const part of chunks(ids, 500)) await request('POST', '/v1/photos/review', { body: { ids: part, status } })
+    },
+    enhancePhoto: (photoId, opts) => request<Photo>('POST', `/v1/photos/${enc(photoId)}/enhance`, { body: opts, idempotent: true }),
+    reindexFaces: (eventId) => request<{ queued: number }>('POST', `/v1/events/${enc(eventId)}/faces/reindex`, { idempotent: true }),
+    requestZip: (eventId, email, opts = {}) => request<ZipRequest>('POST', `/v1/events/${enc(eventId)}/zips`, { body: { email, ...opts }, idempotent: true }),
+    listZipRequests: (eventId) => listAll<ZipRequest>(`/v1/events/${enc(eventId)}/zips`),
+    updateFilm: (id, patch) => request('PATCH', `/v1/films/${enc(id)}`, { body: pick(patch, ['name', 'url'] as const) }),
+
+    // ── Tools ──────────────────────────────────────────────────────────────
+    updateCamera: (id, patch) => request<Camera>('PATCH', `/v1/cameras/${enc(id)}`, { body: pick(patch, ['label', 'eventId', 'albumId', 'mode'] as const) }),
+    deleteCamera: (id) => request<void>('DELETE', `/v1/cameras/${enc(id)}`),
+    resetCameraPassword: (id) => request<Camera>('POST', `/v1/cameras/${enc(id)}/password`, { idempotent: true }),
+    listCameraUploads: (cameraId) => listAll<CameraUpload>(`/v1/cameras/${enc(cameraId)}/uploads`),
+    clearCameraUploads: (cameraId) => request<void>('DELETE', `/v1/cameras/${enc(cameraId)}/uploads`),
+    deleteQR: (id) => request<void>('DELETE', `/v1/qrs/${enc(id)}`),
+    cancelBroadcast: (id) => request<Broadcast>('POST', `/v1/broadcasts/${enc(id)}/cancel`, { idempotent: true }),
+    deleteBroadcast: (id) => request<void>('DELETE', `/v1/broadcasts/${enc(id)}`),
+    updateMember: (id, patch) => request<TeamMember>('PATCH', `/v1/team/${enc(id)}`, { body: patch }),
+    removeMember: (id) => request<void>('DELETE', `/v1/team/${enc(id)}`),
+    getNotificationPrefs: () => get<NotificationPrefs>('/v1/me/notifications'),
+    updateNotificationPrefs: (patch) => request<NotificationPrefs>('PUT', '/v1/me/notifications', { body: patch }),
+    updateEnquiry: (id, patch) => request<Enquiry>('PATCH', `/v1/enquiries/${enc(id)}`, { body: pick(patch, ['status', 'note'] as const) }),
+
+    // ── Guest side ─────────────────────────────────────────────────────────
+    getPublicEvent: (shortId) => request<PublicEvent>('GET', `/v1/public/events/${enc(shortId)}`, { guest: g(shortId) }),
+    async verifyPin(shortId, pin) {
+      const session = await request<GuestSession>('POST', `/v1/public/events/${enc(shortId)}/pin`, { body: { pin }, guest: g(shortId) })
+      rememberSession(session)
+      return session
+    },
+    async registerGuest(shortId, input) {
+      const session = await request<GuestSession & { guest: Guest }>('POST', `/v1/public/events/${enc(shortId)}/register`, { body: input, guest: g(shortId) })
+      rememberSession(session)
+      return session
+    },
+    async listPublicPhotos(shortId, q = {}) {
+      const key = g(shortId)
+      const want = q.limit
+      const items: Photo[] = []
+      let total = 0
+      let cursor: string | undefined
+      for (let guard = 0; guard < 10_000; guard++) {
+        const pageSize = Math.min(200, want !== undefined ? Math.max(1, want - items.length) : 200)
+        const page = await request<Page<Photo> & { total: number }>('GET', `/v1/public/events/${enc(shortId)}/photos`, {
+          guest: key,
+          query: { albumId: q.albumId, personId: q.personId, sort: q.sort, highlights: q.highlights ? 'true' : undefined, limit: pageSize, ...(cursor ? { cursor } : { offset: q.offset }) },
+        })
+        total = page.total
+        items.push(...page.items)
+        if (!page.nextCursor || (want !== undefined && items.length >= want)) break
+        cursor = page.nextCursor
+      }
+      return { total, items }
+    },
+    searchFaces: (shortId, selfie) => request('POST', `/v1/public/events/${enc(shortId)}/faces/search`, { body: selfie, guest: g(shortId) }),
+    setFavourite: (photoId, on, shortId) => request<{ favourites: number }>('POST', `/v1/public/photos/${enc(photoId)}/favourite`, { body: { on }, guest: shortId ? g(shortId) : (lastGallery ?? '') }),
+    createEnquiry: (target, input) => 'shortId' in target
+      ? request<Enquiry>('POST', `/v1/public/events/${enc(target.shortId)}/enquiries`, { body: input, guest: g(target.shortId) })
+      : request<Enquiry>('POST', `/v1/public/studios/${enc(target.studio)}/enquiries`, { body: input, auth: false }),
+    createOrder: (shortId, input) => request<Order>('POST', `/v1/public/events/${enc(shortId)}/orders`, { body: input, guest: g(shortId), idempotent: true }),
+    async recordDownload(photoIds, shortId) {
+      for (const part of chunks(photoIds, 500)) await request<void>('POST', '/v1/public/downloads', { body: { photoIds: part }, guest: shortId ? g(shortId) : (lastGallery ?? '') })
+    },
+    getStudioProfile: (followCode) => request<StudioProfile>('GET', `/v1/public/studios/${enc(followCode)}`, { auth: false }),
+    followStudio: (followCode) => request<{ followers: number }>('POST', `/v1/public/studios/${enc(followCode)}/follow`, { guest: lastGallery ?? '' }),
+    async resolveGuestLink(code) {
+      const r = await request<ResolvedGuestLink>('GET', `/v1/public/links/${enc(code)}`, { auth: false })
+      if (r.session) rememberSession(r.session)
+      return r
+    },
+
 
     auth: {
       requestOtp: (email) => request('POST', '/v1/auth/otp/request', { body: { email }, auth: false }),

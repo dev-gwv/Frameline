@@ -28,7 +28,7 @@ describe('meta, errors, versioning', () => {
     const spec = await call('/v1/openapi.json')
     expect(spec.status).toBe(200)
     expect(spec.json.openapi).toBe('3.1.0')
-    for (const p of ['/v1/events', '/v1/events/{id}/photos', '/v1/auth/otp/request', '/v1/public/events/{shortId}/selfie']) expect(spec.json.paths).toHaveProperty([p])
+    for (const p of ['/v1/events', '/v1/events/{id}/photos', '/v1/auth/otp/request', '/v1/public/events/{shortId}/faces/search', '/v1/store/settings', '/v1/events/{id}/photo-ids']) expect(spec.json.paths).toHaveProperty([p])
     const docs = await call('/v1/docs')
     expect(docs.status).toBe(200)
     expect(String(docs.json)).toContain('/v1/openapi.json')

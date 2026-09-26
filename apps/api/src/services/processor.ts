@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm'
-import type { Env, PhotoJob } from '../env'
+import type { BuildZipJob, Env, PhotoJob, ProcessPhotoJob } from '../env'
+import { getMailer } from './mailer'
 import { getDb, schema } from '../db/client'
 import { newId } from '../lib/ids'
 import { publishTopics } from './realtime'
@@ -29,13 +30,13 @@ export interface ProcessResult {
 
 export interface PhotoProcessor {
   readonly name: string
-  process(job: PhotoJob): Promise<ProcessResult>
+  process(job: ProcessPhotoJob): Promise<ProcessResult>
 }
 
 export class HttpProcessor implements PhotoProcessor {
   readonly name = 'http'
   constructor(private url: string, private token?: string, private bucket?: string) {}
-  async process(job: PhotoJob): Promise<ProcessResult> {
+  async process(job: ProcessPhotoJob): Promise<ProcessResult> {
     const res = await fetch(`${this.url.replace(/\/$/, '')}/process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) },
@@ -46,14 +47,17 @@ export class HttpProcessor implements PhotoProcessor {
   }
 }
 
-/** Dev stand-in: confirms the original exists and keeps client-reported dimensions. No faces. */
+/** Dev stand-in: confirms the original exists, keeps client-reported dimensions and any faces already known. */
 export class SimulatedProcessor implements PhotoProcessor {
   readonly name = 'simulated'
   constructor(private env: Env) {}
-  async process(job: PhotoJob): Promise<ProcessResult> {
+  async process(job: ProcessPhotoJob): Promise<ProcessResult> {
     const head = job.key ? await this.env.MEDIA.head(job.key) : null
-    const [photo] = await getDb(this.env.DB).select({ exif: schema.photos.exif }).from(schema.photos).where(eq(schema.photos.id, job.photoId)).limit(1)
-    return { width: photo?.exif.width || 6000, height: photo?.exif.height || 4000, sizeBytes: head?.size ?? photo?.exif.sizeBytes, faces: [] }
+    const [photo] = await getDb(this.env.DB).select({ exif: schema.photos.exif, faces: schema.photos.faces }).from(schema.photos).where(eq(schema.photos.id, job.photoId)).limit(1)
+    return {
+      width: photo?.exif.width || 6000, height: photo?.exif.height || 4000, sizeBytes: head?.size ?? photo?.exif.sizeBytes,
+      faces: (photo?.faces ?? []).map((f) => ({ box: f.box, personId: f.personId })),
+    }
   }
 }
 
@@ -62,7 +66,7 @@ export function getProcessor(env: Env): PhotoProcessor {
 }
 
 /** Applies a processing result: marks the photo ready, stores faces (D1 + Vectorize namespace = event id). */
-export async function applyResult(env: Env, job: PhotoJob, result: ProcessResult): Promise<boolean> {
+export async function applyResult(env: Env, job: ProcessPhotoJob, result: ProcessResult): Promise<boolean> {
   const db = getDb(env.DB)
   const [photo] = await db.select().from(schema.photos).where(eq(schema.photos.id, job.photoId)).limit(1)
   if (!photo) return false // deleted while processing
@@ -76,9 +80,14 @@ export async function applyResult(env: Env, job: PhotoJob, result: ProcessResult
     }
   })
   const index = vectorIndex(env)
+  // Re-processing (retries, re-index) replaces the photo's faces.
+  const old = await db.select({ v: schema.faces.vectorId }).from(schema.faces).where(eq(schema.faces.photoId, photo.id))
+  const oldVectors = old.map((o) => o.v).filter((v): v is string => !!v)
+  if (index && oldVectors.length) await index.deleteByIds(oldVectors).catch(() => undefined)
   if (vectors.length && index) await index.upsert(vectors)
 
   await db.batch([
+    db.delete(schema.faces).where(eq(schema.faces.photoId, photo.id)),
     db.update(schema.photos).set({
       status: 'ready',
       url: result.previewUrl ?? photo.url,
@@ -98,6 +107,7 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
   for (const msg of batch.messages) {
     const job = msg.body
     try {
+      if (job.kind === 'build-zip') { await buildZip(env, job); msg.ack(); continue }
       if (job.kind !== 'process-photo') { msg.ack(); continue }
       const result = await processor.process(job)
       if (await applyResult(env, job, result)) {
@@ -106,7 +116,7 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
       }
       msg.ack()
     } catch (e) {
-      console.error(JSON.stringify({ level: 'error', msg: 'photo processing failed', photoId: job.photoId, attempt: msg.attempts, error: String(e) }))
+      console.error(JSON.stringify({ level: 'error', msg: 'queue job failed', job, attempt: msg.attempts, error: String(e) }))
       msg.retry({ delaySeconds: Math.min(300, 2 ** msg.attempts * 5) })
     }
   }
@@ -119,3 +129,25 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
     await publishTopics(env, studioId, ['photos', 'events']).catch(() => undefined)
   }
 }
+
+/**
+ * ZIP export. TODO(processor): stream a real ZIP into R2 from the Container. Until then the "ZIP" is a
+ * manifest of download links served by GET /v1/public/zips/:id, and the email points there.
+ */
+export async function buildZip(env: Env, job: BuildZipJob): Promise<void> {
+  const db = getDb(env.DB)
+  const [z] = await db.select().from(schema.zipRequests).where(eq(schema.zipRequests.id, job.zipId)).limit(1)
+  if (!z || z.status === 'ready') return
+  const url = `${(env.API_PUBLIC_URL ?? '').replace(/\/$/, '')}/v1/public/zips/${z.id}`
+  await db.update(schema.zipRequests).set({ status: 'ready', readyAt: new Date().toISOString(), url }).where(eq(schema.zipRequests.id, z.id)).run()
+  const [ev] = await db.select({ name: schema.events.name }).from(schema.events).where(eq(schema.events.id, z.eventId)).limit(1)
+  await getMailer(env).send({
+    to: z.email,
+    subject: `Your photos from ${ev?.name ?? 'Frameline'} are ready`,
+    text: `${z.photoCount} photos are ready to download: ${url}
+
+The link works for 7 days.`,
+  }).catch((e) => console.error(JSON.stringify({ level: 'error', msg: 'zip email failed', error: String(e) })))
+  await publishTopics(env, job.studioId, ['misc']).catch(() => undefined)
+}
+
