@@ -1,7 +1,7 @@
 import { useMutation, useQuery, type UseMutationOptions } from '@tanstack/react-query'
 import type { ID, ListPhotosQuery } from '@frameline/shared'
 import { useToast } from '@frameline/ui'
-import { useApi } from './api'
+import { errorMessage, useApi } from './api'
 
 /*
  * Query hooks for every screen. Keys start with a root listed in TOPIC_KEYS (lib/api.tsx)
@@ -54,7 +54,7 @@ export function useAction<TVars, TData = unknown>(
       onSuccess?.(data, vars, ctx, m)
     },
     onError: (err, vars, ctx, m) => {
-      toast.error(error ?? 'That didn’t work', err.message)
+      toast.error(error ?? 'That didn’t work', errorMessage(err))
       onError?.(err, vars, ctx, m)
     },
     ...rest,

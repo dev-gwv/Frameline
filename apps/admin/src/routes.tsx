@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType } from 'react'
-import { createBrowserRouter, Outlet } from 'react-router-dom'
+import { createBrowserRouter, Navigate, Outlet } from 'react-router-dom'
 import { AppShell } from './layout/AppShell'
 import { RequireAuth } from './lib/auth'
 import { RouteError, PageFallback } from './pages/system'
@@ -15,6 +15,8 @@ const page = (load: () => Promise<{ default: ComponentType }>) => {
  */
 export const router = createBrowserRouter([
   { path: '/login', element: page(() => import('./pages/auth/SignIn')), errorElement: <RouteError /> },
+  // Google sign-in returns here; AuthProvider stores the tokens from the URL fragment.
+  { path: '/auth/callback', element: <RequireAuth><Navigate to="/" replace /></RequireAuth>, errorElement: <RouteError /> },
   { path: '/setup', element: <RequireAuth>{page(() => import('./pages/auth/Setup'))}</RequireAuth>, errorElement: <RouteError /> },
   {
     element: <RequireAuth><Outlet /></RequireAuth>,
