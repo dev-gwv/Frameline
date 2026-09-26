@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CheckCircle2, ChevronDown, ChevronUp, Pause, Play, X } from 'lucide-react'
-import type { ID, UploadFile } from '@frameline/shared'
+import type { ID, UploadFile, UploadOptions } from '@frameline/shared'
 import { Button, Meter, useToast } from '@frameline/ui'
-import { useApi } from '../lib/api'
+import { errorMessage, useApi } from '../lib/api'
 
 /**
  * Global upload queue. Uploads keep running while the photographer moves around the
@@ -11,7 +11,7 @@ import { useApi } from '../lib/api'
 interface Job { id: string; eventId: ID; albumId: ID; albumName: string; total: number; done: number; paused: boolean; startedAt: number; bytes: number }
 interface UploadCtx {
   jobs: Job[]
-  start: (args: { eventId: ID; albumId: ID; albumName: string; files: UploadFile[]; quality: 'web' | 'original' }) => void
+  start: (args: { eventId: ID; albumId: ID; albumName: string; files: UploadFile[] } & UploadOptions) => void
   togglePause: (id: string) => void
   dismiss: (id: string) => void
 }
@@ -25,7 +25,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const [jobs, setJobs] = useState<Job[]>([])
   const paused = useRef(new Set<string>())
 
-  const start = useCallback<UploadCtx['start']>(({ eventId, albumId, albumName, files, quality }) => {
+  const start = useCallback<UploadCtx['start']>(({ eventId, albumId, albumName, files, ...opts }) => {
     const id = Math.random().toString(36).slice(2)
     const bytes = files.reduce((s, f) => s + f.size, 0)
     setJobs((j) => [...j, { id, eventId, albumId, albumName, total: files.length, done: 0, paused: false, startedAt: Date.now(), bytes }])
@@ -33,9 +33,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       for (let i = 0; i < files.length; i += BATCH) {
         while (paused.current.has(id)) await new Promise((r) => setTimeout(r, 300))
         try {
-          await api.uploadPhotos(eventId, albumId, files.slice(i, i + BATCH), { quality })
+          await api.uploadPhotos(eventId, albumId, files.slice(i, i + BATCH), opts)
         } catch (e) {
-          toast.error(`Upload to ${albumName} stopped`, (e as Error).message)
+          toast.error(`Upload to ${albumName} stopped`, errorMessage(e))
           return
         }
         setJobs((js) => js.map((j) => (j.id === id ? { ...j, done: Math.min(j.total, i + BATCH) } : j)))
