@@ -1,0 +1,108 @@
+/*
+ * Gilt design system — CSS tokens. Mirrors packages/shared/src/tokens.ts.
+ * Import after `@import "tailwindcss";` in each app's CSS entry.
+ */
+:root {
+  --paper: #FAF7F0; --surface: #FFFFFF; --sunk: #F3EEE3; --ink: #1B1712; --ink-2: #5E5548; --ink-3: #958B7B;
+  --line: #EAE2D3; --line-2: #DDD2BE;
+  --accent: #C08A2C; --accent-ink: #1E1508; --accent-soft: #F7EDD8; --accent-text: #8E6116; --marker: #D9A63A;
+  --ok: #3E8A5C; --ok-soft: #E4F1E8; --warn: #B9582A; --warn-soft: #FAE8DD; --bad: #B23D2E; --bad-soft: #F7E2DE;
+  --side: #15120E; --side-2: #1F1A14; --side-ink: #F2EADB; --side-ink-2: #A89D8A; --side-line: #2C251D; --side-gold: #F2D38A;
+  --gold: linear-gradient(135deg, #F2D38A 0%, #DDA848 46%, #B37C22 100%);
+  --shadow: 0 1px 2px rgba(40, 28, 10, .06), 0 10px 30px rgba(40, 28, 10, .07);
+  --shadow-lg: 0 20px 60px rgba(20, 14, 6, .28);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #0C0A08; --surface: #15120F; --sunk: #1D1914; --ink: #F3ECDF; --ink-2: #B7AC98; --ink-3: #7F7566;
+    --line: #28221B; --line-2: #372F25;
+    --accent: #E2B458; --accent-ink: #1A1206; --accent-soft: #2A2116; --accent-text: #EBC677; --marker: #F0C766;
+    --ok: #72C592; --ok-soft: #16281D; --warn: #E58C5A; --warn-soft: #33201A; --bad: #EA7E6B; --bad-soft: #361B17;
+    --side: #0F0D0A; --side-2: #1A1611; --side-line: #262019;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 12px 32px rgba(0, 0, 0, .45);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0C0A08; --surface: #15120F; --sunk: #1D1914; --ink: #F3ECDF; --ink-2: #B7AC98; --ink-3: #7F7566;
+  --line: #28221B; --line-2: #372F25;
+  --accent: #E2B458; --accent-ink: #1A1206; --accent-soft: #2A2116; --accent-text: #EBC677; --marker: #F0C766;
+  --ok: #72C592; --ok-soft: #16281D; --warn: #E58C5A; --warn-soft: #33201A; --bad: #EA7E6B; --bad-soft: #361B17;
+  --side: #0F0D0A; --side-2: #1A1611; --side-line: #262019;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 12px 32px rgba(0, 0, 0, .45);
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-sunk: var(--sunk);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-marker: var(--marker);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-side: var(--side);
+  --color-side-2: var(--side-2);
+  --color-side-ink: var(--side-ink);
+  --color-side-ink-2: var(--side-ink-2);
+  --color-side-line: var(--side-line);
+  --color-side-gold: var(--side-gold);
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-sans: "Manrope", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --shadow-card: var(--shadow);
+  --shadow-float: var(--shadow-lg);
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-modal: 14px;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: var(--font-sans); font-size: 14px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  ::selection { background: var(--accent-soft); color: var(--ink); }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+}
+
+@layer utilities {
+  .bg-gold { background: var(--gold); }
+  .text-gold { background: var(--gold); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .tnum { font-variant-numeric: tabular-nums lining-nums; }
+  .eyebrow { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); }
+  .scrollbar-thin { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+  .shimmer { position: relative; overflow: hidden; }
+  .shimmer::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(100deg, transparent 30%, rgba(242, 211, 138, .35) 50%, transparent 70%);
+    background-size: 200% 100%; animation: fl-shimmer 1.6s linear infinite;
+  }
+  .vignette::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 35%, transparent 40%, rgba(0, 0, 0, .28)); }
+}
+
+@keyframes fl-shimmer { from { background-position: 120% 0; } to { background-position: -80% 0; } }
+@keyframes fl-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fl-slide-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fl-slide-left { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}

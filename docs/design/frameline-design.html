@@ -1,0 +1,1319 @@
+<title>Frameline Product Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#FAF7F0; --surface:#FFFFFF; --sunk:#F3EEE3; --ink:#1B1712; --ink-2:#5E5548; --ink-3:#958B7B;
+  --line:#EAE2D3; --line-2:#DDD2BE;
+  --gold:linear-gradient(135deg,#F2D38A 0%,#DDA848 46%,#B37C22 100%);
+  --accent:#C08A2C; --accent-ink:#1E1508; --accent-soft:#F7EDD8; --accent-text:#8E6116;
+  --marker:#D9A63A;
+  --ok:#3E8A5C; --ok-soft:#E4F1E8; --warn:#B9582A; --warn-soft:#FAE8DD; --bad:#B23D2E; --bad-soft:#F7E2DE;
+  --side:#15120E; --side-2:#1F1A14; --side-ink:#F2EADB; --side-ink-2:#A89D8A; --side-line:#2C251D;
+  --shadow:0 1px 2px rgba(40,28,10,.06),0 10px 30px rgba(40,28,10,.07);
+  --display:"Fraunces",Georgia,"Times New Roman",serif;
+  --body:"Manrope","Segoe UI",system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --paper:#0C0A08; --surface:#15120F; --sunk:#1D1914; --ink:#F3ECDF; --ink-2:#B7AC98; --ink-3:#7F7566;
+  --line:#28221B; --line-2:#372F25;
+  --accent:#E2B458; --accent-ink:#1A1206; --accent-soft:#2A2116; --accent-text:#EBC677;
+  --marker:#F0C766;
+  --ok:#72C592; --ok-soft:#16281D; --warn:#E58C5A; --warn-soft:#33201A; --bad:#EA7E6B; --bad-soft:#361B17;
+  --side:#0F0D0A; --side-2:#1A1611; --side-line:#262019;
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 12px 32px rgba(0,0,0,.45);
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --paper:#0C0A08; --surface:#15120F; --sunk:#1D1914; --ink:#F3ECDF; --ink-2:#B7AC98; --ink-3:#7F7566;
+  --line:#28221B; --line-2:#372F25;
+  --accent:#E2B458; --accent-ink:#1A1206; --accent-soft:#2A2116; --accent-text:#EBC677;
+  --marker:#F0C766;
+  --ok:#72C592; --ok-soft:#16281D; --warn:#E58C5A; --warn-soft:#33201A; --bad:#EA7E6B; --bad-soft:#361B17;
+  --side:#0F0D0A; --side-2:#1A1611; --side-line:#262019;
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 12px 32px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.55;padding-inline:16px}
+.wrap{max-width:1380px;margin:0 auto;padding-block:20px 64px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;letter-spacing:-.01em;font-weight:600}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- page header ---------- */
+.top{display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:16px;padding-block:6px 20px;position:relative}
+.top::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,#DDA848 20%,#B37C22 80%,transparent);opacity:.7}
+.brand{display:flex;align-items:center;gap:14px}
+.logo{width:44px;height:44px;border-radius:11px;background:var(--side);display:grid;place-items:center;flex:none;box-shadow:inset 0 0 0 1px rgba(226,180,88,.35)}
+.logo i{display:block;width:24px;height:17px;border-radius:2px;background:var(--gold);position:relative}
+.logo i::after{content:"";position:absolute;inset:3.5px 5px;background:var(--side);border-radius:1px}
+.brand h1{font-size:32px;font-weight:600;line-height:1}
+.brand p{margin:5px 0 0;color:var(--ink-2);font-size:14px}
+.wn{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--line-2);color:var(--accent-text);padding:2px 7px;border-radius:5px;margin-left:8px;vertical-align:middle}
+.tabs{display:flex;gap:4px;background:var(--sunk);padding:4px;border-radius:11px;flex-wrap:wrap;border:1px solid var(--line)}
+.tabs button{border:0;background:transparent;padding:7px 14px;border-radius:8px;cursor:pointer;font-weight:600;font-size:14px;color:var(--ink-2)}
+.tabs button[aria-selected="true"]{background:var(--side);color:#F2D38A;box-shadow:var(--shadow)}
+
+/* ---------- screens view ---------- */
+.screens{display:grid;grid-template-columns:232px 1fr;gap:26px;margin-top:24px}
+.index{position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);align-self:start;display:flex;flex-direction:column;gap:14px;max-height:calc(100vh - 24px);overflow:auto;padding-right:4px}
+.index h4{font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin:0 0 4px}
+.index ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}
+.index button{width:100%;text-align:left;border:0;background:transparent;padding:6px 10px;border-radius:7px;cursor:pointer;font-size:14px;color:var(--ink-2);display:flex;gap:8px;align-items:baseline}
+.index button span{font-family:var(--mono);font-size:11px;color:var(--ink-3);min-width:18px}
+.index button em{margin-left:auto;font-style:normal;font-family:var(--mono);font-size:9.5px;color:var(--accent-text);border:1px solid var(--line-2);border-radius:4px;padding:0 4px}
+.index button:hover{background:var(--sunk);color:var(--ink)}
+.index button[aria-current="true"]{background:var(--accent-soft);color:var(--accent-text);font-weight:700}
+.index button[aria-current="true"] span{color:var(--accent-text)}
+.panelhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:end;gap:12px;margin-bottom:14px}
+.panelhead h2{font-size:28px}
+.panelhead .route{font-family:var(--mono);font-size:12.5px;color:var(--ink-2);background:var(--sunk);padding:3px 8px;border-radius:6px;border:1px solid var(--line)}
+.pager{display:flex;gap:6px}
+.pager button{border:1px solid var(--line-2);background:var(--surface);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;font-weight:700}
+.stage{position:relative;overflow:hidden;border-radius:14px;border:1px solid var(--line-2);background:var(--surface);box-shadow:var(--shadow)}
+.notes{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:18px;margin-top:20px}
+.note{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.note h5{margin:0 0 8px;font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.note p{margin:0}
+.note ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.pills{display:flex;flex-wrap:wrap;gap:6px}
+.pill{font-family:var(--mono);font-size:12px;background:var(--sunk);border:1px solid var(--line);padding:2px 8px;border-radius:999px;color:var(--ink-2)}
+
+/* ---------- MOCK (1280 x 800 canvas, scaled) ---------- */
+.mock{position:absolute;top:0;left:0;width:1280px;height:800px;transform-origin:0 0;font-size:13px;line-height:1.45;background:var(--paper);color:var(--ink);overflow:hidden;font-family:var(--body)}
+.chrome{height:34px;display:flex;align-items:center;gap:7px;padding:0 14px;background:var(--sunk);border-bottom:1px solid var(--line)}
+.chrome i{width:10px;height:10px;border-radius:50%;background:var(--line-2)}
+.chrome .url{margin-left:18px;font-family:var(--mono);font-size:11.5px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:3px 12px;min-width:380px}
+.m-app{display:grid;grid-template-columns:220px 1fr;height:766px}
+.m-app.col{grid-template-columns:62px 1fr}
+.m-side{background:var(--side);color:var(--side-ink);display:flex;flex-direction:column;padding:14px 10px;gap:1px;overflow:hidden;border-right:1px solid var(--side-line)}
+.m-logo{display:flex;align-items:center;gap:9px;padding:2px 6px 12px;font-family:var(--display);font-weight:600;font-size:18px;color:var(--side-ink)}
+.m-logo b{width:26px;height:26px;border-radius:7px;background:var(--side-2);display:grid;place-items:center;flex:none;box-shadow:inset 0 0 0 1px rgba(226,180,88,.35)}
+.m-logo b::after{content:"";width:14px;height:10px;border-radius:1.5px;background:var(--gold);box-shadow:inset 0 0 0 2.5px transparent}
+.m-k{display:flex;align-items:center;gap:8px;border:1px solid var(--side-line);background:var(--side-2);border-radius:7px;padding:6px 8px;color:var(--side-ink-2);margin-bottom:8px;font-size:12.5px}
+.m-k kbd{margin-left:auto;font-family:var(--mono);font-size:10.5px;border:1px solid var(--side-line);border-radius:4px;padding:0 4px}
+.m-grp{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#7C7162;padding:10px 8px 3px}
+.m-nav{display:flex;align-items:center;gap:10px;padding:5.5px 8px;border-radius:7px;color:var(--side-ink-2);font-weight:600;font-size:12.5px}
+.m-nav.on{background:rgba(226,180,88,.13);color:#F2D38A}
+.m-nav .ct{margin-left:auto;font-family:var(--mono);font-size:10px;background:rgba(226,180,88,.16);color:#F2D38A;padding:0 5px;border-radius:4px}
+.m-use{margin-top:auto;border-top:1px solid var(--side-line);padding:12px 6px 2px;font-size:11.5px;color:var(--side-ink-2)}
+.m-use .bar{height:5px;background:var(--side-2);border-radius:3px;margin:6px 0 4px;overflow:hidden}
+.m-use .bar i{display:block;height:100%;width:25%;background:var(--gold)}
+.m-app.col .m-side{align-items:center;padding:14px 8px}
+.m-app.col .m-nav{padding:8px;justify-content:center}
+.m-main{overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.m-head{display:flex;justify-content:space-between;align-items:flex-end;padding:22px 28px 16px;gap:16px}
+.m-head h1{font-size:25px}
+.m-sub{color:var(--ink-2);margin-top:3px}
+.m-crumb{color:var(--ink-3);font-size:12px;margin-bottom:3px}
+.m-actions{display:flex;gap:8px;align-items:center}
+.m-body{padding:0 28px 24px;flex:1;min-height:0}
+.i{flex:none;vertical-align:-3px}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);border-radius:8px;padding:6px 12px;font-weight:700;font-size:12.5px;white-space:nowrap}
+.btn.pri{background:var(--gold);border-color:transparent;color:var(--accent-ink);box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 1px 2px rgba(110,70,10,.3)}
+.btn.dark{background:var(--side);border-color:var(--side);color:#F2D38A}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--ink-2)}
+.btn.sm{padding:3px 8px;font-size:11.5px}
+.btn.lg{padding:10px 16px;font-size:14px;border-radius:10px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--sunk);color:var(--ink-2);white-space:nowrap}
+.chip.ok{background:var(--ok-soft);color:var(--ok)} .chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)} .chip.acc{background:var(--accent-soft);color:var(--accent-text)}
+.chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.cardp{padding:16px}
+.ct-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.ct-h h3{font-size:15px;font-weight:600}
+.lbl{font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.field{border:1px solid var(--line-2);background:var(--surface);border-radius:8px;padding:7px 10px;color:var(--ink);display:flex;align-items:center;gap:8px}
+.field.ph{color:var(--ink-3)}
+.fl{display:flex;flex-direction:column;gap:5px}
+.fl>span{font-size:12px;font-weight:700;color:var(--ink-2)}
+.tg{width:30px;height:17px;border-radius:9px;background:var(--line-2);position:relative;flex:none}
+.tg::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.tg.on{background:var(--gold)} .tg.on::after{left:15px}
+.seg{display:inline-flex;background:var(--sunk);border-radius:9px;padding:3px;gap:2px;border:1px solid var(--line)}
+.seg span{padding:4px 10px;border-radius:7px;font-weight:700;font-size:12px;color:var(--ink-2);display:inline-flex;align-items:center;gap:4px}
+.seg span.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(40,28,10,.12)}
+.row{display:flex;align-items:center;gap:12px}
+.srow{display:flex;align-items:center;gap:14px;padding:11px 0;border-top:1px solid var(--line)}
+.srow:first-of-type{border-top:0}
+.srow .tx{flex:1} .srow .tx b{display:block;font-weight:700;font-size:13px} .srow .tx small{color:var(--ink-2);font-size:12px}
+.ic{width:30px;height:30px;border-radius:8px;background:var(--accent-soft);display:grid;place-items:center;color:var(--accent-text);flex:none}
+table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+table.t th{text-align:left;font-family:var(--mono);font-weight:500;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);padding:8px 10px;border-bottom:1px solid var(--line)}
+table.t td{padding:9px 10px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+table.t td.r,table.t th.r{text-align:right}
+.ph{position:relative;border-radius:6px;overflow:hidden;aspect-ratio:3/2}
+.ph::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at 50% 35%,transparent 40%,rgba(0,0,0,.28));}
+.ph .fn{position:absolute;left:5px;bottom:3px;z-index:1;font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.85);letter-spacing:.04em}
+.ph.sel{outline:3px solid var(--marker);outline-offset:-3px}
+.ph.sel::before{content:"✓";position:absolute;z-index:2;top:6px;right:6px;width:18px;height:18px;border-radius:50%;background:var(--gold);color:#1E1508;font-size:11px;font-weight:800;display:grid;place-items:center}
+.ph.proc{background:var(--sunk)!important}
+.ph.proc::after{background:linear-gradient(100deg,transparent 30%,rgba(242,211,138,.35) 50%,transparent 70%);background-size:200% 100%;animation:sh 1.6s linear infinite}
+.ph.proc .fn{color:var(--ink-3)}
+.ph.hov .hv{position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;justify-content:space-between;padding:6px;background:linear-gradient(transparent 50%,rgba(0,0,0,.5))}
+@keyframes sh{from{background-position:120% 0}to{background-position:-80% 0}}
+@media (prefers-reduced-motion:reduce){.ph.proc::after{animation:none}}
+.meter{height:6px;background:var(--sunk);border-radius:3px;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--gold);border-radius:3px}
+.scrim{position:absolute;inset:34px 0 0 0;background:rgba(12,10,8,.55);z-index:5}
+.phone{width:290px;height:610px;border-radius:38px;background:#0A0806;padding:10px;box-shadow:0 30px 60px rgba(0,0,0,.28),inset 0 0 0 1px rgba(226,180,88,.25)}
+.phone .scr{width:100%;height:100%;border-radius:29px;overflow:hidden;background:var(--surface);position:relative;display:flex;flex-direction:column}
+.stat b{display:block;font-family:var(--display);font-size:25px;font-weight:600;font-variant-numeric:tabular-nums lining-nums;letter-spacing:-.01em}
+.stat small{color:var(--ink-2);font-size:12px}
+.up{color:var(--ok);font-size:11.5px;font-weight:700}
+.tabsu{display:flex;gap:18px;border-bottom:1px solid var(--line)}
+.tabsu span{padding-bottom:9px;font-weight:700;color:var(--ink-3);display:inline-flex;gap:6px;align-items:center}
+.tabsu span.on{color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
+.modal{position:absolute;z-index:6;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.mh{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 22px;border-bottom:1px solid var(--line)}
+.mh h1{font-size:21px}
+
+/* ---------- other views ---------- */
+.view{margin-top:28px}
+.lede{max-width:72ch;color:var(--ink-2);font-size:16px;margin:8px 0 0}
+.sec{margin-top:36px}
+.sec>h3{font-size:22px;margin-bottom:12px}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table.big{border-collapse:collapse;width:100%;min-width:780px;font-size:14px}
+table.big th{text-align:left;font-family:var(--mono);font-weight:500;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);padding:10px 14px;border-bottom:1px solid var(--line);background:var(--sunk);position:sticky;top:0}
+table.big td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+table.big tr:last-child td{border-bottom:0}
+table.big td.cost{font-family:var(--mono);font-size:12.5px;white-space:nowrap;color:var(--accent-text)}
+table.big td.area{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);white-space:nowrap}
+table.big td.where{white-space:nowrap}
+table.big td.where button{border:0;background:none;padding:0;color:var(--accent-text);font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line-2)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.box{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px}
+.box h4{margin:0 0 6px;font-size:17px;font-family:var(--display);font-weight:600}
+.box p{margin:0;color:var(--ink-2)}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi b{display:block;font-family:var(--display);font-size:30px;font-weight:600;font-variant-numeric:lining-nums tabular-nums}
+.kpi span{color:var(--ink-2);font-size:13px}
+.flow{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+.flow h4{margin:0 0 4px;font-family:var(--display);font-size:18px;font-weight:600}
+.flow>p{margin:0 0 14px;color:var(--ink-2)}
+.steps{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);gap:10px;overflow-x:auto;padding-bottom:4px}
+.step{border-top:2px solid var(--accent);padding-top:10px}
+.step .n{font-family:var(--mono);font-size:11px;color:var(--accent-text)}
+.step b{display:block;font-size:14px;margin:2px 0}
+.step small{color:var(--ink-2);font-size:13px;display:block}
+.sw{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.sw div{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.sw i{display:block;height:64px}
+.sw span{display:block;padding:8px 10px;font-size:13px;font-weight:700}
+.sw small{display:block;padding:0 10px 10px;font-family:var(--mono);font-size:11px;color:var(--ink-2)}
+.typeline{display:flex;align-items:baseline;gap:18px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.typeline .lbl{min-width:140px}
+.mermaidbox{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;overflow-x:auto}
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0}
+.filters button{border:1px solid var(--line-2);background:var(--surface);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:700;cursor:pointer;color:var(--ink-2)}
+.filters button[aria-pressed="true"]{background:var(--side);border-color:var(--side);color:#F2D38A}
+.filters input{border:1px solid var(--line-2);background:var(--surface);border-radius:999px;padding:6px 14px;min-width:0;flex:1;max-width:320px}
+.foot{margin-top:40px;color:var(--ink-3);font-size:13px}
+
+@media (max-width:980px){
+  .screens{grid-template-columns:1fr}
+  .index{position:static;flex-direction:row;overflow-x:auto;gap:18px;padding-bottom:6px;max-height:none}
+  .index section{flex:none}
+  .index ul{flex-direction:row;gap:4px}
+  .index button{white-space:nowrap}
+  .notes,.grid2,.grid3{grid-template-columns:1fr}
+  .grid4{grid-template-columns:1fr 1fr}
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"><i></i></div>
+      <div>
+        <h1>Frameline <span class="wn">working name</span></h1>
+        <p>Product design for a photo-delivery platform for event photographers</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" data-view="screens" aria-selected="true">Screens</button>
+      <button role="tab" data-view="coverage" aria-selected="false">Feature coverage</button>
+      <button role="tab" data-view="flows" aria-selected="false">UX &amp; flows</button>
+      <button role="tab" data-view="stack" aria-selected="false">Tech stack</button>
+      <button role="tab" data-view="design" aria-selected="false">Design system</button>
+    </nav>
+  </header>
+
+  <!-- SCREENS -->
+  <section id="v-screens" class="screens">
+    <aside class="index" id="index" aria-label="Screens"></aside>
+    <div>
+      <div class="panelhead">
+        <div>
+          <div class="row" style="gap:10px;margin-bottom:6px"><span class="route" id="route"></span></div>
+          <h2 id="sname"></h2>
+        </div>
+        <div class="pager"><button id="prev" type="button">← Prev</button><button id="next" type="button">Next →</button></div>
+      </div>
+      <div class="stage" id="stage"><div class="mock" id="mock"></div></div>
+      <div class="notes" id="notes"></div>
+    </div>
+  </section>
+
+  <!-- COVERAGE -->
+  <section id="v-coverage" class="view" hidden>
+    <h2 style="font-size:30px">Every reference-app feature, accounted for</h2>
+    <p class="lede">I built this list from a second walkthrough of the live app and from the interface text of all 87 of its page files. Each row names the feature as the reference app has it and the Frameline screen where it lives. Click a screen name to open it.</p>
+    <div class="grid4" style="margin-top:20px" id="kpis"></div>
+    <div class="filters" id="filters">
+      <button type="button" data-f="all" aria-pressed="true">All</button>
+      <button type="button" data-f="Covered" aria-pressed="false">Covered</button>
+      <button type="button" data-f="Improved" aria-pressed="false">Improved</button>
+      <button type="button" data-f="Later" aria-pressed="false">Later phase</button>
+      <button type="button" data-f="New" aria-pressed="false">New in Frameline</button>
+      <input id="q" type="search" placeholder="Search features, e.g. PIN, watermark, GST" aria-label="Search features">
+    </div>
+    <div class="tablewrap" style="max-height:900px;overflow:auto"><table class="big">
+      <thead><tr><th>Area</th><th>Feature</th><th>Status</th><th>Frameline screen</th></tr></thead>
+      <tbody id="covrows"></tbody>
+    </table></div>
+  </section>
+
+  <!-- FLOWS -->
+  <section id="v-flows" class="view" hidden>
+    <h2 style="font-size:30px">How the product works</h2>
+    <p class="lede">Two people use Frameline. The photographer runs events from the admin app on a laptop. Guests open a link on their phone, take a selfie, and leave with their photos. Every decision below makes one of those two jobs shorter.</p>
+
+    <div class="sec">
+      <h3>Direction: what we keep, what we change</h3>
+      <div class="tablewrap"><table class="big">
+        <thead><tr><th>Area</th><th>Reference app today</th><th>Frameline</th></tr></thead>
+        <tbody>
+          <tr><td>Navigation</td><td>14 items in a purple top bar, half of them icon-only</td><td>A dark sidebar in groups (Work, Business, Grow, Tools, Account), ⌘K to jump anywhere, and the plan meter always in view</td></tr>
+          <tr><td>Uploading</td><td>Two upload zones, a confirm modal, then Refresh to see photos</td><td>Drop anywhere. One review step covers quality, duplicates and speed. Tiles appear at once and fill in live, and the upload dock follows you across pages</td></tr>
+          <tr><td>Photo viewer</td><td>A floating toolbar of unlabelled icons</td><td>Labelled actions, a Details panel with camera data, faces and guest activity, a filmstrip, and keyboard shortcuts listed on screen</td></tr>
+          <tr><td>Event settings</td><td>A long grid of 30+ toggles</td><td>Presets at creation, grouped sections, and a live "What guests can do" summary</td></tr>
+          <tr><td>Sharing</td><td>Five tabs: Message, QR, PIN, Advanced, VIP</td><td>Link &amp; access, QR, Message and Personal links (album, face, VIP), each shown with a guest preview</td></tr>
+          <tr><td>Billing</td><td>Credits, packs, subscriptions and renewals on separate pages</td><td>One Plan &amp; usage page. Credits are the wallet, packs are add-ons, and renewal links are sent to clients from there</td></tr>
+          <tr><td>Onboarding</td><td>A survey, then a 6-step profile wizard</td><td>3 steps (Studio, Brand, First event) with a live phone preview, then a checklist on Home</td></tr>
+          <tr><td>Guest side</td><td>App download pushed first</td><td>Mobile web first: selfie on the landing screen, results in seconds, app optional</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="sec">
+      <h3>UX principles</h3>
+      <div class="grid3">
+        <div class="box"><h4>Photos first, gold for action</h4><p>The interface uses warm neutrals and a dark sidebar so pictures stand out. Gold marks the one action that matters on each screen and any selected photo.</p></div>
+        <div class="box"><h4>Never make them refresh</h4><p>Uploads, imports, face indexing and camera sync stream into the grid, and progress never blocks other work.</p></div>
+        <div class="box"><h4>Decide once, with presets</h4><p>Most events are one of a few kinds. Pick a preset when you create the event and adjust later only if needed.</p></div>
+        <div class="box"><h4>Say what guests will see</h4><p>Privacy and download settings sit next to a plain-language summary and a real guest preview.</p></div>
+        <div class="box"><h4>A beginner can finish it</h4><p>Every screen asks plain questions in order (where, what, how big) and shows the result on a real photo. Expert controls fold away under "More options", and every icon has a label or a tooltip.</p></div>
+        <div class="box"><h4>Phone-first for guests</h4><p>The guest gallery is a fast PWA, with no forced app install and download or buy always one tap away.</p></div>
+      </div>
+    </div>
+
+    <div class="sec" id="flowlist"><h3>Key flows</h3></div>
+  </section>
+
+  <!-- STACK -->
+  <section id="v-stack" class="view" hidden>
+    <h2 style="font-size:30px">Tech stack: Cloudflare-native, lowest running cost</h2>
+    <p class="lede">TypeScript across the product, run almost entirely on Cloudflare. Photos live in R2, which charges nothing for downloads, the biggest cost in photo delivery. Metadata sits in D1, face vectors in Vectorize, and the heavy image and face work runs in Containers that only bill while they are working. The one exception is camera FTP, which needs a small VPS.</p>
+
+    <div class="sec">
+      <h3>Architecture</h3>
+      <div class="mermaidbox">
+<pre class="mermaid">
+flowchart LR
+  A["Admin app<br/>React + Vite · Workers static assets"] -->|REST| B["API<br/>Hono on Workers"]
+  G["Guest gallery + studio sites<br/>React Router SSR · Workers"] -->|REST| B
+  A -->|presigned multipart PUT| R[("R2<br/>originals + renditions")]
+  B --> D[("D1<br/>SQLite metadata")]
+  B --> V[("Vectorize<br/>face embeddings")]
+  B -->|enqueue| Q["Queues"]
+  Q --> C["Containers<br/>sharp · InsightFace ONNX"]
+  C --> R
+  C --> V
+  C --> D
+  B --> O["Durable Objects<br/>live progress · activity"]
+  F["Camera FTP<br/>SFTPGo on €4 VPS"] --> R
+  R --> CDN["Cloudflare CDN<br/>zero egress"] --> G
+  B --> PAY["Razorpay · PhonePe<br/>UPI · cards · payouts"]
+</pre>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3>Layer by layer</h3>
+      <div class="tablewrap"><table class="big">
+        <thead><tr><th>Layer</th><th>Pick</th><th>Launch cost</th><th>Why this one</th></tr></thead>
+        <tbody id="stackrows"></tbody>
+      </table></div>
+    </div>
+
+    <div class="sec">
+      <h3>Monthly running cost, worked examples</h3>
+      <p class="lede" style="font-size:14px;margin-bottom:14px">Assumptions: each photo stores about 7 MB (original plus 3 sizes), processing takes about 1 CPU-second, and each photo has about 3 faces stored as 512-dimension vectors. Prices are Cloudflare list prices at the time of writing, so check current pricing before you budget.</p>
+      <div class="grid3">
+        <div class="box"><span class="lbl">Beta · 10 studios</span><h4 class="mono" style="font-size:28px;margin-top:6px">≈ $10/mo</h4><p>30k photos/mo, 300 GB stored, 20k visits. Workers $5 · R2 storage $4.35 · Containers $0.15 · Vectorize $0.05 · downloads $0.</p></div>
+        <div class="box"><span class="lbl">Launch · 100 studios</span><h4 class="mono" style="font-size:28px;margin-top:6px">≈ $85/mo</h4><p>400k photos/mo, 3 TB stored, 2 TB downloaded. R2 storage $45 · R2 writes $4.50 · Containers $9.30 · Vectorize $16 · Workers $7.40. The same downloads on S3 would add about $180.</p></div>
+        <div class="box"><span class="lbl">Scale · 1,000 studios</span><h4 class="mono" style="font-size:28px;margin-top:6px">≈ $880/mo</h4><p>4M photos/mo, 30 TB stored. R2 storage $450 · R2 requests $95 · Containers $100 · Vectorize $165 · Workers $57 · D1 $10. Revenue at this scale is about $8.4k/mo.</p></div>
+      </div>
+      <div class="box" style="margin-top:14px"><h4>The one cost to manage: storage</h4><p>Move originals from expired events to R2 Infrequent Access (about $0.01 instead of $0.015 per GB) and delete them after the grace period. This cuts the largest line on the bill by 40–60%. Face data for expired events is deleted on the same schedule, which is also a privacy promise to guests.</p></div>
+    </div>
+
+    <div class="sec">
+      <h3>Trade-offs we accept</h3>
+      <div class="grid2">
+        <div class="box"><h4>D1 is SQLite</h4><p>There is one writer per database and a 10 GB limit each. Photo rows are about 400 bytes, so tens of millions fit before we split by studio. Postgres on Neon is the fallback, at about $19–69/mo.</p></div>
+        <div class="box"><h4>No face model in Workers AI</h4><p>Face detection and embeddings run in InsightFace inside a Container. That costs about $0.00002 per photo, compared with about $1 per 1,000 photos on AWS Rekognition.</p></div>
+        <div class="box"><h4>FTP can't run on Cloudflare</h4><p>Camera sync needs a raw TCP server. A €4 VPS runs SFTPGo, writes to R2 and calls the API. Everything else stays on Cloudflare.</p></div>
+        <div class="box"><h4>Harder to switch vendors</h4><p>Keeping business logic in plain TypeScript, and D1 access behind Drizzle, makes a move to Postgres and S3-compatible storage a matter of weeks, not a rewrite.</p></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3>Repository layout</h3>
+      <div class="mermaidbox"><pre class="mono" style="margin:0;font-size:13px;line-height:1.7">frameline/                 pnpm + Turborepo
+├─ apps/
+│  ├─ admin/              React 19 · Vite · TanStack Router/Query · Tailwind v4 · shadcn/ui
+│  ├─ gallery/            React Router v7 (SSR on Workers) · guest gallery · studio sites · PWA
+│  ├─ api/                Hono on Workers · Zod · Better Auth (D1 adapter)
+│  ├─ processor/          Container: Node (sharp, exifr) + Python (InsightFace ONNX) · Queue consumer
+│  └─ ftp-bridge/         SFTPGo config + upload hook (VPS)
+├─ packages/
+│  ├─ db/                 Drizzle schema + migrations for D1
+│  ├─ ui/                 shared components + gold design tokens
+│  └─ shared/             types, Zod schemas, API client
+└─ infra/                 wrangler.toml per app · container Dockerfile</pre></div>
+    </div>
+
+    <div class="sec">
+      <h3>Build order</h3>
+      <div class="flow"><div class="steps">
+        <div class="step"><span class="n">Phase 1 · 3–4 wks</span><b>Core loop</b><small>Auth, events, albums, R2 uploads, processing, viewer, share link + PIN, guest gallery</small></div>
+        <div class="step"><span class="n">Phase 2 · 2 wks</span><b>Faces</b><small>Indexing, selfie search, privacy mode, face links, face panel in viewer</small></div>
+        <div class="step"><span class="n">Phase 3 · 2–3 wks</span><b>Controls</b><small>Settings, watermarks and rules, favourites, guest uploads, registrations, Drive import</small></div>
+        <div class="step"><span class="n">Phase 4 · 3 wks</span><b>Money</b><small>Plans, wallet, packs, renewals, store, KYC, orders, payouts, GST invoices, reports</small></div>
+        <div class="step"><span class="n">Phase 5 · 3 wks</span><b>Growth</b><small>Website, enquiries, custom domains, Smart QR, broadcasts, studio app settings</small></div>
+        <div class="step"><span class="n">Phase 6</span><b>Pro tools</b><small>Camera sync, AI enhance, international selling, Tauri desktop uploader, Expo app</small></div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- DESIGN SYSTEM -->
+  <section id="v-design" class="view" hidden>
+    <h2 style="font-size:30px">Design system: Gilt</h2>
+    <p class="lede">Gilt draws on the gallery frame and the gold-leaf album cover. The palette is warm ivory and obsidian, with gold only where the photographer acts or selects. A high-contrast serif gives headings an editorial feel, a clean grotesque keeps the interface easy to read, and a mono face handles IDs, frame numbers and money.</p>
+    <div class="sec"><h3>Colour</h3><div class="sw" id="swatches"></div></div>
+    <div class="sec"><h3>Type</h3>
+      <div class="box">
+        <div class="typeline"><span class="lbl">Display · Fraunces</span><span style="font-family:var(--display);font-size:36px;font-weight:600;letter-spacing:-.01em">Riya &amp; Kabir Wedding</span></div>
+        <div class="typeline"><span class="lbl">Interface · Manrope</span><span style="font-size:16px">Guests see only the photos they appear in. Downloads are limited to 2048 px.</span></div>
+        <div class="typeline" style="border:0"><span class="lbl">Data · JetBrains Mono</span><span class="mono" style="font-size:15px">6402F9F · frame 4172 · 1,248 photos · ₹48,200</span></div>
+      </div>
+    </div>
+    <div class="sec"><h3>Core components</h3>
+      <div class="grid2">
+        <div class="box" style="display:flex;flex-direction:column;gap:14px">
+          <div class="lbl">Buttons &amp; status</div>
+          <div class="row" style="flex-wrap:wrap"><span class="btn pri lg">Share event</span><span class="btn dark lg">Preview</span><span class="btn lg">Settings</span><span class="btn ghost lg">Cancel</span></div>
+          <div class="row" style="flex-wrap:wrap;gap:6px"><span class="chip ok"><i class="dot"></i>Live</span><span class="chip acc"><i class="dot"></i>Uploading</span><span class="chip warn"><i class="dot"></i>Expires in 6 days</span><span class="chip">Draft</span><span class="chip acc">12 to review</span><span class="chip bad">Payment failed</span></div>
+        </div>
+        <div class="box">
+          <div class="lbl" style="margin-bottom:6px">Setting row</div>
+          <div class="srow" style="border:0"><div class="ic" data-i="face"></div><div class="tx"><b>Guests only see their own photos</b><small>They take a selfie to unlock the gallery</small></div><div class="tg on"></div></div>
+          <div class="srow"><div class="ic" data-i="download"></div><div class="tx"><b>Original quality downloads</b><small>Off: downloads are capped at 2048 px</small></div><div class="tg"></div></div>
+        </div>
+        <div class="box">
+          <div class="lbl" style="margin-bottom:10px">Photo tile states</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px" id="tiles"></div>
+          <p style="margin-top:8px;font-size:13px">Default · selected (gold ring) · processing</p>
+        </div>
+        <div class="box">
+          <div class="lbl" style="margin-bottom:10px">Upload dock</div>
+          <div class="card cardp" style="box-shadow:var(--shadow)">
+            <div class="row" style="justify-content:space-between"><b>Uploading to Sangeet</b><span class="btn sm">Pause</span></div>
+            <div class="meter" style="margin:10px 0 6px"><i style="width:37%"></i></div>
+            <div class="row" style="justify-content:space-between;font-size:13px;color:var(--ink-2)"><span class="mono">146 / 400</span><span>2.1 MB/s · about 3 min left</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="sec"><h3>Tokens</h3>
+      <div class="mermaidbox"><pre class="mono" style="margin:0;font-size:13px;line-height:1.7">gold     linear-gradient(135deg, #F2D38A → #DDA848 → #B37C22)   used for primary buttons, meters, selection
+radius   8 controls · 12 cards · 14 modals · 999 chips          spacing  4-pt grid: 4 8 12 16 24 32
+type     12 / 13 / 15 / 18 / 25 / 36                             motion   150ms ease-out · respects reduced motion
+layout   dark sidebar 220 (62 in the event workspace) · content max 1200 · photo grid 5–8 columns by density
+theme    ivory light + obsidian dark from the same tokens · Tailwind v4 @theme maps these to utilities</pre></div>
+    </div>
+  </section>
+
+  <p class="foot">Frameline is a working name. Sample studio: Northlight Studio. All figures on the screens are illustrative.</p>
+</div>
+
+<script>
+const P={
+home:'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z',calendar:'M4 5h16v16H4zM4 9h16M8 3v4M16 3v4',bag:'M5 8h14l-1 13H6zM9 8V6a3 3 0 0 1 6 0v2',
+receipt:'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6',globe:'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18',
+qr:'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM14 18h2M18 14h2',megaphone:'M3 10v4h3l7 4V6L6 10zM16 9a4 4 0 0 1 0 6',
+drop:'M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z',camera:'M4 7h4l2-2h4l2 2h4v12H4zM12 10a3 3 0 1 0 0 6a3 3 0 1 0 0-6',card:'M3 6h18v12H3zM3 10h18',
+help:'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01',gear:'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
+search:'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M20 20l-4-4',plus:'M12 5v14M5 12h14',upload:'M12 16V4M7 9l5-5 5 5M4 20h16',share:'M4 12v7h16v-7M12 3v12M8 7l4-4 4 4',
+heart:'M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z',lock:'M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3',
+users:'M9 11a3 3 0 1 0 0-6a3 3 0 1 0 0 6M3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 6',image:'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9h.01',
+spark:'M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z',check:'M5 12l4 4 10-10',chev:'M9 6l6 6-6 6',chevd:'M6 9l6 6 6-6',eye:'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6',
+download:'M12 4v12M7 11l5 5 5-5M4 20h16',link:'M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1',
+copy:'M8 8h12v12H8zM4 16V4h12',x:'M6 6l12 12M18 6L6 18',face:'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M9 10h.01M15 10h.01M8.5 14.5c2 2 5 2 7 0',
+grid:'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',bell:'M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0',dots:'M5 12h.01M12 12h.01M19 12h.01',
+arrow:'M5 12h14M13 6l6 6-6 6',back:'M19 12H5M11 6l-6 6 6 6',sort:'M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4',mail:'M3 6h18v12H3zM3 7l9 6 9-6',chat:'M4 5h16v11H9l-5 4z',
+move:'M4 7h6l2 2h8v10H4zM12 13h5M15 11l2 2-2 2',trash:'M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13',chart:'M4 20V10M10 20V4M16 20v-8M22 20H2',phone:'M7 3h10v18H7zM11 18h2',
+play:'M7 5l12 7-12 7z',zin:'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M20 20l-4-4M8 11h6M11 8v6',zout:'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M20 20l-4-4M8 11h6',
+full:'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',rotl:'M4 4v6h6M4.5 10A8 8 0 1 1 6 17',rotr:'M20 4v6h-6M19.5 10A8 8 0 1 0 18 17',flip:'M12 3v18M8 7l-5 5 5 5zM16 7l5 5-5 5z',
+wand:'M4 20l11-11M14 4v3M18 6l-2 2M20 10h-3M17 4l1 1',drive:'M8 4h8l6 11-4 6H6l-4-6zM8 4l6 11h8M2 15h12',folder:'M3 6h6l2 2h10v11H3z',star:'M12 3l2.7 5.6 6.3.9-4.5 4.4 1 6.1L12 17l-5.5 3 1-6.1L3 9.5l6.3-.9z',
+shield:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z',info:'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M12 11v6M12 7h.01',film:'M4 4h16v16H4zM8 4v16M16 4v16M4 9h4M4 15h4M16 9h4M16 15h4'
+};
+const I=(n,s=16)=>`<svg class="i" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${P[n]}"/></svg>`;
+const G=['linear-gradient(135deg,#f6b26b,#c0504d 60%,#3d1f2b)','linear-gradient(160deg,#a7c957,#386641 70%,#1b2d1f)','linear-gradient(135deg,#ffd9a0,#e8906b 50%,#6b4f7a)',
+'radial-gradient(circle at 30% 30%,#fff3c4,#e0a458 45%,#5b3a29)','linear-gradient(180deg,#8ec5fc,#c9b6f2 70%,#6e6a8e)','linear-gradient(135deg,#2b2d42,#8d99ae)',
+'radial-gradient(circle at 70% 40%,#ffb4a2,#b5838d 50%,#3d2c3e)','linear-gradient(135deg,#d4a373,#faedcd 40%,#606c38)','linear-gradient(200deg,#e76f51,#f4a261 40%,#264653)',
+'radial-gradient(circle at 50% 60%,#f1faee,#a8dadc 40%,#1d3557)','linear-gradient(135deg,#ff9e7d,#ffd6a5 50%,#7b4fa8)','linear-gradient(160deg,#cdb4db,#ffafcc 50%,#6d597a)',
+'radial-gradient(circle at 40% 70%,#ffe8a3,#c77d2e 55%,#2c1a12)','linear-gradient(120deg,#83c5be,#006d77 70%)'];
+const ph=(i,cls='',style='')=>`<div class="ph ${cls}" style="background:${G[i%G.length]};${style}"><span class="fn">${cls.includes('proc')?'processing':String(4100+i*7)}</span></div>`;
+
+const NAV=[['home','Home','home'],['events','Events','calendar'],'Business',['store','Store','bag'],['orders','Orders & wallet','receipt'],['reports','Reports','chart'],'Grow',['website','Website','globe'],['studioapp','Studio app','phone'],['qr','Smart QR','qr'],['broadcasts','Broadcasts','megaphone'],'Tools',['watermark','Watermarks','drop'],['camerasync','Camera sync','camera'],['enhance','AI enhance','wand'],'Account',['plans','Plan & usage','card'],['support','Support','help'],['account','Settings','gear']];
+function side(active,col){
+  let h=`<aside class="m-side"><div class="m-logo"><b></b>${col?'':'Frameline'}</div>`;
+  if(!col)h+=`<div class="m-k">${I('search',14)}Search or jump to…<kbd>⌘K</kbd></div>`;
+  NAV.forEach(n=>{
+    if(typeof n==='string'){h+=col?`<div style="height:8px"></div>`:`<div class="m-grp">${n}</div>`;return;}
+    h+=`<div class="m-nav ${n[0]===active?'on':''}">${I(n[2],15)}${col?'':n[1]}${!col&&n[0]==='events'?'<span class="ct">2 live</span>':''}</div>`;
+  });
+  if(!col)h+=`<div class="m-use"><div class="row" style="justify-content:space-between"><span>Photos this year</span><span class="mono">25%</span></div><div class="bar"><i></i></div><span class="mono">12,480 / 50,000</span> · Starter</div>`;
+  return h+`</aside>`;
+}
+const chrome=u=>`<div class="chrome"><i></i><i></i><i></i><span class="url">${u}</span></div>`;
+const shell=(active,url,body,col)=>`${chrome(url)}<div class="m-app ${col?'col':''}">${side(active,col)}<div class="m-main">${body}</div></div>`;
+const head=(title,sub,actions='',crumb='')=>`<div class="m-head"><div>${crumb?`<div class="m-crumb">${crumb}</div>`:''}<h1>${title}</h1>${sub?`<div class="m-sub">${sub}</div>`:''}</div><div class="m-actions">${actions}</div></div>`;
+const spark=(pts,w=110,h=30)=>{const mx=Math.max(...pts),mn=Math.min(...pts);const xs=pts.map((p,i)=>[i*(w/(pts.length-1)),h-3-((p-mn)/(mx-mn||1))*(h-6)]);const d=xs.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');const e=xs[xs.length-1];return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d} L${w} ${h} L0 ${h}Z" fill="var(--accent-soft)"/><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.6"/><circle cx="${e[0]}" cy="${e[1]}" r="2.6" fill="var(--accent)"/></svg>`;};
+const tabsU=(arr,on)=>`<div class="tabsu">${arr.map((t,i)=>`<span class="${i===on?'on':''}">${t}</span>`).join('')}</div>`;
+const EV=[{n:'Riya & Kabir Wedding',d:'12–14 Sep 2026',p:'Udaipur',c:1248,s:'Live',id:'6402F9F',v:'2,310'},{n:'Mehta Sangeet Night',d:'20 Sep 2026',p:'Jaipur',c:412,s:'Live',id:'7A1C0B2',v:'880'},
+{n:'Tessera Labs Offsite',d:'24 Sep 2026',p:'Goa',c:146,s:'Uploading',id:'3F9E21D',v:'120'},{n:'Greenfield School Annual Day',d:'2 Sep 2026',p:'Pune',c:2096,s:'Expiring',id:'C0DE417',v:'5,402'},
+{n:'Coastal Half Marathon',d:'17 Aug 2026',p:'Mumbai',c:5820,s:'Live',id:'91B7F3A',v:'12,040'},{n:'Anaya’s First Birthday',d:'4 Oct 2026',p:'Bengaluru',c:0,s:'Draft',id:'5D22E80',v:'0'},
+{n:'Kapoor Engagement',d:'19 Jul 2026',p:'Delhi',c:734,s:'Archived',id:'2A6F1C9',v:'1,680'},{n:'Studio Portfolio 2026',d:'Ongoing',p:'Northlight',c:88,s:'Live',id:'E4B0937',v:'640'}];
+const stChip=s=>({Live:'<span class="chip ok"><i class="dot"></i>Live</span>',Uploading:'<span class="chip acc"><i class="dot"></i>Uploading</span>',Expiring:'<span class="chip warn"><i class="dot"></i>Expires in 6 days</span>',Draft:'<span class="chip">Draft</span>',Archived:'<span class="chip">Archived</span>'}[s]);
+function qrSvg(seed,size=120,col='#1B1712',round=false){let x=seed*9301+49297;const r=()=>(x=(x*9301+49297)%233280)/233280;const n=21,c=size/n;let s=`<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true"><rect width="${size}" height="${size}" fill="#fff"/>`;
+ const fin=(a,b)=>`<rect x="${a*c}" y="${b*c}" width="${7*c}" height="${7*c}" rx="${round?c*2:0}" fill="${col}"/><rect x="${(a+1)*c}" y="${(b+1)*c}" width="${5*c}" height="${5*c}" rx="${round?c*1.4:0}" fill="#fff"/><rect x="${(a+2)*c}" y="${(b+2)*c}" width="${3*c}" height="${3*c}" rx="${round?c:0}" fill="${col}"/>`;
+ for(let i=0;i<n;i++)for(let j=0;j<n;j++){const inF=(i<8&&j<8)||(i>12&&j<8)||(i<8&&j>12);if(!inF&&r()>.52)s+=round?`<circle cx="${i*c+c/2}" cy="${j*c+c/2}" r="${c*.45}" fill="${col}"/>`:`<rect x="${i*c}" y="${j*c}" width="${c}" height="${c}" fill="${col}"/>`;}
+ return s+fin(0,0)+fin(14,0)+fin(0,14)+'</svg>';}
+
+/* ---------------- SCREENS ---------------- */
+const S=[];const add=o=>S.push(o);
+
+add({id:'signin',g:'Start',name:'Sign in',route:'/login',render:()=>`${chrome('app.frameline.in/login')}
+<div style="display:grid;grid-template-columns:1.1fr 1fr;height:766px">
+ <div style="background:#0E0B08;padding:40px;display:flex;flex-direction:column;gap:22px;color:#F3ECDF">
+  <div class="m-logo"><b></b>Frameline</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${[0,2,3,6,8,10,12,1,4,9,11,7].map((g,k)=>ph(g,k===5?'sel':'')).join('')}</div>
+  <div style="margin-top:auto"><div style="font-family:var(--display);font-size:40px;font-weight:600;line-height:1.08;max-width:15ch">Deliver every guest their photos <span style="background:var(--gold);-webkit-background-clip:text;background-clip:text;color:transparent">by tonight.</span></div>
+  <p style="color:#B7AC98;max-width:44ch;margin-top:12px">Upload, share one link, and let guests find themselves with a selfie. Used by 1,200 studios across India.</p></div>
+ </div>
+ <div style="display:grid;place-items:center;background:var(--surface)">
+  <div style="width:360px;display:flex;flex-direction:column;gap:14px">
+   <h1 style="font-size:28px">Welcome back</h1><div class="m-sub" style="margin-top:-8px">New here? The same steps create your studio.</div>
+   <span class="btn lg" style="justify-content:center;margin-top:8px"><b style="font-family:var(--body);color:#4285F4">G</b>Continue with Google</span>
+   <div class="row" style="color:var(--ink-3);font-size:12px"><hr style="flex:1;border:0;border-top:1px solid var(--line)">or use email<hr style="flex:1;border:0;border-top:1px solid var(--line)"></div>
+   <label class="fl"><span>Email address</span><div class="field">${I('mail',14)}studio@northlight.in</div></label>
+   <span class="btn pri lg" style="justify-content:center">Email me a 6-digit code</span>
+   <div class="row" style="justify-content:space-between;font-size:12px"><span style="color:var(--accent-text);font-weight:700">Use password instead</span><span style="color:var(--ink-3)">Forgot password?</span></div>
+   <div style="font-size:11.5px;color:var(--ink-3)">By continuing you agree to the Terms of Use and Privacy Policy. Bot check runs invisibly.</div>
+  </div>
+ </div></div>`,
+notes:{p:'Get a photographer into the product in under 30 seconds, with sign-up and sign-in as one flow.',u:['An email code is the default, and a password stays available for people who set one (Settings → Security)','Google sign-in, forgot password and reset password are all kept','The left panel shows the result, a delivered gallery, so the value is clear before signing up'],r:'/login, /signup, /set-password, forgot and reset password',b:['Better Auth email OTP + password','Google OAuth','Turnstile']}});
+
+add({id:'onboarding',g:'Start',name:'Studio setup',route:'/setup',render:()=>`${chrome('app.frameline.in/setup')}
+<div style="height:766px;display:grid;grid-template-columns:1fr 420px;background:var(--paper)">
+ <div style="padding:30px 56px;display:flex;flex-direction:column;gap:18px">
+  <div class="m-logo" style="color:var(--ink)"><b style="background:var(--side)"></b>Frameline</div>
+  <div class="row" style="gap:10px">${['Studio','Brand','First event'].map((s,i)=>`<div class="row" style="gap:8px"><span style="width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;${i<1?'background:var(--gold);color:#1E1508':i===1?'border:2px solid var(--accent);color:var(--accent-text)':'border:1px solid var(--line-2);color:var(--ink-3)'}">${i<1?'✓':i+1}</span><b style="font-weight:${i===1?800:500};color:${i===2?'var(--ink-3)':'var(--ink)'}">${s}</b>${i<2?'<span style="width:50px;height:1px;background:var(--line-2)"></span>':''}</div>`).join('')}</div>
+  <div><h1 style="font-size:30px">Make galleries look like yours</h1><div class="m-sub">Guests see this on every event. Change it any time in Settings → Studio profile.</div></div>
+  <div class="card cardp" style="display:flex;flex-direction:column;gap:14px;max-width:580px">
+   <div class="row" style="gap:16px"><div style="width:70px;height:70px;border-radius:12px;border:1.5px dashed var(--line-2);display:grid;place-items:center;color:var(--ink-3)">${I('upload',20)}</div><div style="flex:1"><b>Logo</b><div class="m-sub" style="font-size:12px">PNG or SVG, transparent background</div></div><div style="width:130px;height:70px;border-radius:10px;background:${G[3]};display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700">Cover · 16:9</div></div>
+   <div class="fl"><span>Brand colour</span><div class="row" style="gap:8px">${['#B37C22','#1F3A5F','#8C2F39','#2F5D50','#1B1712','#6B4F7A'].map((c,i)=>`<span style="width:30px;height:30px;border-radius:8px;background:${c};${i===2?'box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--ink)':''}"></span>`).join('')}<span class="field" style="padding:5px 9px"><span class="mono">#8C2F39</span></span></div></div>
+   <div class="fl"><span>Gallery address</span><div class="field"><span class="mono">northlight</span><span style="color:var(--ink-3)" class="mono">.frameline.in/&lt;event&gt;</span><span class="chip ok" style="margin-left:auto">Available</span></div></div>
+   <div class="row" style="gap:10px"><label class="fl" style="flex:1"><span>Studio phone</span><div class="field"><span class="mono">+91 98200 41177</span></div></label><label class="fl" style="flex:1"><span>Instagram</span><div class="field">@northlight.studio</div></label></div>
+  </div>
+  <div class="row" style="max-width:580px;justify-content:space-between"><span class="btn ghost">Back</span><div class="row"><span class="btn ghost">Skip for now</span><span class="btn pri lg">Continue</span></div></div>
+ </div>
+ <div style="background:var(--sunk);display:grid;place-items:center;border-left:1px solid var(--line);position:relative">
+  <div class="phone"><div class="scr"><div style="height:240px;background:${G[3]};position:relative;display:flex;align-items:flex-end;padding:16px;color:#fff"><div style="position:absolute;top:14px;left:0;right:0;text-align:center;font-family:var(--display);letter-spacing:.2em;font-size:11px">NORTHLIGHT</div><div><div style="font-family:var(--display);font-size:22px;font-weight:600">Your event name</div><div style="font-size:11px;opacity:.85">Date · City</div></div></div>
+  <div style="padding:14px;display:flex;flex-direction:column;gap:10px"><span class="btn lg" style="justify-content:center;background:#8C2F39;border-color:#8C2F39;color:#fff">${I('face')}Find my photos</span><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">${[0,2,6,7,10,11].map(g=>ph(g)).join('')}</div><div style="font-size:10.5px;color:var(--ink-3);text-align:center">Northlight Studio · +91 98200 41177 · @northlight.studio</div></div></div></div>
+  <div class="lbl" style="position:absolute;bottom:24px">Live guest preview</div>
+ </div></div>`,
+notes:{p:'Brand the studio before the first gallery goes out: 3 steps instead of a survey plus a 6-step wizard.',u:['Step 1 (Studio) asks who you are, your city and how you heard about us, merged into one short form','Step 2 covers everything a guest sees: logo, cover, colour, gallery address, contact and social links, with a live phone preview','Step 3 creates the first event from a preset. Portfolio and extra social links move to Settings → Studio profile'],r:'Onboarding survey, /profile/create (6 steps), dashboard branding card',b:['React Hook Form + Zod','Subdomain availability check','R2 presigned upload']}});
+
+add({id:'home',g:'Work',name:'Home',route:'/',render:()=>shell('home','app.frameline.in',head('Good evening, Northlight','Saturday 26 Sep · 2 events live · 1 upload running',`<span class="btn">${I('upload',14)}Upload</span><span class="btn pri">${I('plus',14)}New event</span>`)+`
+<div class="m-body" style="display:grid;grid-template-columns:1fr 320px;gap:16px">
+ <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+  <div class="card" style="padding:10px 14px;display:flex;align-items:center;gap:12px;background:var(--warn-soft);border-color:transparent"><span style="color:var(--warn)">${I('bell',16)}</span><div style="flex:1"><b>Greenfield School Annual Day expires in 6 days.</b> <span style="color:var(--ink-2)">Renew it yourself or send the school a renewal link.</span></div><span class="btn sm">Send renewal link</span><span class="btn sm pri">Renew</span></div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">${[['Photos delivered','8,412','+12%',[3,5,4,6,8,7,9]],['Gallery visits','3,905','+31%',[2,3,3,5,4,7,8]],['Face searches','1,236','+18%',[1,2,4,3,5,6,6]],['Store revenue','₹48,200','+9%',[4,4,5,5,6,6,7]]].map(s=>`<div class="card cardp stat"><small>${s[0]} · Sep</small><b>${s[1]}</b><div class="row" style="justify-content:space-between"><span class="up">${s[2]}</span>${spark(s[3],80,26)}</div></div>`).join('')}</div>
+  <div class="card"><div class="ct-h cardp" style="margin:0;padding-bottom:6px"><h3>Recent events</h3><span class="btn ghost sm">All events ${I('arrow',12)}</span></div>
+  <table class="t"><thead><tr><th>Event</th><th>Status</th><th class="r">Photos</th><th class="r">Visits</th><th class="r">Face matches</th></tr></thead><tbody>
+  ${EV.slice(0,4).map((e,i)=>`<tr><td><div class="row" style="gap:10px">${ph(i*3,'','width:44px;border-radius:4px')}<div><b style="font-weight:700">${e.n}</b><div style="color:var(--ink-3);font-size:11.5px">${e.d} · ${e.p}</div></div></div></td><td>${stChip(e.s)}</td><td class="r">${e.c.toLocaleString('en-IN')}</td><td class="r">${e.v}</td><td class="r">${[412,190,12,1210][i]}</td></tr>`).join('')}
+  </tbody></table></div>
+ </div>
+ <div style="display:flex;flex-direction:column;gap:12px">
+  <div class="card cardp"><div class="ct-h"><h3>Finish setting up</h3><span class="mono" style="color:var(--ink-2)">3 of 5</span></div><div class="meter" style="margin-bottom:8px"><i style="width:60%"></i></div>
+  ${[['Add studio name',1],['Upload logo',1],['Create first event',1],['Set a watermark',0],['Publish your website',0]].map(t=>`<div class="row" style="padding:5px 0;gap:10px;${t[1]?'color:var(--ink-3);text-decoration:line-through':''}"><span style="width:18px;height:18px;border-radius:50%;display:grid;place-items:center;${t[1]?'background:var(--gold);color:#1E1508':'border:1.5px solid var(--line-2)'}">${t[1]?I('check',11):''}</span>${t[0]}${t[1]?'':'<span style="margin-left:auto;color:var(--accent-text);font-weight:700;font-size:12px">Start</span>'}</div>`).join('')}</div>
+  <div class="card cardp"><div class="ct-h"><h3>Activity</h3><span class="chip acc"><i class="dot"></i>Live</span></div>
+  ${[['face','Priya S. found 24 photos of herself','Riya & Kabir · 4 min'],['bag','Order #1043 · ₹1,199','Mehta Sangeet · 18 min'],['camera','Canon R6 sent 212 photos','Tessera Offsite · 1 h'],['users','12 guest uploads to review','Riya & Kabir · 2 h']].map(a=>`<div class="row" style="padding:7px 0;border-top:1px solid var(--line);align-items:flex-start"><div class="ic">${I(a[0],14)}</div><div><b style="font-weight:700">${a[1]}</b><div style="color:var(--ink-3);font-size:11.5px">${a[2]}</div></div></div>`).join('')}</div>
+  <div class="card cardp" style="background:var(--side);color:var(--side-ink);border-color:var(--side)"><div class="row" style="justify-content:space-between"><div><b>Desktop uploader</b><div style="font-size:11.5px;color:var(--side-ink-2)">Up to 9× faster for 2,000+ photos</div></div><span class="btn sm dark" style="border:1px solid #3a3025">Mac · Windows</span></div></div>
+ </div></div>`),
+notes:{p:'Answer "what needs me today?" and show that galleries are being used.',u:['Alerts come first: expiring events and expiring face data, each with its fix (Renew, or Send renewal link to the client)','Stats for the month, then events, then a live activity feed','The setup checklist replaces the red "Action needed" card. Credits, packs and coupon codes move to Plan & usage; the follow code moves to Studio app; help videos move to Support'],r:'/dashboard: credits, coupon, follow code, packs table, onboarding, promo cards, desktop app links, expiring banners',b:['TanStack Query','Durable Object WebSocket for activity','SVG sparklines']}});
+
+add({id:'events',g:'Work',name:'Events',route:'/events',render:()=>shell('events','app.frameline.in/events',head('Events','4 live · 1 uploading · 1 draft',`<span class="btn">${I('chart',14)}Events report</span><span class="btn pri">${I('plus',14)}New event</span>`)+`
+<div class="m-body" style="display:flex;flex-direction:column;gap:14px">
+ <div class="row" style="justify-content:space-between"><div class="row" style="gap:8px"><div class="field ph" style="width:260px">${I('search',14)}Search name, ID or city</div><div class="seg"><span class="on">All 8</span><span>Live 4</span><span>Drafts 1</span><span>Expiring 1</span><span>Archived 1</span></div></div><div class="row"><span class="btn ghost">${I('sort',14)}Most recent</span></div></div>
+ <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">${EV.map((e,i)=>`<div class="card" style="overflow:hidden;position:relative">
+  <div style="position:relative;display:grid;grid-template-columns:2fr 1fr;gap:2px;height:128px">${e.c?`<div style="background:${G[i*3%14]}"></div><div style="display:grid;gap:2px"><div style="background:${G[(i*3+1)%14]}"></div><div style="background:${G[(i*3+2)%14]}"></div></div>`:`<div style="grid-column:1/-1;background:var(--sunk);display:grid;place-items:center;color:var(--ink-3)">${I('image',22)}</div>`}
+  <div style="position:absolute;top:8px;left:8px">${stChip(e.s)}</div><div style="position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:6px;background:rgba(0,0,0,.45);color:#fff;display:grid;place-items:center">${I('dots',14)}</div></div>
+  <div style="padding:10px 12px"><b style="font-weight:700;font-size:13.5px">${e.n}</b><div style="color:var(--ink-2);font-size:12px">${e.d} · ${e.p}</div>
+  <div class="row" style="justify-content:space-between;margin-top:8px;color:var(--ink-3);font-size:11.5px"><span class="mono">${e.id}</span><span class="mono">${e.c.toLocaleString('en-IN')} photos · ${e.v} visits</span></div></div></div>`).join('')}</div>
+ <div class="card cardp" style="position:absolute;right:52px;top:258px;width:210px;box-shadow:var(--shadow);padding:6px;z-index:3">${[['eye','Open'],['share','Share'],['link','Copy gallery link'],['calendar','Rename or change date'],['card','Renew or add photos'],['bag','Sell photos from this event'],['x','Archive']].map((m,i)=>`<div class="row" style="gap:10px;padding:7px 8px;border-radius:6px;${i===0?'background:var(--sunk)':''}">${I(m[0],14)}${m[1]}</div>`).join('')}</div>
+</div>`),
+notes:{p:'Find any event quickly and see its state without opening it.',u:['Status chips on the cover: Live, Uploading, Expiring, Draft, Archived (and Free trial)','The card menu holds what used to be scattered: rename, change date, copy link, renew or add photos, sell from this event, archive','Search by name, short ID or city. The events report (active, expiring, deleted, CSV) is one click away'],r:'/events (edit name and ID, delete), /sell-photos event list, /events-report',b:['TanStack Router search params','Radix Dropdown Menu']}});
+
+add({id:'create',g:'Work',name:'New event',route:'/events/new',render:()=>shell('events','app.frameline.in/events/new',head('Events','4 live · 1 uploading · 1 draft',`<span class="btn pri">${I('plus',14)}New event</span>`)+`
+<div class="m-body" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;opacity:.5">${EV.map((e,i)=>`<div class="card" style="height:190px;background:${G[i*3%14]}"></div>`).join('')}</div>`)+`
+<div class="scrim"></div>
+<div style="position:absolute;z-index:6;top:34px;right:0;bottom:0;width:480px;background:var(--surface);border-left:1px solid var(--line);box-shadow:var(--shadow);padding:22px 24px;display:flex;flex-direction:column;gap:13px">
+ <div class="row" style="justify-content:space-between"><h1 style="font-size:23px">New event</h1>${I('x',18)}</div>
+ <label class="fl"><span>Event name</span><div class="field">Anaya’s First Birthday</div></label>
+ <div class="row" style="gap:10px"><label class="fl" style="flex:1"><span>Date</span><div class="field">${I('calendar',14)}4 Oct 2026</div></label><label class="fl" style="flex:1"><span>City</span><div class="field">Bengaluru</div></label><label class="fl" style="flex:1"><span>Type</span><div class="field">Baby shoot ${I('chevd',12)}</div></label></div>
+ <div class="fl"><span>Start from a preset</span>
+ ${[['Private family event','Selfie to see your own photos. PIN on. Downloads of own photos only.',1],['Open corporate event','Anyone with the link sees everything. Downloads on.',0],['Race or sports','Selfie or bib search. Store on with sample prices.',0]].map(p=>`<div style="border:${p[2]?'1.5px solid var(--accent)':'1px solid var(--line)'};background:${p[2]?'var(--accent-soft)':'var(--surface)'};border-radius:10px;padding:9px 12px;display:flex;gap:10px"><span style="width:16px;height:16px;border-radius:50%;margin-top:2px;flex:none;${p[2]?'border:5px solid var(--accent)':'border:1.5px solid var(--line-2)'}"></span><div><b>${p[0]}</b><div style="color:var(--ink-2);font-size:12px">${p[1]}</div></div></div>`).join('')}</div>
+ <div class="fl"><span>Client host (optional)</span><div class="row"><div class="field" style="flex:1">${I('mail',13)}priya.rao@gmail.com</div><div class="field" style="width:150px"><span class="mono">+91 99870 22113</span></div></div><small style="color:var(--ink-3);font-size:11.5px">Hosts can view everything and approve guest uploads.</small></div>
+ <div class="row" style="justify-content:space-between"><span>Guest uploads · up to</span><div class="field" style="width:110px"><span class="mono">300</span> photos</div></div>
+ <div class="card cardp" style="background:var(--sunk);border:0"><div class="row" style="justify-content:space-between"><span>Uses your Starter plan</span><span class="mono">37,520 photos left</span></div></div>
+ <div class="row" style="margin-top:auto;justify-content:flex-end"><span class="btn ghost">Cancel</span><span class="btn pri lg">Create event</span></div>
+</div>`,
+notes:{p:'Create a ready-to-share event in one step, with the privacy decisions made up front.',u:['Presets set 10+ settings at once, and everything stays editable','Keeps every reference field: event type (Wedding, Couple, Family, Baby, Product, Real estate, Themed…), host email and mobile, guest upload limit','Capacity comes from the plan. Without a plan, the same drawer offers a one-off pack'],r:'/events/create, /sell-photos/create (create from purchased pack, categories, hosts, guest upload max)',b:['Radix Dialog (drawer)','Zod schema shared with API']}});
+
+const wsBody=(opts={})=>`<div style="display:flex;flex-direction:column;height:766px">
+ <div class="m-head" style="padding:16px 22px 12px;border-bottom:1px solid var(--line);background:var(--surface)"><div><div class="m-crumb">Events /</div><div class="row" style="gap:10px"><h1 style="font-size:23px">Riya &amp; Kabir Wedding</h1><span class="chip ok"><i class="dot"></i>Live</span><span class="mono" style="color:var(--ink-3);font-size:12px;border:1px solid var(--line);padding:1px 6px;border-radius:5px">6402F9F</span></div><div class="m-sub">1,248 / 2,000 photos · 2,310 visits (1,420 web · 640 Android · 250 iOS) · expires 14 Sep 2027</div></div>
+ <div class="m-actions"><span class="btn ghost">${I('drive',14)}Import</span><span class="btn ghost">${I('users',14)}Guests <span class="chip acc">2</span></span><span class="btn">${I('eye',14)}Preview</span><span class="btn">${I('gear',14)}Settings</span><span class="btn pri">${I('share',14)}Share</span></div></div>
+ <div style="display:grid;grid-template-columns:220px 1fr;flex:1;min-height:0">
+  <div style="border-right:1px solid var(--line);padding:12px 10px;background:var(--surface);display:flex;flex-direction:column;gap:1px">
+   <div class="lbl" style="padding:0 8px 6px">Albums · drag to reorder</div>
+   ${[['All photos','1,248'],['Haldi','312'],['Mehendi','287'],['Sangeet','401',1],['Wedding','248']].map(a=>`<div class="row" style="padding:6px 8px;border-radius:7px;gap:8px;${a[2]?'background:var(--accent-soft);color:var(--accent-text);font-weight:800':'font-weight:600;color:var(--ink-2)'}"><span style="color:var(--ink-3)">⋮⋮</span>${a[0]}<span class="mono" style="margin-left:auto;font-size:11px;color:var(--ink-3)">${a[1]}</span></div>`).join('')}
+   <div class="row" style="padding:6px 8px;gap:8px;font-weight:600;color:var(--ink-2)">${I('users',14)}Guest uploads<span class="chip acc" style="margin-left:auto">12 new</span></div>
+   <div class="row" style="padding:6px 8px;gap:8px;font-weight:600;color:var(--ink-2)">${I('spark',14)}Highlights<div class="tg on" style="margin-left:auto;transform:scale(.8)"></div></div>
+   <div class="row" style="padding:6px 8px;gap:8px;font-weight:600;color:var(--ink-2)">${I('film',14)}Films<span class="mono" style="margin-left:auto;font-size:11px;color:var(--ink-3)">2</span></div>
+   <div class="row" style="padding:6px 8px;gap:8px;font-weight:600;color:var(--ink-2)">${I('heart',14)}Guest favourites<span class="mono" style="margin-left:auto;font-size:11px;color:var(--ink-3)">96</span></div>
+   <div class="row" style="padding:6px 8px;gap:8px;color:var(--accent-text);font-weight:700">${I('plus',14)}New album</div>
+   <div style="margin-top:auto" class="card cardp"><div class="lbl">Face index</div><div class="row" style="justify-content:space-between;margin-top:4px"><b>1,102 / 1,248</b><span class="chip acc">Running</span></div><div class="meter" style="margin-top:8px"><i style="width:88%"></i></div></div>
+  </div>
+  <div style="padding:12px 20px;position:relative;overflow:hidden">
+   <div class="row" style="justify-content:space-between;margin-bottom:10px"><div class="row" style="gap:8px"><span class="btn ghost">${I('sort',14)}Capture time ${I('chevd',12)}</span><div class="seg"><span class="on">All</span><span>${I('face',12)} People</span><span>Favourites</span><span>Hidden</span></div><div class="field ph" style="width:180px;padding:5px 9px">${I('search',13)}Find a person</div></div><div class="row"><div class="seg"><span class="on">Scroll</span><span>Pages</span></div><span class="btn pri">${I('upload',14)}Upload</span></div></div>
+   <div class="row" style="justify-content:space-between;margin-bottom:10px"><div><b style="font-size:16px;font-family:var(--display)">Sangeet</b> <span style="color:var(--ink-3)">401 photos · 20 Sep, 7:12 PM – 11:48 PM</span></div><span style="color:var(--ink-3);font-size:12px">Drop photos anywhere to add them</span></div>
+   <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">${Array.from({length:28},(_,k)=>k===1?`<div class="ph hov" style="background:${G[3]}"><div class="hv"><span class="mono" style="color:#fff;font-size:9.5px">IMG_4172.JPG</span><div class="row" style="justify-content:space-between;color:#fff"><span class="mono" style="font-size:9.5px">#2</span><span style="display:flex;gap:4px">${I('heart',12)}${I('wand',12)}</span></div></div></div>`:ph(k+2,[4,9].includes(k)?'sel':k>=24?'proc':'')).join('')}</div>
+   ${opts.noBars?'':`<div style="position:absolute;left:50%;bottom:20px;transform:translateX(-50%);background:var(--side);color:var(--side-ink);border-radius:12px;padding:8px 10px;display:flex;align-items:center;gap:6px;box-shadow:var(--shadow)"><b style="padding:0 8px;color:#F2D38A">2 selected</b><span style="color:var(--side-ink-2);font-size:11.5px;padding-right:6px">Select all 401</span>${[['move','Move to…'],['eye','Hide'],['image','Set as cover'],['download','Download'],['trash','Delete']].map(b=>`<span class="btn sm" style="background:transparent;color:inherit;border-color:#3a3025">${I(b[0],12)}${b[1]}</span>`).join('')}</div>
+   <div class="card cardp" style="position:absolute;right:20px;bottom:20px;width:280px;box-shadow:var(--shadow)"><div class="row" style="justify-content:space-between"><b>Uploading to Sangeet</b><span class="btn sm">Pause</span></div><div class="meter" style="margin:10px 0 6px"><i style="width:37%"></i></div><div class="row" style="justify-content:space-between;font-size:12px;color:var(--ink-2)"><span class="mono">146 / 400</span><span>2.1 MB/s · about 3 min left</span></div></div>`}
+  </div></div></div>`;
+add({id:'workspace',g:'Work',name:'Event workspace',route:'/events/6402f9f',render:()=>shell('events','app.frameline.in/events/6402f9f?album=sangeet',wsBody(),true),
+notes:{p:'The main screen for a photographer: organise, upload and curate one event.',u:['The album rail holds every collection the reference app scatters: albums (drag to reorder, rename, delete), Guest uploads with a review count, the Highlights toggle, Films (YouTube videos) and guest favourites','Drop files anywhere. Tiles appear at once and shimmer while processing, so there is no Refresh button. Sort by capture time, name or name sequence; switch between endless scroll and pages','Hovering a tile shows the filename, its number and quick actions (favourite count, AI enhance). The selection bar offers Select all, Move to…, Hide, Set as cover, Download and Delete','View stats are split by web, Android and iOS in the header. Import, Guests (registrations, favourites, access requests), Preview, Settings and Share are always visible'],r:'/events/:id: albums, Guest Uploads, Enable Highlight, event views, videos, sort, favourites, two upload zones, Refresh, Select, Use Pages, Admin Request, Import, Increase Photo Limit',b:['Uppy + R2 multipart','dnd-kit','TanStack Virtual','Durable Object progress']}});
+
+add({id:'viewer',g:'Work',name:'Photo viewer',route:'/events/6402f9f/sangeet/2',render:()=>`${chrome('app.frameline.in/events/6402f9f/sangeet/2')}
+<div style="height:766px;background:#070605;color:#F3ECDF;display:grid;grid-template-columns:1fr 300px;position:relative">
+ <div style="position:relative;display:flex;flex-direction:column">
+  <div class="row" style="justify-content:space-between;padding:14px 18px">
+   <div class="row" style="gap:10px"><span class="btn sm dark" style="border-color:#2c251d">${I('back',13)}Sangeet</span><span class="mono" style="font-size:12px;color:#B7AC98"><b style="color:#F2D38A">2</b> / 401</span><span class="row" style="gap:6px;background:#15120F;border:1px solid #2c251d;border-radius:8px;padding:4px 8px"><span class="mono" style="font-size:12px">IMG_4172.JPG</span><span style="color:#B7AC98">${I('copy',12)}</span></span></div>
+   <div class="row" style="gap:6px;background:#15120F;border:1px solid #2c251d;border-radius:12px;padding:5px">
+    <span class="btn sm dark" style="border:0">${I('image',13)}Cover ${I('chevd',11)}</span><span class="btn sm dark" style="border:0">${I('eye',13)}Hide</span><span class="btn sm dark" style="border:0">${I('move',13)}Move</span><span class="btn sm dark" style="border:0">${I('share',13)}Share</span><span class="btn sm pri">${I('download',13)}Download ${I('chevd',11)}</span><span class="btn sm dark" style="border:0;color:#EA7E6B">${I('trash',13)}</span><span class="btn sm dark" style="border:0">${I('x',13)}</span>
+   </div></div>
+  <div style="flex:1;display:grid;place-items:center;position:relative">
+   <div style="width:640px;height:427px;border-radius:4px;background:${G[3]};position:relative;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+    ${[[190,110,70,82,'Riya'],[330,96,66,78,'Kabir'],[470,150,58,70,'']].map(f=>`<div style="position:absolute;left:${f[0]}px;top:${f[1]}px;width:${f[2]}px;height:${f[3]}px;border:1.5px solid #F2D38A;border-radius:6px">${f[4]?`<span style="position:absolute;top:-20px;left:-1px;background:#F2D38A;color:#1E1508;font-size:10px;font-weight:800;padding:1px 6px;border-radius:4px">${f[4]}</span>`:''}</div>`).join('')}
+    <div style="position:absolute;right:14px;bottom:10px;color:#fff;opacity:.7;font-family:var(--display);font-size:15px">© Northlight Studio</div>
+   </div>
+   <span style="position:absolute;left:18px;top:50%;width:38px;height:38px;border-radius:50%;background:#15120F;border:1px solid #2c251d;display:grid;place-items:center">${I('back',16)}</span>
+   <span style="position:absolute;right:18px;top:50%;width:38px;height:38px;border-radius:50%;background:#15120F;border:1px solid #2c251d;display:grid;place-items:center">${I('arrow',16)}</span>
+   <div style="position:absolute;top:66px;left:50%;transform:translateX(-50%);background:#15120F;border:1px solid #2c251d;border-radius:10px;padding:6px;width:190px;font-size:12px;box-shadow:0 10px 30px rgba(0,0,0,.5)">${[['Download web size','2048 px · watermarked'],['Download original','6000 × 4000 · 11.2 MB'],['Copy share link','']].map((d,i)=>`<div style="padding:6px 8px;border-radius:6px;${i===0?'background:#1D1914':''}"><b>${d[0]}</b>${d[1]?`<div style="color:#7F7566;font-size:10.5px">${d[1]}</div>`:''}</div>`).join('')}</div>
+  </div>
+  <div style="display:flex;justify-content:center;padding:6px 0 8px"><div class="row" style="gap:4px;background:#15120F;border:1px solid #2c251d;border-radius:12px;padding:5px 8px">
+   <span class="btn sm pri">${I('play',12)}Slideshow</span><span style="width:1px;height:18px;background:#2c251d"></span>
+   ${[['zout','Zoom out'],['','Fit'],['zin','Zoom in'],['','100%'],['full','Full screen']].map(t=>`<span class="btn sm dark" style="border:0" title="${t[1]}">${t[0]?I(t[0],13):t[1]}</span>`).join('')}<span style="width:1px;height:18px;background:#2c251d"></span>
+   ${[['rotl','Rotate left'],['rotr','Rotate right'],['flip','Flip']].map(t=>`<span class="btn sm dark" style="border:0">${I(t[0],13)}</span>`).join('')}<span class="btn sm dark" style="border:0">Reset</span><span style="width:1px;height:18px;background:#2c251d"></span><span class="btn sm dark" style="border:0;color:#F2D38A">${I('face',13)}Face boxes on</span>
+  </div></div>
+  <div class="row" style="gap:6px;padding:0 18px 10px;justify-content:center">${[0,3,6,9,1,4,7,10,2].map((g,i)=>`<div style="width:58px;height:38px;border-radius:4px;background:${G[g]};${i===1?'outline:2px solid #F2D38A;outline-offset:1px':'opacity:.6'}"></div>`).join('')}</div>
+  <div class="mono" style="position:absolute;left:18px;bottom:12px;font-size:10.5px;color:#7F7566">← → photos · Space slideshow · F favourite · D download · Esc close</div>
+ </div>
+ <div style="background:#100D0A;border-left:1px solid #2c251d;padding:16px;display:flex;flex-direction:column;gap:14px;overflow:hidden">
+  <div class="row" style="gap:16px;border-bottom:1px solid #2c251d"><span style="padding-bottom:8px;font-weight:800;box-shadow:inset 0 -2px 0 #E2B458">Details</span><span style="padding-bottom:8px;color:#7F7566;font-weight:700">Faces · 3</span><span style="padding-bottom:8px;color:#7F7566;font-weight:700">Activity</span></div>
+  ${[['Captured','20 Sep 2026, 8:42:17 PM'],['Camera','Canon EOS R6'],['Lens','RF 35mm F1.8 Macro IS STM'],['Exposure','1/200 s · f/2.2 · ISO 800'],['Size','6000 × 4000 · 11.2 MB'],['Uploaded','Standard · by Meera · via Camera sync'],['Album','Sangeet · #2 of 401']].map(d=>`<div><div class="lbl" style="color:#7F7566">${d[0]}</div><div style="font-weight:600">${d[1]}</div></div>`).join('')}
+  <div><div class="lbl" style="color:#7F7566;margin-bottom:6px">People in this photo</div><div class="row" style="gap:8px">${[['Riya','214'],['Kabir','198'],['Guest','12']].map((p,i)=>`<div style="text-align:center"><div style="width:44px;height:44px;border-radius:50%;background:${G[[6,0,10][i]]};border:1.5px solid #E2B458"></div><div style="font-size:10.5px;margin-top:3px">${p[0]}</div><div class="mono" style="font-size:9.5px;color:#7F7566">${p[1]} photos</div></div>`).join('')}</div></div>
+  <div class="row" style="gap:14px;font-size:12px;color:#B7AC98"><span>${I('heart',13)} 14 favourites</span><span>${I('download',13)} 32 downloads</span></div>
+  <span class="btn" style="margin-top:auto;justify-content:center;background:#1D1914;border-color:#372F25;color:#F2D38A">${I('wand',14)}AI enhance this photo</span>
+  <div class="mono" style="font-size:9.5px;color:#5c5448">photo c3adea4f · album fdf75b9f</div>
+ </div>
+</div>`,
+notes:{p:'Inspect, fix and act on a single photo without leaving the album.',u:['Every control from the reference viewer is kept: count, filename with copy, set as event or album cover, share, download web size or original, delete (with a guard if it is the cover), close, previous and next, slideshow, zoom out / fit / zoom in / full screen, rotate left and right, flip, reset, face boxes on or off, details, and IDs','Buttons now have text labels, so icons are not the only cue. Keyboard shortcuts are listed on screen','New: Hide from guests, Move to album, a filmstrip, full EXIF (camera, lens, exposure), who uploaded it and how, named people with photo counts, guest favourites and downloads, and AI enhance'],r:'FullScreenGallery: Event Cover, Album Cover, share, download, delete, close, Play, zoom, Fit, fullscreen, rotate, flip, Reset, Faces, Details',b:['react-zoom-pan-pinch','exifr at processing','Vectorize face clusters','Web Share API']}});
+
+add({id:'upload',g:'Work',name:'Upload review',route:'/events/6402f9f · upload',render:()=>shell('events','app.frameline.in/events/6402f9f',wsBody({noBars:true}),true)+`<div class="scrim"></div>
+<div class="modal" style="top:70px;width:900px">
+ <div class="mh"><div><h1>Add 412 photos to Sangeet</h1><div class="m-sub">Checked in your browser before anything is sent.</div></div>${I('x',18)}</div>
+ <div style="display:grid;grid-template-columns:1fr 330px">
+  <div style="padding:18px 22px;display:flex;flex-direction:column;gap:14px">
+   <div class="fl"><span>Quality</span><div class="row" style="gap:10px">${[['Web-ready','Resized to 2K, watermark applied. Counts as 1 photo.',1],['Originals','Full files kept for download. Counts as 2 photos.',0]].map(q=>`<div style="flex:1;border:${q[2]?'1.5px solid var(--accent)':'1px solid var(--line)'};background:${q[2]?'var(--accent-soft)':'var(--surface)'};border-radius:10px;padding:10px 12px"><b>${q[0]}</b><div style="font-size:12px;color:var(--ink-2)">${q[1]}</div></div>`).join('')}</div></div>
+   <div class="srow" style="padding:8px 0"><div class="ic">${I('drop',14)}</div><div class="tx"><b>Add watermark</b><small>© Northlight Studio · bottom right · <u>edit</u></small></div><div class="tg on"></div></div>
+   <div class="srow" style="padding:8px 0"><div class="ic">${I('upload',14)}</div><div class="tx"><b>Upload speed</b><small>Fast mode sends smaller batches on weak connections</small></div><div class="seg"><span class="on">Standard</span><span>Fast</span></div></div>
+   <div class="card cardp" style="background:var(--warn-soft);border-color:transparent"><div class="row" style="justify-content:space-between"><b style="color:var(--warn)">8 photos are already in this event</b><div class="seg"><span class="on">Skip them</span><span>Upload anyway</span></div></div>
+   <div class="row" style="gap:8px;margin-top:10px">${[1,4,7,10].map(g=>`<div style="flex:1"><div class="row" style="gap:3px">${ph(g,'','flex:1')}${ph(g,'','flex:1;opacity:.6')}</div><div class="mono" style="font-size:9.5px;color:var(--ink-3);margin-top:3px">IMG_41${g}8.JPG</div></div>`).join('')}</div>
+   <div style="font-size:11.5px;color:var(--ink-2);margin-top:8px">Matched by content, not just filename. <u>Run deep check</u> for edited copies.</div></div>
+  </div>
+  <div style="background:var(--sunk);border-left:1px solid var(--line);padding:18px;display:flex;flex-direction:column;gap:12px">
+   <div class="lbl">Summary</div>
+   ${[['Selected','412'],['Duplicates skipped','− 8'],['Too large (over 200 MB)','− 0'],['Will upload','404']].map((r,i)=>`<div class="row" style="justify-content:space-between;${i===3?'border-top:1px solid var(--line-2);padding-top:8px;font-weight:800':''}"><span>${r[0]}</span><span class="mono">${r[1]}</span></div>`).join('')}
+   <div><div class="row" style="justify-content:space-between;font-size:12px"><span>Event capacity after upload</span><span class="mono">1,652 / 2,000</span></div><div class="meter" style="margin-top:6px"><i style="width:82%"></i></div></div>
+   <div class="card cardp" style="font-size:12px;color:var(--ink-2)">Uploading more than 2,000 photos? The <b style="color:var(--ink)">desktop uploader</b> resumes after sleep or network drops.</div>
+   <span class="btn pri lg" style="justify-content:center;margin-top:auto">Upload 404 photos</span>
+  </div>
+ </div></div>`,
+notes:{p:'One check before upload that settles quality, watermark, speed and duplicates.',u:['Replaces the two upload zones (Standard and Original, counting 2×) with one quality choice that shows its cost against capacity','Duplicate detection is on by default with side-by-side thumbnails; "Upload anyway" and a deeper check match the reference options','Fast mode, oversized-file checks, the capacity-after meter and a desktop-app tip for big jobs. Uploads resume after drops and correct EXIF orientation'],r:'Standard Upload, Original Upload, Add Watermark?, Fast Upload, Run Advanced Duplicate Detection, upload as duplicate or skip, desktop app',b:['Uppy','pHash in a Web Worker','R2 multipart resume']}});
+
+add({id:'import',g:'Work',name:'Import from Drive',route:'/events/6402f9f · import',render:()=>shell('events','app.frameline.in/events/6402f9f',wsBody({noBars:true}),true)+`<div class="scrim"></div>
+<div class="modal" style="top:70px;width:860px">
+ <div class="mh"><div><h1>Import from Google Drive</h1><div class="m-sub">Paste a folder shared as "Anyone with the link".</div></div>${I('x',18)}</div>
+ <div style="padding:14px 22px 0">${tabsU(['Import','Active · 1','History'],0)}</div>
+ <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:16px 22px 20px">
+  <div style="display:flex;flex-direction:column;gap:12px">
+   <div class="row"><div class="field" style="flex:1">${I('drive',14)}<span class="mono" style="font-size:11.5px">drive.google.com/drive/folders/1Qx…Ra</span></div><span class="btn">Preview</span></div>
+   <div class="card cardp"><div class="lbl" style="margin-bottom:8px">Riya-Kabir-Final · 1,020 photos</div>
+   ${[['Haldi','312','New album'],['Mehendi','287','New album'],['Sangeet','401','Adds to existing'],['Sangeet/Candids','20','Merged into Sangeet']].map(f=>`<div class="row" style="padding:6px 0;border-top:1px solid var(--line);gap:10px">${I('folder',14)}<b style="font-weight:600">${f[0]}</b><span class="mono" style="color:var(--ink-3);font-size:11.5px">${f[1]}</span><span class="chip ${f[2].startsWith('New')?'acc':''}" style="margin-left:auto">${f[2]}</span></div>`).join('')}</div>
+   <div style="font-size:12px;color:var(--ink-2)">47 photos were imported before and will be skipped.</div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+   ${[['Create albums from subfolders',1],['Merge nested subfolders into the parent album',1],['Apply watermark',1]].map(t=>`<div class="row" style="justify-content:space-between;padding:6px 0"><b style="font-weight:600">${t[0]}</b><div class="tg ${t[1]?'on':''}"></div></div>`).join('')}
+   <div class="fl"><span>Quality</span><div class="seg"><span class="on">Web-ready 2K</span><span>Originals (2×)</span></div></div>
+   <div class="card cardp" style="background:var(--sunk);border:0;font-size:12px;color:var(--ink-2)">If Google limits the folder, we pause and retry automatically after 24 hours. Photos already imported are kept. <u>Import FAQ</u></div>
+   <span class="btn pri lg" style="justify-content:center;margin-top:auto">Import 973 photos</span>
+  </div>
+ </div></div>`,
+notes:{p:'Bring in a finished shoot from Google Drive without downloading and re-uploading it.',u:['Preview the folder tree first and see which albums will be created, merged or added to','Keeps every reference option: subfolders become albums, merge nested folders, watermark, 2K or originals','Import, Active and History tabs; skipped duplicates; automatic retry when Google throttles the folder. The FAQ link replaces a separate help page'],r:'Import from Google Drive modal, /help/google-drive-import',b:['Drive API v3 (public folders)','Queues + Containers','R2']}});
+
+add({id:'share',g:'Work',name:'Share: link & access',route:'/events/6402f9f · share',render:()=>shell('events','app.frameline.in/events/6402f9f',wsBody({noBars:true}),true)+`<div class="scrim"></div>
+<div class="modal" style="top:60px;width:900px">
+ <div class="mh"><div><h1>Share Riya &amp; Kabir Wedding</h1><div class="m-sub">A link, a PIN and a printed QR code.</div></div>${I('x',18)}</div>
+ <div style="padding:12px 22px 0">${tabsU(['Link & access','QR code','Message','Personal links'],0)}</div>
+ <div style="display:grid;grid-template-columns:1fr 300px">
+  <div style="padding:16px 22px;display:flex;flex-direction:column;gap:14px">
+   <div class="fl"><span>Gallery link</span><div class="row"><div class="field" style="flex:1">${I('link',14)}<span class="mono">frameline.in/6402f9f</span><span style="margin-left:auto;font-size:11px;color:var(--ink-3)">short link on</span></div><span class="btn pri">${I('copy',14)}Copy</span></div></div>
+   <div class="row" style="gap:8px"><span class="btn sm">${I('chat',12)}WhatsApp</span><span class="btn sm">${I('mail',12)}Email</span><span class="btn sm">App link · code 6402f9f</span></div>
+   <div class="fl"><span>Who can open it</span><div class="seg"><span>Anyone with the link</span><span class="on">${I('lock',12)} Link + PIN</span><span>Registered guests</span></div></div>
+   <div class="card cardp" style="background:var(--sunk);border:0"><div class="row" style="justify-content:space-between"><div><div class="lbl">PIN</div><b class="mono" style="font-size:24px;letter-spacing:.22em">5211</b></div><div class="row"><span class="btn sm">${I('copy',12)}Copy</span><span class="btn sm">New PIN</span></div></div>
+   <div style="font-size:12px;color:var(--ink-2);margin-top:6px">The PIN also unlocks <b style="color:var(--ink)">Download all</b> on the web (5 times per guest) and shows every photo when "only their photos" is on.</div></div>
+   <div class="row" style="justify-content:space-between"><div><b>Guests see only their own photos</b><div style="font-size:12px;color:var(--ink-2)">A selfie unlocks their matches</div></div><div class="tg on"></div></div>
+  </div>
+  <div style="background:var(--sunk);padding:18px;display:flex;flex-direction:column;align-items:center;gap:10px;border-left:1px solid var(--line)">
+   <div class="lbl">What the guest sees</div>
+   <div style="width:190px;border-radius:18px;overflow:hidden;border:6px solid #0A0806;background:var(--surface)"><div style="height:120px;background:${G[12]};display:flex;align-items:flex-end;padding:10px;color:#fff;font-family:var(--display);font-size:15px;font-weight:600">Riya &amp; Kabir</div><div style="padding:10px;display:flex;flex-direction:column;gap:6px"><div style="font-size:10.5px;color:var(--ink-2)">Enter PIN</div><div class="row" style="gap:4px">${'5211'.split('').map(()=>`<span style="flex:1;height:24px;border:1px solid var(--line-2);border-radius:5px"></span>`).join('')}</div><span class="btn sm" style="justify-content:center;background:#8C2F39;color:#fff;border:0">Continue</span></div></div>
+  </div>
+ </div></div>`,
+notes:{p:'Everything needed to get guests into the gallery, on one sheet with a live guest preview.',u:['Access level, PIN and privacy sit together, because they are one decision','What the PIN unlocks is stated under it (download all on the web, 5 times per guest; view all when privacy is on)','Shortened links, WhatsApp, email and the app code are one click each'],r:'Share → Message tab (web gallery link, shortened links), PIN tab (copy, reset, what it is used for)',b:['Workers KV short links','Radix Tabs']}});
+
+add({id:'share2',g:'Work',name:'Share: QR & personal links',route:'/events/6402f9f · share',render:()=>shell('events','app.frameline.in/events/6402f9f',wsBody({noBars:true}),true)+`<div class="scrim"></div>
+<div class="modal" style="top:48px;width:980px">
+ <div class="mh"><div><h1>Share Riya &amp; Kabir Wedding</h1><div class="m-sub">Printed QR codes and links made for one person.</div></div>${I('x',18)}</div>
+ <div style="padding:12px 22px 0">${tabsU(['Link & access','QR code','Message','Personal links'],3)}</div>
+ <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;padding:16px 22px 20px">
+  <div class="card cardp" style="display:flex;flex-direction:column;gap:10px"><div class="row" style="gap:8px"><div class="ic">${I('folder',14)}</div><b>Album link</b></div><div style="font-size:12px;color:var(--ink-2)">Guests land straight on one album.</div><div class="field">Sangeet ${I('chevd',12)}</div>${[['Open web gallery directly',1],['Shorten link',1]].map(o=>`<div class="row" style="justify-content:space-between;font-size:12.5px"><span>${o[0]}</span><div class="tg ${o[1]?'on':''}"></div></div>`).join('')}<div class="field" style="margin-top:auto"><span class="mono" style="font-size:11px">frameline.in/s/Qm7k</span><span style="margin-left:auto">${I('copy',13)}</span></div></div>
+  <div class="card cardp" style="display:flex;flex-direction:column;gap:10px;border-color:var(--accent)"><div class="row" style="gap:8px"><div class="ic">${I('face',14)}</div><b>Face link for one guest</b></div><div style="font-size:12px;color:var(--ink-2)">Their photos open with no selfie needed, for grandparents or the couple.</div>
+   <div class="row" style="gap:10px"><div style="width:52px;height:52px;border-radius:50%;background:${G[6]};border:2px solid var(--accent)"></div><div class="fl" style="flex:1"><span>Welcome name</span><div class="field">Dadi ji</div></div></div>
+   <div style="font-size:11.5px;color:var(--ink-3)">Or paste a photo URL with one clear face.</div>
+   ${[['Start on "My photos"',1]].map(o=>`<div class="row" style="justify-content:space-between;font-size:12.5px"><span>${o[0]}</span><div class="tg on"></div></div>`).join('')}
+   <div class="field" style="margin-top:auto"><span class="mono" style="font-size:11px">frameline.in/s/Dd9x</span><span style="margin-left:auto">${I('copy',13)}</span></div></div>
+  <div class="card cardp" style="display:flex;flex-direction:column;gap:10px"><div class="row" style="gap:8px"><div class="ic">${I('star',14)}</div><b>VIP link</b></div><div style="font-size:12px;color:var(--ink-2)">For family and the client. More access, no friction.</div>
+   ${[['Skip sign-in','Browse and download without an account',1],['Include PIN','Download all works without typing it',1],['See all photos','Ignores "only their photos"',0]].map(o=>`<div class="row" style="justify-content:space-between;align-items:flex-start"><div><b style="font-size:12.5px">${o[0]}</b><div style="font-size:11px;color:var(--ink-3)">${o[1]}</div></div><div class="tg ${o[2]?'on':''}"></div></div>`).join('')}
+   <div class="field" style="margin-top:auto"><span class="mono" style="font-size:11px">frameline.in/v/6402f9f…</span><span style="margin-left:auto">${I('copy',13)}</span></div></div>
+ </div>
+ <div style="border-top:1px solid var(--line);padding:14px 22px;display:flex;gap:18px;align-items:center;background:var(--sunk)">
+  <div style="background:#fff;border-radius:8px;padding:6px">${qrSvg(7,72,'#8C2F39',true)}</div>
+  <div style="flex:1"><b>QR code tab</b><div style="font-size:12px;color:var(--ink-2)">Style: Rounded · Soft · Hybrid · Classic. Corners: rounded, circle, square. Brand colour, your logo in the centre (up to 80 KB), separate codes for the web gallery and the app, PNG or SVG, and an A4 poster.</div></div>
+  <span class="btn">${I('download',14)}Poster</span>
+ </div></div>`,
+notes:{p:'Special links for special people, plus a branded QR code.',u:['Album link: deep-link to one album, open the web gallery directly, shorten','Face link: upload a photo of one person or paste a photo URL; they see their photos with no selfie and a welcome greeting by name','VIP link: skip sign-in and embed the PIN, as in the reference app, plus an optional "see all photos"','The QR tab keeps every style option: 4 styles, 3 corner shapes, colour, a logo up to 80 KB, separate web and app codes, PNG or SVG'],r:'Share → QR Codes, Advanced Links (album link, prefilled My Photos link, personalised link), VIP Links',b:['qr-code-styling','Vectorize lookup from a single face','Signed link tokens']}});
+
+add({id:'message',g:'Work',name:'Share: message',route:'/events/6402f9f · share',render:()=>shell('events','app.frameline.in/events/6402f9f',wsBody({noBars:true}),true)+`<div class="scrim"></div>
+<div class="modal" style="top:60px;width:900px">
+ <div class="mh"><div><h1>Share Riya &amp; Kabir Wedding</h1><div class="m-sub">Your reusable message fills in each event's details.</div></div>${I('x',18)}</div>
+ <div style="padding:12px 22px 0">${tabsU(['Link & access','QR code','Message','Personal links'],2)}</div>
+ <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:16px 22px 20px">
+  <div style="display:flex;flex-direction:column;gap:10px">
+   <div class="row" style="justify-content:space-between"><b>Template</b><span class="mono" style="font-size:11px;color:var(--ink-3)">214 / 2,000</span></div>
+   <div class="field" style="height:180px;align-items:flex-start;line-height:1.6;display:block">Namaste! The photos from <span class="chip acc">Event name</span> are ready.<br><br>Open <span class="chip acc">Web gallery link</span> and enter PIN <span class="chip acc">PIN</span>, then take a selfie to find yourself.<br><br>Prefer the app? Use code <span class="chip acc">Event ID</span>.<br>— <span class="chip acc">Studio name</span></div>
+   <div><div class="lbl" style="margin-bottom:6px">Insert</div><div class="row" style="gap:6px;flex-wrap:wrap">${['Event name','Event ID','Studio name','Web gallery link','App link','PIN','Expiry date'].map(v=>`<span class="chip" style="border:1px dashed var(--line-2)">+ ${v}</span>`).join('')}</div></div>
+   <div class="row" style="justify-content:space-between;margin-top:auto"><span class="btn ghost sm">Reset to default</span><span class="btn pri">Save for all events</span></div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+   <div class="row" style="justify-content:space-between"><b>Preview</b><div class="row" style="gap:6px;font-size:12px"><span>Short links</span><div class="tg on"></div></div></div>
+   <div style="background:#E7DDCB;border-radius:12px;padding:14px;flex:1"><div style="background:#DCF8C6;color:#1B1712;border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.55;max-width:92%;margin-left:auto;box-shadow:0 1px 1px rgba(0,0,0,.1)">Namaste! The photos from <b>Riya &amp; Kabir Wedding</b> are ready.<br><br>Open frameline.in/6402f9f and enter PIN 5211, then take a selfie to find yourself.<br><br>Prefer the app? Use code 6402F9F.<br>— Northlight Studio<div class="mono" style="text-align:right;font-size:9.5px;color:#6b7a6b">9:41 PM ✓✓</div></div></div>
+   <div class="row"><span class="btn" style="flex:1;justify-content:center">${I('chat',14)}WhatsApp</span><span class="btn" style="flex:1;justify-content:center">${I('mail',14)}Email</span><span class="btn" style="flex:1;justify-content:center">${I('copy',14)}Copy</span></div>
+  </div>
+ </div></div>`,
+notes:{p:'Write the invite once and reuse it for every event.',u:['Variables appear as chips, not raw placeholders, with the same set as the reference app (event name, ID, studio, app link, web link) plus PIN and expiry','The preview looks like the WhatsApp chat it will land in, with the short-links toggle next to it','A 2,000-character limit with a counter, Save for all events, and Reset to default'],r:'Share → Message and Customize tabs (reusable message, add event detail, shortened links, email, WhatsApp, copy)',b:['TipTap with mention chips','Server-side template render']}});
+
+add({id:'settings',g:'Work',name:'Event settings',route:'/events/6402f9f/settings',render:()=>shell('events','app.frameline.in/events/6402f9f/settings',head('Event settings','','<span style="color:var(--ink-3);font-size:12px">All changes saved · just now</span><span class="btn">'+I('eye',14)+'Preview as guest</span>','Riya &amp; Kabir Wedding /')+`
+<div class="m-body" style="display:grid;grid-template-columns:168px 1fr 290px;gap:20px">
+ <div style="display:flex;flex-direction:column;gap:1px">${['General','Access','Faces','Downloads','Guest uploads','Watermark','Branding','Store','Hosts','Website & leads','Danger zone'].map((s,i)=>`<div style="padding:6px 10px;border-radius:7px;font-weight:700;${i===1?'background:var(--accent-soft);color:var(--accent-text)':'color:var(--ink-2)'}">${s}</div>`).join('')}</div>
+ <div style="display:flex;flex-direction:column;gap:12px;overflow:hidden">
+  <div class="card cardp"><div class="ct-h"><h3>Access</h3></div>
+   <div class="srow"><div class="ic">${I('lock',15)}</div><div class="tx"><b>Who can open the gallery</b><small>PIN 5211 · change it in Share</small></div><div class="seg"><span>Link</span><span class="on">Link + PIN</span><span>Registered</span></div></div>
+   <div class="srow"><div class="ic">${I('users',15)}</div><div class="tx"><b>Ask for name, email and mobile first</b><small>38 registered · see Guests</small></div><div class="tg on"></div></div>
+   <div class="srow"><div class="ic">${I('phone',15)}</div><div class="tx"><b>Skip the "get the app" page</b><small>Guests go straight to the web gallery</small></div><div class="tg on"></div></div></div>
+  <div class="card cardp"><div class="ct-h"><h3>Faces</h3><div class="row"><span class="chip ok">Index ready</span><span class="btn sm">Re-run indexing</span></div></div>
+   <div class="srow"><div class="ic">${I('face',15)}</div><div class="tx"><b>Selfie search</b><small>Guests find themselves across all albums</small></div><div class="tg on"></div></div>
+   <div class="srow"><div class="ic">${I('eye',15)}</div><div class="tx"><b>Guests only see their own photos</b><small>Everything else stays hidden. The PIN shows all</small></div><div class="tg on"></div></div>
+   <div class="srow"><div class="ic">${I('shield',15)}</div><div class="tx"><b>Selfie search without signing in</b><small>Anonymous "My photos"</small></div><div class="tg"></div></div></div>
+  <div class="card cardp"><div class="ct-h"><h3>Downloads</h3><span class="btn sm">Download log</span></div>
+   <div class="srow"><div class="ic">${I('download',15)}</div><div class="tx"><b>What guests can download</b><small>Web gallery and app</small></div><div class="seg"><span>Everything</span><span class="on">Their photos</span><span>Nothing</span></div></div>
+   <div class="srow"><div class="ic">${I('image',15)}</div><div class="tx"><b>Original quality</b><small>Off: downloads are capped at 2048 px</small></div><div class="tg"></div></div>
+   <div class="srow"><div class="ic">${I('mail',15)}</div><div class="tx"><b>Email me every photo as ZIP files</b><small>For your archive or the client's drive</small></div><span class="btn sm">Request</span></div></div>
+ </div>
+ <div style="display:flex;flex-direction:column;gap:12px;align-self:start">
+ <div class="card cardp" style="background:var(--side);color:var(--side-ink);border-color:var(--side)"><div class="lbl" style="color:#E2B458">What guests can do</div>
+ <ul style="margin:10px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:7px"><li>Open the gallery with the link and PIN 5211</li><li>Leave their name, email and mobile first</li><li>Take a selfie and see only their photos</li><li>Download their own photos at up to 2048 px</li><li>Upload up to 300 photos (you review them)</li><li>Send you an enquiry</li></ul></div>
+ <div class="card cardp" style="font-size:12px;color:var(--ink-2)"><b style="color:var(--ink)">Hosts · 2</b><br>Priya Rao (client), Aman Rao. Hosts see everything and approve guest uploads. <u>Manage</u></div>
+ </div>
+</div>`),
+notes:{p:'Change what guests can do and understand the result without guessing.',u:['Sections cover every reference toggle: General (name, ID, date), Access (link, PIN, registration, skip app page), Faces (search, privacy, anonymous, re-index), Downloads (all / theirs / none, originals, ZIP by email, download log)','Also Guest uploads (on, limit, watermark, review), Watermark (turn off, event rule), Branding, Store, Hosts, Website & leads (show on site, allow enquiries), Danger zone (disable, delete)','A plain-language summary on a dark card updates as you switch, with Preview as guest one click away'],r:'/events/:id/settings (every card), /events/:id/watermark, /events/:id/branding',b:['Optimistic mutations','Radix Switch / Toggle Group']}});
+
+add({id:'guests',g:'Work',name:'Guests & favourites',route:'/events/6402f9f/guests',render:()=>shell('events','app.frameline.in/events/6402f9f/guests',head('Guests','Everyone who registered, favourited or asked for access.',`<span class="btn">${I('download',14)}Export CSV</span>`,'Riya &amp; Kabir Wedding /')+`
+<div class="m-body" style="display:flex;flex-direction:column;gap:14px">
+ ${tabsU(['Favourites · 14','Registered · 38','Access requests · 2','Guest uploads · 12'],0)}
+ <div style="display:grid;grid-template-columns:1fr 320px;gap:16px">
+  <div class="card"><table class="t"><thead><tr><th>Guest</th><th>Picked</th><th class="r">Photos</th><th>Last active</th><th class="r"></th></tr></thead><tbody>
+  ${[['Priya Rao','client · host',[3,6,0,9],'86','12 min ago'],['Neha Kapoor','guest',[1,4,10],'24','2 h ago'],['Aman Rao','host',[12,2,7,11],'61','yesterday'],['Dev Malhotra','guest',[5,8],'9','2 days ago'],['Sara Thomas','guest',[13,3,6],'17','3 days ago']].map(r=>`<tr><td><b style="font-weight:700">${r[0]}</b><div style="font-size:11px;color:var(--ink-3)">${r[1]}</div></td><td><div class="row" style="gap:3px">${r[2].map(g=>`<div style="width:34px;height:24px;border-radius:3px;background:${G[g]}"></div>`).join('')}</div></td><td class="r mono">${r[3]}</td><td style="color:var(--ink-3)">${r[4]}</td><td class="r"><span class="btn sm">View picks</span> <span class="btn sm">${I('download',12)}ZIP</span></td></tr>`).join('')}</tbody></table></div>
+  <div style="display:flex;flex-direction:column;gap:12px">
+   <div class="card cardp"><div class="ct-h"><h3>Access requests</h3><span class="chip acc">2</span></div>
+   ${[['Rohan Mehta','rohan.m@gmail.com','Wants full access as the couple’s cousin'],['Studio Lumen','hello@lumen.in','Second shooter, wants to upload']].map(a=>`<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${a[0]}</b><div class="mono" style="font-size:11px;color:var(--ink-3)">${a[1]}</div><div style="font-size:12px;color:var(--ink-2);margin:4px 0 6px">${a[2]}</div><div class="row" style="gap:6px"><span class="btn sm pri">Approve</span><span class="btn sm">Decline</span></div></div>`).join('')}</div>
+   <div class="card cardp" style="font-size:12px;color:var(--ink-2)"><b style="color:var(--ink)">Client proofing</b><br>The couple's favourites (86) can become an album for editing or an album order. <u>Create album from picks</u></div>
+  </div>
+ </div></div>`),
+notes:{p:'See who engaged with the gallery and act on it: proofing, leads and access.',u:['Favourites: every viewer who starred photos, a preview of their picks, a count, and View picks or Download ZIP','Registered: guest name, email and mobile, exportable as leads. Access requests: approve or decline co-admin requests','Guest uploads are reviewed here before going live. New: turn the client’s picks into an album'],r:'/events/:id/who-favorited, Guests Data, Admin Request modal, Guest Uploads album',b:['D1','Queues ZIP builder','R2 multipart ZIP']}});
+
+add({id:'gallery',g:'Guests',name:'Guest gallery (phone)',route:'frameline.in/6402f9f',render:()=>`${chrome('frameline.in/6402f9f · guest view on a phone')}
+<div style="height:766px;display:flex;align-items:center;justify-content:center;gap:36px;background:radial-gradient(circle at 50% 40%,var(--sunk),var(--paper))">
+ <div style="display:flex;flex-direction:column;align-items:center;gap:10px"><span class="lbl">1 · Landing</span>
+ <div class="phone"><div class="scr"><div style="height:310px;background:${G[12]};position:relative;color:#fff;display:flex;flex-direction:column;justify-content:flex-end;padding:18px"><div style="position:absolute;top:18px;left:0;right:0;text-align:center;font-family:var(--display);letter-spacing:.22em;font-size:11px">NORTHLIGHT</div><div style="font-size:11px;opacity:.9">Welcome, Dadi ji</div><div style="font-family:var(--display);font-size:28px;font-weight:600;line-height:1.05">Riya &amp; Kabir</div><div style="font-size:12px;opacity:.9">12–14 Sep 2026 · Udaipur</div></div>
+ <div style="padding:14px;display:flex;flex-direction:column;gap:9px"><span class="btn lg" style="justify-content:center;background:#8C2F39;border-color:#8C2F39;color:#fff;padding:12px">${I('face',18)}Find my photos</span><div style="text-align:center;font-size:10.5px;color:var(--ink-2)">Your selfie is only used to match you and is deleted after 30 days.</div>
+ <div class="row" style="justify-content:space-between;margin-top:4px"><b style="font-size:12px">Albums</b><span style="font-size:11px;color:var(--ink-3)">1,248 photos · 2 films</span></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">${[0,2,6,1,10,8].map(g=>ph(g)).join('')}</div></div></div></div></div>
+ <div style="display:flex;flex-direction:column;align-items:center;gap:10px"><span class="lbl">2 · Your photos</span>
+ <div class="phone"><div class="scr"><div style="padding:14px 12px 8px;border-bottom:1px solid var(--line)"><div class="row" style="justify-content:space-between"><span style="font-family:var(--display);letter-spacing:.2em;font-size:10px;color:#8C2F39">NORTHLIGHT</span>${I('heart',16)}</div><div style="font-family:var(--display);font-size:19px;font-weight:600;margin-top:6px">We found you in 38 photos</div><div class="row" style="gap:5px;margin-top:8px;flex-wrap:wrap"><span class="chip" style="background:var(--side);color:#F2D38A">All 38</span><span class="chip">Haldi 6</span><span class="chip">Sangeet 19</span><span class="chip">Wedding 13</span></div></div>
+ <div style="padding:5px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;flex:1;overflow:hidden;align-content:start">${[3,6,11,0,12,2,7,10,1,4,9,13,5,8,6].map(g=>`<div class="ph" style="aspect-ratio:1;background:${G[g]}"></div>`).join('')}</div>
+ <div style="position:absolute;left:0;right:0;bottom:0;padding:10px;background:var(--surface);border-top:1px solid var(--line);display:flex;gap:6px"><span class="btn" style="flex:1;justify-content:center">${I('bag',14)}Buy</span><span class="btn pri" style="flex:1.4;justify-content:center">${I('download',14)}Download 38</span></div></div></div></div>
+ <div style="display:flex;flex-direction:column;align-items:center;gap:10px"><span class="lbl">3 · One photo</span>
+ <div class="phone"><div class="scr" style="background:#070605;color:#F3ECDF"><div class="row" style="justify-content:space-between;padding:14px 14px 0"><span>${I('back',16)}</span><span class="mono" style="font-size:11px;color:#B7AC98">12 / 38</span><span>${I('dots',16)}</span></div>
+ <div style="flex:1;display:grid;place-items:center"><div style="width:100%;height:190px;background:${G[3]}"></div></div>
+ <div style="display:grid;grid-template-columns:repeat(4,1fr);padding:10px 8px 18px;text-align:center;font-size:10.5px;color:#B7AC98">${[['heart','Favourite'],['download','Download'],['share','Share'],['bag','Buy print']].map((a,i)=>`<div style="display:flex;flex-direction:column;align-items:center;gap:4px;${i===0?'color:#F2D38A':''}">${I(a[0],18)}${a[1]}</div>`).join('')}</div>
+ <div style="margin:0 12px 14px;background:#15120F;border:1px solid #2c251d;border-radius:10px;padding:10px;font-size:11px;color:#B7AC98">Want photos like these? <b style="color:#F2D38A">Enquire with Northlight</b></div></div></div></div>
+</div>`,
+notes:{p:'A guest leaves with their photos in under a minute, with no app install and no account.',u:['The selfie comes first on landing. Face and VIP links skip it and greet the guest by name','Results are grouped by album, with Download all (PIN-gated if set) and Buy pinned at the bottom. Films (YouTube) and Highlights appear as albums','In the photo view: favourite (shown to the studio as picks), download, share, buy a print, and an enquiry prompt that turns viewers into leads. Guest uploads, registration and "follow studio" also run here'],r:'Guest web gallery and app: My Photos, favourites, download all with PIN, buy photos, enquiry form, guest uploads, videos, highlights, welcome greeting',b:['React Router v7 SSR on Workers','PWA','Vectorize query']}});
+
+add({id:'watermark',g:'Tools',name:'Watermarks',route:'/watermarks',render:()=>shell('watermark','app.frameline.in/watermarks',head('Watermarks','Your name on every photo guests see. Set it once; new uploads use it automatically.',`<span class="btn pri">Save changes</span>`)+`
+<div class="m-body" style="display:flex;flex-direction:column;gap:12px">
+ <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+  <div class="card cardp" style="border:1.5px solid var(--accent);background:linear-gradient(90deg,var(--accent-soft),var(--surface));display:flex;align-items:center;gap:12px;padding:12px 16px"><div class="ic">${I('upload',15)}</div><div style="flex:1"><b>Simple watermark</b><div style="font-size:12px;color:var(--ink-2)">Added when photos are uploaded. Right for most studios.</div></div><span class="chip acc"><i class="dot"></i>In use</span></div>
+  <div class="card cardp" style="display:flex;align-items:center;gap:12px;padding:12px 16px"><div class="ic" style="background:var(--sunk);color:var(--ink-2)">${I('gear',15)}</div><div style="flex:1"><b>Advanced rules</b><div style="font-size:12px;color:var(--ink-2)">Different marks for originals, store previews or single events.</div></div><span class="btn sm">Set up</span></div>
+ </div>
+ <div style="display:grid;grid-template-columns:330px 1fr;gap:16px;flex:1;min-height:0">
+  <div style="display:flex;flex-direction:column;gap:10px">
+   <div class="card cardp"><div class="row" style="gap:8px;margin-bottom:10px"><span class="mono" style="width:20px;height:20px;border-radius:50%;background:var(--gold);color:#1E1508;display:grid;place-items:center;font-size:11px;font-weight:700">1</span><b style="font-size:14px">Where should it go?</b></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${[['↖','Top left'],['↗','Top right'],['↙','Bottom left'],['↘','Bottom right']].map((p,i)=>`<div style="border-radius:9px;padding:10px 6px;text-align:center;font-weight:700;font-size:12px;${i===3?'background:var(--side);color:#F2D38A':'border:1px solid var(--line-2)'}"><div style="font-size:14px">${p[0]}</div>${p[1]}</div>`).join('')}</div></div>
+   <div class="card cardp"><div class="row" style="gap:8px;margin-bottom:10px"><span class="mono" style="width:20px;height:20px;border-radius:50%;background:var(--gold);color:#1E1508;display:grid;place-items:center;font-size:11px;font-weight:700">2</span><b style="font-size:14px">What should it say?</b></div>
+    <div class="seg" style="width:100%;margin-bottom:8px"><span class="on" style="flex:1;justify-content:center">${I('info',12)} Your name</span><span style="flex:1;justify-content:center">${I('image',12)} Your logo</span></div>
+    <div class="field" style="margin-bottom:6px">Northlight Studio</div><div class="field ph">Subtitle, e.g. your website (optional)</div></div>
+   <div class="card cardp"><div class="row" style="gap:8px;margin-bottom:8px"><span class="mono" style="width:20px;height:20px;border-radius:50%;background:var(--gold);color:#1E1508;display:grid;place-items:center;font-size:11px;font-weight:700">3</span><b style="font-size:14px">How big?</b></div>
+    <div class="seg" style="width:100%"><span style="flex:1;justify-content:center">Subtle</span><span class="on" style="flex:1;justify-content:center">Normal</span><span style="flex:1;justify-content:center">Bold</span></div></div>
+   <div class="row" style="justify-content:space-between;color:var(--accent-text);font-weight:700;font-size:12.5px;padding:2px 4px">More options: font, opacity, exact spacing ${I('chevd',13)}</div>
+  </div>
+  <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:8px;position:relative">
+   <div class="row" style="justify-content:space-between"><span style="font-size:12px;color:var(--ink-2)">Preview on sample photos · <b style="color:var(--ink)">portrait</b></span><div class="row" style="gap:6px"><span class="btn sm">${I('upload',12)}Try my photo</span><span class="btn sm dark">${I('grid',12)}Gallery</span></div></div>
+   <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:26px">
+    <span style="width:34px;height:34px;border-radius:50%;border:1px solid var(--line-2);background:var(--surface);display:grid;place-items:center">${I('back',15)}</span>
+    <div style="width:290px;height:420px;border-radius:4px;background:linear-gradient(180deg,#d9b06a,#a8733a 45%,#5b2e22 75%,#3a2419);position:relative;box-shadow:var(--shadow)"><div style="position:absolute;left:34%;top:14%;width:34%;height:74%;border-radius:40% 40% 8% 8%;background:linear-gradient(180deg,#2a1a14 0 16%,#7a1f2b 16% 70%,#efe6d6 70%)"></div><div style="position:absolute;right:10px;bottom:10px;color:#fff;text-align:right;text-shadow:0 1px 4px rgba(0,0,0,.5)"><div style="font-family:var(--display);font-size:15px;font-weight:600">Northlight Studio</div></div></div>
+    <span style="width:34px;height:34px;border-radius:50%;border:1px solid var(--line-2);background:var(--surface);display:grid;place-items:center">${I('arrow',15)}</span>
+   </div>
+   <div class="row" style="justify-content:center;gap:6px">${Array.from({length:10},(_,k)=>`<span style="width:${k===3?18:6}px;height:6px;border-radius:3px;background:${k===3?'var(--accent)':'var(--line-2)'}"></span>`).join('')}</div>
+  </div>
+ </div>
+</div>`),
+notes:{p:'A beginner sets a good-looking watermark in three choices and sees it on real photos right away.',u:['Follows the reference layout that works well: two modes at the top (Simple, in use; Advanced rules, set up when needed), then numbered questions in plain words: where, what, how big','A large, real portrait preview with arrows, dot pager, Gallery and "Try my photo", so the size and contrast are judged on actual photos','Everything technical (font, opacity, pixel offsets, 9-point position) stays under "More options". Advanced rules hold original-file rules, store FOR SALE templates, per-event overrides and the logo asset library'],r:'/setwatermark (Standard / Original cards, position, text or image, bigger watermark, sample gallery), /dynamicwatermark, /events/:id/watermark, /sell-photos/watermark-settings, Asset Manager',b:['sharp composite in Containers','Canvas live preview','R2 asset store']}});
+
+add({id:'store',g:'Business',name:'Store',route:'/store',render:()=>{const bars=[3,5,2,6,4,7,8,5,3,6,9,11,7,5,4,8,10,6,5,9,12,14,9,7,6,10,8,11,13,9];const mx=14;return shell('store','app.frameline.in/store',head('Store','Sell downloads and prints from any event. Money goes to your wallet.',`<span class="btn">${I('gear',14)}Store settings</span><span class="btn pri">${I('plus',14)}Sell from an event</span>`)+`
+<div class="m-body" style="display:grid;grid-template-columns:1fr 320px;gap:16px">
+ <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">${[['Revenue · Sep','₹48,200'],['USD sales · Sep','$310'],['Orders · pending','63 · 4'],['Carts to recover','7']].map(s=>`<div class="card cardp stat"><small>${s[0]}</small><b>${s[1]}</b></div>`).join('')}</div>
+  <div class="card cardp"><div class="ct-h"><h3>Daily revenue</h3><div class="seg"><span class="on">30 days</span><span>90 days</span></div></div>
+  <svg width="100%" viewBox="0 0 620 160" aria-hidden="true"><defs><linearGradient id="gb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E2B458"/><stop offset="1" stop-color="#B37C22"/></linearGradient></defs>${[0,1,2,3].map(k=>`<line x1="34" x2="620" y1="${10+k*42}" y2="${10+k*42}" stroke="var(--line)"/><text x="0" y="${14+k*42}" font-size="10" fill="var(--ink-3)" font-family="JetBrains Mono">₹${(3-k)*1.5}k</text>`).join('')}${bars.map((b,k)=>`<rect x="${40+k*19.4}" y="${136-b/mx*126}" width="13" height="${b/mx*126}" rx="2" fill="${k===bars.length-1?'url(#gb)':'var(--accent-soft)'}"/>`).join('')}<text x="40" y="155" font-size="10" fill="var(--ink-3)" font-family="JetBrains Mono">27 Aug</text><text x="560" y="155" font-size="10" fill="var(--ink-3)" font-family="JetBrains Mono">26 Sep</text></svg></div>
+  <div class="card"><div class="ct-h cardp" style="margin:0;padding-bottom:4px"><h3>Recent orders</h3><span class="btn ghost sm">${I('download',12)}Export CSV</span></div><table class="t"><thead><tr><th>Order</th><th>Buyer</th><th>Type</th><th class="r">Paid</th><th class="r">Your share</th><th>Status</th></tr></thead><tbody>
+  ${[['#1043','Priya S.','All my photos','₹1,199','₹1,079','Paid'],['#1042','Arjun K.','3 photos','₹447','₹402','Paid'],['#1041','Neha R.','Print 8×12 ×2','₹798','₹718','Printing'],['#1039','John D. (UK)','Single photo','$12','$12','Paid direct']].map(o=>`<tr><td class="mono">${o[0]}</td><td>${o[1]}</td><td>${o[2]}</td><td class="r">${o[3]}</td><td class="r">${o[4]}</td><td><span class="chip ${o[5]==='Printing'?'acc':'ok'}">${o[5]}</span></td></tr>`).join('')}</tbody></table></div>
+ </div>
+ <div style="display:flex;flex-direction:column;gap:12px">
+ <div class="card cardp"><div class="ct-h"><h3>Default prices</h3><span class="btn ghost sm">Edit</span></div>
+ ${[['Single photo','Full resolution','₹149'],['Multiple photos','Each, from 3 photos','₹129'],['All my photos','Everything the guest is in','₹999'],['Print 8×12 in','Matte, 5 days','₹399']].map(p=>`<div class="row" style="padding:8px 0;border-top:1px solid var(--line);justify-content:space-between"><div><b style="font-weight:700">${p[0]}</b><div style="font-size:11.5px;color:var(--ink-3)">${p[1]}</div></div><b class="mono">${p[2]}</b></div>`).join('')}</div>
+ <div class="card cardp" style="background:var(--side);color:var(--side-ink);border-color:var(--side)"><b>7 carts to recover</b><div style="font-size:12px;color:var(--side-ink-2);margin:4px 0 8px">Guests who added photos but didn't pay. Send a reminder on WhatsApp.</div><span class="btn sm pri">Send reminders</span></div>
+ </div>
+</div>`)},
+notes:{p:'Turn galleries into income, with prices, orders and recovery in one place.',u:['Any event can sell. There are no separate "sell photos events"; For-sale uploads are just a store-only album','Seller dashboard stats (INR and USD balances, completed and pending orders, revenue chart), recent orders with your share after GST and commission, and CSV export','Keeps pricing types (single, multiple, all my photos bundle) and adds a one-click cart recovery nudge for "carts to recover"'],r:'/sell-photos, /sell-photos/:id, /sell-photos/dashboard (balances, charts, wallet ledger, photo orders, payment pending, carts to recover, export CSV)',b:['Razorpay Route','PhonePe','Print partner webhook']}});
+
+add({id:'storesettings',g:'Business',name:'Store settings',route:'/store/settings',render:()=>shell('store','app.frameline.in/store/settings',head('Store settings','Needed once before your first payout.','<span class="btn pri">Save</span>','Store /')+`
+<div class="m-body" style="display:flex;flex-direction:column;gap:12px">
+ ${tabsU(['Business & KYC','Payouts','Store watermark','International selling','Terms'],0)}
+ <div style="display:grid;grid-template-columns:1fr 340px;gap:16px">
+  <div class="card cardp" style="display:flex;flex-direction:column;gap:12px">
+   <div class="row" style="gap:10px"><label class="fl" style="flex:1.4"><span>Legal entity name</span><div class="field">Northlight Studio LLP</div></label><label class="fl" style="flex:1"><span>PAN</span><div class="field"><span class="mono">AAKFN4521Q</span></div></label></div>
+   <div class="row" style="justify-content:space-between"><b>Registered under GST?</b><div class="seg"><span class="on">Yes</span><span>No</span></div></div>
+   <label class="fl"><span>GSTIN</span><div class="field"><span class="mono">27AAKFN4521Q1Z8</span><span class="chip ok" style="margin-left:auto">Verified</span></div></label>
+   <div class="lbl" style="margin-top:4px">Documents</div>
+   ${[['PAN card','pan-card.pdf','Verified','ok'],['ID card','aadhaar.jpg','Verified','ok'],['GST certificate','gst-cert.pdf','In review','acc'],['Cancelled cheque','—','Needed','warn']].map(d=>`<div class="row" style="padding:6px 0;border-top:1px solid var(--line)"><div class="ic">${I('receipt',14)}</div><div style="flex:1"><b style="font-weight:700">${d[0]}</b><div class="mono" style="font-size:11px;color:var(--ink-3)">${d[1]}</div></div><span class="chip ${d[3]}">${d[2]}</span>${d[3]==='warn'?'<span class="btn sm">Upload</span>':''}</div>`).join('')}
+   <div style="font-size:11.5px;color:var(--ink-3)">JPG, PNG, PDF, WebP, HEIC · up to 10 MB each. Not registered for GST? We give you a declaration letter template.</div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:12px">
+   <div class="card cardp"><div class="ct-h"><h3>Payout account</h3><span class="chip ok">Verified</span></div>${[['Account holder','Northlight Studio LLP'],['Account','•••• 4471 · HDFC Bank'],['IFSC','HDFC0001234 · Andheri West']].map(r=>`<div style="padding:5px 0"><div class="lbl">${r[0]}</div><div class="mono" style="font-size:12px">${r[1]}</div></div>`).join('')}</div>
+   <div class="card cardp"><div class="ct-h"><h3>International buyers</h3><span class="chip">Off</span></div><div style="font-size:12px;color:var(--ink-2)">Buyers outside India pay you directly by your link or QR, with no commission. Annual plans from $100 for 200 orders.</div><span class="btn sm" style="margin-top:8px">See plans</span></div>
+  </div>
+ </div></div>`),
+notes:{p:'KYC, payouts, the store watermark and international selling in one settings area.',u:['Business & KYC: legal name, PAN, GST yes or no (with a declaration template if no), GSTIN, documents with a status per file, business address','Payouts: bank account and IFSC, verified. Store watermark: templates with live preview. International: plans ($100 / $250 / $500 per year by order count) where buyers pay you directly','Terms: the photo-selling terms and conditions'],r:'/sell-photos/settings, /sell-photos/business-settings, /sell-photos/watermark-settings, /sell-photos/subscription (international)',b:['Razorpay Route KYC','R2 private documents','Zod validation (IFSC, PAN, GSTIN)']}});
+
+add({id:'orders',g:'Business',name:'Orders & wallet',route:'/wallet',render:()=>shell('orders','app.frameline.in/wallet',head('Orders & wallet','',`<span class="btn">${I('receipt',14)}Billing & GST details</span>`)+`
+<div class="m-body" style="display:flex;flex-direction:column;gap:12px">
+ <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:12px">
+  <div class="card cardp" style="background:var(--side);color:var(--side-ink);border:0"><div class="lbl" style="color:#B7AC98">Wallet balance</div><div class="row" style="justify-content:space-between;margin-top:6px"><b style="font-family:var(--display);font-size:32px;font-weight:600;background:var(--gold);-webkit-background-clip:text;background-clip:text;color:transparent">₹31,840.00</b><span class="btn pri">Withdraw</span></div><div style="font-size:12px;color:#B7AC98;margin-top:4px">HDFC ••4471 · automatic payout every Tuesday · usable as credits</div></div>
+  <div class="card cardp stat"><small>Earned this month</small><b>₹43,380</b><span class="up">sales + renewal markups</span></div>
+  <div class="card cardp stat"><small>Pending (refund window)</small><b>₹4,120</b><small>releases in 3 days</small></div></div>
+ <div class="card"><div style="padding:12px 16px 0">${tabsU(['Wallet ledger','Photo orders','Plan purchases','Commission','Invoices'],0)}</div>
+ <table class="t"><thead><tr><th>Date & time</th><th>Description</th><th>Type</th><th class="r">Amount</th><th class="r">Balance</th></tr></thead><tbody>
+ ${[['26 Sep, 9:12 PM','Order #1043 · Mehta Sangeet','Sale','+ ₹1,079.10','₹31,840.00'],['26 Sep, 6:40 PM','Order #1042 · Coastal Half Marathon','Sale','+ ₹402.30','₹30,760.90'],['24 Sep, 10:00 AM','Payout to HDFC ••4471','Payout','− ₹18,200.00','₹30,358.60'],['23 Sep, 4:18 PM','Order #1040 refunded','Refund','− ₹134.10','₹48,558.60'],['22 Sep, 1:05 PM','Client renewal · Kapoor Engagement (2× price)','Renewal markup','+ ₹600.00','₹48,692.70'],['21 Sep, 11:30 AM','3,000-photo pack · paid from wallet','Credits used','− ₹1,350.00','₹48,092.70'],['20 Sep, 9:02 PM','Order #1037 · Riya & Kabir','Sale','+ ₹134.10','₹49,442.70']].map(r=>`<tr><td class="mono" style="color:var(--ink-2);font-size:11.5px">${r[0]}</td><td>${r[1]}</td><td><span class="chip ${r[2]==='Payout'||r[2]==='Credits used'?'':r[2]==='Refund'?'warn':'ok'}">${r[2]}</span></td><td class="r mono" style="color:${r[3].startsWith('+')?'var(--ok)':'var(--ink)'}">${r[3]}</td><td class="r mono">${r[4]}</td></tr>`).join('')}</tbody></table></div>
+</div>`),
+notes:{p:'One trustworthy record of money in and out.',u:['A single running-balance ledger covers sales, payouts, refunds, renewal markups and credits used. The wallet is the credit balance (1 credit = ₹1)','Tabs for photo orders (buyer, items, GST split, your share, status refresh), plan purchases, commission and invoices','Signed amounts in tabular figures; billing and GST details are one click away for tax invoices'],r:'/orders (credits used, view details, refresh status), /wallet-ledger, /commission-ledger, Add Billing Details',b:['Double-entry ledger in D1','Razorpay webhooks','PDF invoices']}});
+
+add({id:'reports',g:'Business',name:'Reports',route:'/reports',render:()=>{const yrs=[['2024','18,210'],['2025','41,880'],['2026','12,480']];return shell('reports','app.frameline.in/reports',head('Reports','Photo counts are live. Usage reports are also emailed to you.',`<span class="btn">${I('download',14)}Download CSV</span>`)+`
+<div class="m-body" style="display:flex;flex-direction:column;gap:12px">
+ ${tabsU(['Events','Usage'],0)}
+ <div class="row" style="gap:8px"><div class="seg"><span class="on">Active 6</span><span>Expired or expiring 2</span><span>Deleted 1</span></div><div class="field ph" style="width:220px">${I('search',13)}Filter events</div></div>
+ <div class="card"><table class="t"><thead><tr><th>Event</th><th>ID</th><th>Type</th><th>Event date</th><th>Created</th><th class="r">Photos</th><th>Plan</th><th>Expiry</th><th>Status</th></tr></thead><tbody>
+ ${EV.slice(0,6).map((e,i)=>`<tr><td><b style="font-weight:700">${e.n}</b></td><td class="mono">${e.id}</td><td>${['Wedding','Wedding','Corporate','School','Sports','Baby shoot'][i]}</td><td>${e.d}</td><td class="mono" style="font-size:11.5px">${['10 Sep','18 Sep','24 Sep','30 Aug','15 Aug','26 Sep'][i]} 2026</td><td class="r mono">${e.c.toLocaleString('en-IN')}</td><td>${i===3?'Event pack':'Starter'}</td><td class="mono" style="font-size:11.5px">${i===3?'2 Oct 2026 · in 6d':'Sep 2027'}</td><td>${stChip(e.s)}</td></tr>`).join('')}</tbody></table></div>
+ <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+  <div class="card cardp"><div class="ct-h"><h3>Photo uploads by year</h3><span class="mono" style="color:var(--ink-3);font-size:11px">estimated 72,570 total</span></div>${yrs.map(y=>`<div class="row" style="gap:10px;padding:4px 0"><span class="mono" style="width:40px">${y[0]}</span><div class="meter" style="flex:1;height:10px"><i style="width:${parseInt(y[1].replace(',',''))/420}%"></i></div><span class="mono" style="width:60px;text-align:right">${y[1]}</span></div>`).join('')}</div>
+  <div class="card cardp"><div class="ct-h"><h3>Purchases by year</h3><span class="btn sm">Request fresh report</span></div>${[['2025','Starter yearly + 2 packs','₹10,190'],['2026','Starter yearly renewal','₹8,490']].map(p=>`<div class="row" style="padding:6px 0;border-top:1px solid var(--line);justify-content:space-between"><span class="mono">${p[0]}</span><span>${p[1]}</span><b class="mono">${p[2]}</b></div>`).join('')}</div>
+ </div>
+</div>`)},
+notes:{p:'Answers for the studio’s accountant and for planning capacity.',u:['Events report: active, expiring and deleted events with type, dates, photos, plan, expiry and status, plus CSV download','Usage report: uploads by year and purchases by year. Big reports are prepared in the background and emailed, with a "Request fresh report" button','Reached from the sidebar and from Events, instead of being hidden routes'],r:'/events-report, /usage-report',b:['D1 aggregates','Queues + email for heavy reports']}});
+
+add({id:'camerasync',g:'Tools',name:'Camera sync',route:'/camera-sync',render:()=>shell('camerasync','app.frameline.in/camera-sync',head('Camera sync <span class="chip acc" style="vertical-align:5px">Beta</span>','Photos go from your camera to an album while you shoot.',`<span class="btn pri">${I('plus',14)}Add camera</span>`)+`
+<div class="m-body" style="display:grid;grid-template-columns:1fr 330px;gap:16px">
+ <div style="display:flex;flex-direction:column;gap:12px">
+  <div class="card cardp" style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">${[['Add a camera','Pick the event, the album, and whether photos need your review first'],['Enter FTP details on the camera','Canon, Nikon, Sony and Fujifilm bodies with FTP over Wi-Fi; use passive mode'],['Shoot','Photos appear in about 10 seconds; guests get a “new photos” alert']].map((s,i)=>`<div class="step"><span class="n">Step ${i+1}</span><b>${s[0]}</b><small>${s[1]}</small></div>`).join('')}</div>
+  <div class="card"><div class="ct-h cardp" style="margin:0;padding-bottom:4px"><h3>Cameras</h3><span class="mono" style="color:var(--ink-3)">3 of 10</span></div>
+  <table class="t"><thead><tr><th>Camera</th><th>Sends to</th><th>Mode</th><th>Status</th><th class="r">Today</th></tr></thead><tbody>
+  ${[['Canon R6 · Aarav','Tessera Labs Offsite / Keynote','Live · 2K','Receiving','212'],['Sony A7 IV · Meera','Tessera Labs Offsite / Candids','Review first','Idle 12 min','148'],['Nikon Z6 · backup','Studio Portfolio / Inbox','Originals','Offline','0']].map(c=>`<tr><td><div class="row" style="gap:8px"><div class="ic">${I('camera',14)}</div><b style="font-weight:700">${c[0]}</b></div></td><td>${c[1]}</td><td>${c[2]}</td><td><span class="chip ${c[3]==='Receiving'?'ok':c[3]==='Offline'?'':'warn'}"><i class="dot"></i>${c[3]}</span></td><td class="r mono">${c[4]}</td></tr>`).join('')}</tbody></table></div>
+  <div class="card cardp"><div class="ct-h"><h3>Upload history · Canon R6</h3><span class="btn ghost sm">Clear history</span></div><div class="mono" style="font-size:11.5px;color:var(--ink-2);display:flex;flex-direction:column;gap:3px">${['21:14:08  IMG_4172.JPG  11.2 MB  ✓ published','21:14:01  IMG_4171.JPG  10.8 MB  ✓ published','21:13:52  IMG_4170.JPG  11.0 MB  ✓ published'].map(l=>`<span>${l}</span>`).join('')}</div></div>
+ </div>
+ <div class="card cardp" style="align-self:start"><div class="ct-h"><h3>Canon R6 · Aarav</h3><span class="btn sm">${I('copy',12)}Copy all</span></div>
+ ${[['Server','ftp.frameline.in'],['Port','21 · passive (PASV)'],['Username','nl_r6_aarav'],['Password','••••••••••••']].map(k=>`<div class="fl" style="margin-bottom:9px"><span>${k[0]}</span><div class="field"><span class="mono">${k[1]}</span><span style="margin-left:auto;color:var(--ink-3)">${I('copy',13)}</span></div></div>`).join('')}
+ <div class="card cardp" style="background:var(--sunk);border:0;font-size:12px;color:var(--ink-2)">Last photo 8 s ago · IMG_4172.JPG · 11.2 MB. Set the camera to send JPEG only. <u>Setup guide</u></div></div>
+</div>`),
+notes:{p:'Live delivery: guests see photos during the event, not days later.',u:['Up to 10 cameras, each with a target event and album, upload type (2K live, originals) and "Review first" (a private album until you approve)','Credentials sit next to the camera they belong to, with Copy all; upload history per camera with Clear history','Status per camera (Receiving, Idle, Offline) and a count for today'],r:'/kam-sync (FTP accounts, upload type, review first, upload target, history, copy all), /about/kam-sync, /how-kam-sync-works',b:['SFTPGo on VPS','Upload hook → Queues','R2']}});
+
+add({id:'enhance',g:'Tools',name:'AI enhance',route:'/enhance/c3adea4f',render:()=>shell('enhance','app.frameline.in/enhance/c3adea4f',head('AI enhance','IMG_4172.JPG · Sangeet · Riya &amp; Kabir Wedding',`<span class="chip acc">Balance 1,200 credits</span>`,'Photo viewer /')+`
+<div class="m-body" style="display:grid;grid-template-columns:1fr 320px;gap:16px">
+ <div class="card" style="padding:12px;position:relative;overflow:hidden">
+  <div style="position:absolute;inset:12px;border-radius:8px;overflow:hidden"><div style="position:absolute;inset:0;background:${G[12]};filter:saturate(.7) brightness(.85)"></div><div style="position:absolute;inset:0 0 0 50%;background:${G[12]};filter:saturate(1.15) brightness(1.08) contrast(1.05)"></div>
+  <div style="position:absolute;left:50%;top:0;bottom:0;width:2px;background:#F2D38A"></div><div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;background:var(--gold);display:grid;place-items:center;color:#1E1508;font-weight:800">⇆</div>
+  <span class="chip" style="position:absolute;left:12px;top:12px;background:rgba(0,0,0,.55);color:#fff">Before</span><span class="chip" style="position:absolute;right:12px;top:12px;background:rgba(0,0,0,.55);color:#F2D38A">After</span></div>
+ </div>
+ <div style="display:flex;flex-direction:column;gap:12px">
+  <div class="card cardp"><div class="lbl" style="margin-bottom:8px">Presets</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${['Warm evening light','Clean background','Soft skin retouch','Classic black & white','Brighter faces','Remove guests behind'].map((p,i)=>`<span style="border:${i===0?'1.5px solid var(--accent)':'1px solid var(--line)'};background:${i===0?'var(--accent-soft)':'var(--surface)'};border-radius:8px;padding:7px 8px;font-size:12px;font-weight:700">${p}</span>`).join('')}</div></div>
+  <div class="card cardp"><div class="fl"><span>Or describe the edit</span><div class="field" style="height:70px;align-items:flex-start;color:var(--ink-3)">Make the marigold decor glow warmer, keep skin tones natural</div></div></div>
+  <div class="card cardp"><div class="row" style="justify-content:space-between"><span>Cost</span><b class="mono">8 credits</b></div><div class="fl" style="margin-top:8px"><span>Save as</span><div class="seg"><span class="on">New photo in Sangeet</span><span>Replace</span></div></div></div>
+  <div class="row"><span class="btn" style="flex:1;justify-content:center">Try again</span><span class="btn pri" style="flex:1.4;justify-content:center">${I('check',14)}Save</span></div>
+ </div>
+</div>`),
+notes:{p:'Hero-grade edits on single photos without leaving the product.',u:['Presets (example templates) and a custom prompt, as in the reference; cost in credits is shown before running','A before-and-after slider makes the change easy to judge','Save as a new photo or replace the original. Reached from the photo viewer or a tile’s wand icon'],r:'/ai-enhancement, /ai-enhancement-tutorial, AI Enhance Photo on tiles',b:['Image-edit model API (pay per call)','Credits debit in ledger']}});
+
+add({id:'qr',g:'Grow',name:'Smart QR',route:'/qr',render:()=>shell('qr','app.frameline.in/qr',head('Smart QR','Print a QR once and point it at a different event whenever you like.',`<span class="btn pri">${I('plus',14)}New QR</span>`)+`
+<div class="m-body" style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+ ${[['Studio front desk','Riya & Kabir Wedding','1,204',3,'Web gallery'],['Reception standee','Tessera Labs Offsite','318',11,'App on phones, web elsewhere'],['Race finish arch','Coastal Half Marathon','6,870',5,'Web gallery']].map((q,i)=>`<div class="card cardp" style="display:flex;flex-direction:column;gap:11px">
+ <div class="row" style="justify-content:space-between"><b style="font-size:14.5px">${q[0]}</b>${I('dots',16)}</div>
+ <div style="background:#fff;border-radius:10px;padding:14px;display:grid;place-items:center;border:1px solid var(--line)">${qrSvg(q[3],140,i===1?'#8C2F39':'#1B1712',i!==2)}</div>
+ <div class="fl"><span>Currently opens</span><div class="field">${q[1]}<span style="margin-left:auto;color:var(--ink-3)">${I('chevd',13)}</span></div></div>
+ <div class="row" style="justify-content:space-between;font-size:12px;color:var(--ink-2)"><span>${q[4]}</span><span><b class="mono" style="color:var(--ink)">${q[2]}</b> scans</span></div>
+ <div class="row"><span class="btn" style="flex:1;justify-content:center">${I('download',14)}Poster</span><span class="btn" style="flex:1;justify-content:center">Schedule switch</span></div></div>`).join('')}
+</div>`),
+notes:{p:'Printed QR codes reused across events, so standees never need reprinting.',u:['Each QR has a name and says in words where it points today; change the target from a dropdown','Web gallery or app, with platform-specific redirects (app on phones, web elsewhere), and a custom logo, as in the reference','New: scan counts, styled codes and scheduled switching to the next event'],r:'/common-qr (QR name, web gallery / app, platform-specific redirects, custom logo, show QR)',b:['Redirect Worker + KV','qr-code-styling']}});
+
+add({id:'website',g:'Grow',name:'Website builder',route:'/website',render:()=>shell('website','app.frameline.in/website',head('Website <span class="chip" style="vertical-align:5px">Draft</span>','northlight.frameline.in',`<span class="btn">${I('mail',14)}Enquiries <span class="chip acc">4</span></span><span class="btn">${I('eye',14)}Preview</span><span class="btn pri">Publish</span>`)+`
+<div class="m-body" style="display:grid;grid-template-columns:190px 1fr 250px;gap:14px">
+ <div class="card cardp" style="align-self:start;padding:10px"><div class="lbl" style="padding:4px 6px 8px">Sections · drag to order</div>${[['Cover',1],['About',1],['Galleries',1],['Services',1],['Testimonials',1],['Questions',0],['Contact',1],['Location',0],['Social',1]].map((s,i)=>`<div class="row" style="padding:5px 6px;border-radius:6px;${i===2?'background:var(--accent-soft);color:var(--accent-text);font-weight:800':''}"><span style="color:var(--ink-3)">⋮⋮</span>${s[0]}<div class="tg ${s[1]?'on':''}" style="margin-left:auto;transform:scale(.8)"></div></div>`).join('')}</div>
+ <div class="card" style="overflow:hidden;display:flex;flex-direction:column">
+  <div class="row" style="justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--ink-3)"><div class="seg"><span class="on">Desktop</span><span>Phone</span></div><span>Reload preview</span></div>
+  <div style="height:230px;background:${G[3]};position:relative;display:flex;align-items:flex-end;padding:22px;color:#fff"><div style="position:absolute;top:14px;left:22px;right:22px;display:flex;justify-content:space-between;font-size:11px;letter-spacing:.15em"><b style="font-family:var(--display)">NORTHLIGHT</b><span>WORK · ABOUT · CONTACT</span></div><div><div style="font-family:var(--display);font-size:34px;font-weight:600;line-height:1.05;max-width:16ch">Weddings photographed like films.</div><span class="btn sm" style="margin-top:10px;background:#fff;color:#15191C;border:0">Check a date</span></div></div>
+  <div style="padding:16px 20px"><div style="font-family:var(--display);font-weight:600;font-size:17px;margin-bottom:10px">Recent galleries</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">${[['Riya & Kabir',0],['Kapoor Engagement',6],['Mehta Sangeet',10]].map(g=>`<div>${ph(g[1],'','border-radius:6px')}<b style="font-size:12px">${g[0]}</b></div>`).join('')}</div></div>
+ </div>
+ <div style="display:flex;flex-direction:column;gap:12px">
+  <div class="card cardp"><div class="lbl" style="margin-bottom:8px">Template</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${['Classic','Editorial','Minimal','Bold','Showcase','Portfolio'].map((t,i)=>`<div style="border:${i===1?'1.5px solid var(--accent)':'1px solid var(--line)'};border-radius:7px;padding:5px;font-size:11px;font-weight:700"><div style="height:28px;border-radius:4px;margin-bottom:4px;background:${i===1?G[3]:i===3?'#15120E':'var(--sunk)'}"></div>${t}</div>`).join('')}</div></div>
+  <div class="card cardp"><div class="lbl" style="margin-bottom:8px">Domain</div><div class="field" style="font-size:12px"><span class="mono">northlight.frameline.in</span></div><span class="btn" style="margin-top:8px;width:100%;justify-content:center">${I('globe',14)}Connect your own domain</span><div style="font-size:11px;color:var(--ink-3);margin-top:6px">₹799/month or yearly. We show the DNS records and check them for you.</div></div>
+ </div></div>`),
+notes:{p:'A studio website built from the galleries the photographer already delivered.',u:['Every reference section: address reservation, 6 templates, brand colour, logo and cover, about, services with free-text prices, testimonials, FAQ presets, galleries (including private ones, cover only), contact, location with a map link, and social links','Sections switch on and off and reorder by dragging; desktop and phone preview; Draft, Publish and "View live site"','Enquiries inbox with notes and a notification list; custom domain setup (DNS records, progress, last checked) from the same page'],r:'/website, /website/enquiries, /custom-domain',b:['Cloudflare for SaaS hostnames','SSR on Workers','JSON section schema']}});
+
+add({id:'studioapp',g:'Grow',name:'Studio app',route:'/studio-app',render:()=>shell('studioapp','app.frameline.in/studio-app',head('Studio app','What guests see when they follow your studio in the Frameline app.','<span class="btn pri">Save</span>')+`
+<div class="m-body" style="display:grid;grid-template-columns:1fr 1fr 300px;gap:16px">
+ <div style="display:flex;flex-direction:column;gap:12px">
+  <div class="card cardp" style="background:var(--side);color:var(--side-ink);border-color:var(--side)"><div class="lbl" style="color:#B7AC98">Follow code</div><div class="row" style="justify-content:space-between;margin-top:6px"><b class="mono" style="font-size:24px;letter-spacing:.12em;color:#F2D38A">FA-KCGWHY</b><span class="btn sm dark" style="border:1px solid #3a3025">${I('copy',12)}Copy</span></div><div style="font-size:12px;color:#B7AC98;margin:4px 0 10px">Anyone with this code follows all your events in the app.</div><div class="row"><span class="btn sm dark" style="border:1px solid #3a3025">${I('link',12)}Follow link</span><span class="btn sm dark" style="border:1px solid #3a3025">${I('qr',12)}QR code</span></div></div>
+  <div class="card cardp"><div class="ct-h"><h3>Show in your app</h3></div>${[['Services and prices','From your website',1],['Questions and answers','5 answered',1],['Private galleries in the list','Cover and name only',0]].map(o=>`<div class="srow"><div class="tx"><b>${o[0]}</b><small>${o[1]}</small></div><div class="tg ${o[2]?'on':''}"></div></div>`).join('')}</div>
+ </div>
+ <div class="card cardp"><div class="ct-h"><h3>Featured galleries</h3><span class="btn sm">${I('plus',12)}Add</span></div><div style="font-size:12px;color:var(--ink-2);margin-bottom:8px">Fill the row at the top of your app. Drag to reorder.</div>${[['Riya & Kabir Wedding',0],['Kapoor Engagement',6],['Coastal Half Marathon',5],['Studio Portfolio 2026',9]].map(g=>`<div class="row" style="padding:7px 0;border-top:1px solid var(--line)"><span style="color:var(--ink-3)">⋮⋮</span><div style="width:46px;height:32px;border-radius:4px;background:${G[g[1]]}"></div><b style="font-weight:700;flex:1">${g[0]}</b>${I('x',14)}</div>`).join('')}</div>
+ <div style="display:grid;place-items:start center"><div class="phone" style="width:250px;height:520px"><div class="scr"><div style="padding:14px 12px 6px;display:flex;align-items:center;gap:8px"><div style="width:30px;height:30px;border-radius:8px;background:#8C2F39"></div><b style="font-family:var(--display)">Northlight</b><span class="chip acc" style="margin-left:auto">Following</span></div>
+ <div style="padding:0 12px"><div class="lbl" style="margin:6px 0">Featured</div><div class="row" style="gap:6px">${[0,6,5].map(g=>`<div style="flex:none;width:92px;height:118px;border-radius:8px;background:${G[g]}"></div>`).join('')}</div>
+ <div class="lbl" style="margin:12px 0 6px">Services</div>${[['Wedding coverage','From ₹1,50,000'],['Pre-wedding shoot','From ₹35,000']].map(s=>`<div class="row" style="justify-content:space-between;padding:6px 0;border-top:1px solid var(--line);font-size:11.5px"><b>${s[0]}</b><span class="mono">${s[1]}</span></div>`).join('')}
+ <div class="lbl" style="margin:12px 0 6px">Questions</div><div style="font-size:11.5px;padding:6px 0;border-top:1px solid var(--line)"><b>How long until we get photos?</b></div></div></div></div></div>
+</div>`),
+notes:{p:'Control the studio’s presence inside the guest app, and grow followers.',u:['Follow code (FA-…), follow link and QR moved here from the Home page','Featured galleries (add, reorder), show services, show FAQs and list private galleries, as on the reference App Features page','A live phone preview of the studio profile in the app'],r:'/app-features, dashboard follow-events card',b:['Shared content model with the website','Expo app later; PWA first']}});
+
+add({id:'broadcasts',g:'Grow',name:'Broadcasts',route:'/broadcasts',render:()=>shell('broadcasts','app.frameline.in/broadcasts',head('Broadcasts','Send an update to guests who follow your studio.','')+`
+<div class="m-body" style="display:grid;grid-template-columns:1fr 280px 1fr;gap:16px">
+ <div class="card cardp" style="display:flex;flex-direction:column;gap:11px;align-self:start">
+  <label class="fl"><span>Title</span><div class="field">Diwali mini-sessions are open</div></label>
+  <label class="fl"><span>Message</span><div class="field" style="height:80px;align-items:flex-start">20-minute family portraits at our studio, 1–5 Nov. Edited photos in 48 hours.</div></label>
+  <div class="fl"><span>Image</span><div class="row">${ph(7,'','width:90px')}<span class="btn sm">Replace</span></div></div>
+  <div class="fl"><span>Send to</span><div class="seg"><span class="on">All followers · 1,920</span><span>One event's guests</span></div></div>
+  <div class="row" style="justify-content:flex-end"><span class="btn">Schedule</span><span class="btn pri">Send now</span></div>
+ </div>
+ <div style="display:grid;place-items:start center"><div class="phone" style="width:250px;height:510px"><div class="scr" style="background:${G[9]}"><div style="text-align:center;color:#fff;margin-top:40px;font-family:var(--display);font-size:46px;font-weight:600">9:41</div>
+ <div style="margin:22px 12px;background:rgba(255,255,255,.88);border-radius:14px;padding:10px;display:flex;gap:8px;color:#15191C"><div style="width:30px;height:30px;border-radius:7px;background:#8C2F39;flex:none"></div><div style="font-size:11.5px"><b>Northlight Studio</b><div><b>Diwali mini-sessions are open</b></div><div style="color:#4a4f52">20-minute family portraits at our studio…</div></div></div></div></div></div>
+ <div class="card"><div class="ct-h cardp" style="margin:0;padding-bottom:4px"><h3>Sent</h3></div><table class="t"><thead><tr><th>Broadcast</th><th class="r">Opened</th><th></th></tr></thead><tbody>${[['New photos: Riya & Kabir','62%'],['Sangeet highlights are live','48%'],['Monsoon offer · 20% off prints','21%']].map(b=>`<tr><td>${b[0]}</td><td class="r mono">${b[1]}</td><td class="r">${I('dots',14)}</td></tr>`).join('')}</tbody></table></div>
+</div>`),
+notes:{p:'Bring past guests back as future clients.',u:['Create, edit and delete posts with text and an image, as in the reference; they appear in the app’s Posts tab and send a push','Composer next to a lock-screen preview; audience is all followers or one event’s guests','New: scheduling and open rates'],r:'/posts (create, edit, delete, text, image, all users)',b:['Web Push (VAPID)','Expo push later','Queues scheduled jobs']}});
+
+add({id:'plans',g:'Account',name:'Plan & usage',route:'/plan',render:()=>shell('plans','app.frameline.in/plan',head('Plan & usage','',`<div class="seg"><span class="on">Yearly · save 50%</span><span>Quarterly</span></div>`)+`
+<div class="m-body" style="display:flex;flex-direction:column;gap:12px">
+ <div class="card cardp" style="display:grid;grid-template-columns:1.2fr 1.3fr 1fr 1fr;gap:20px;align-items:center">
+  <div><div class="lbl">Current plan</div><b style="font-family:var(--display);font-size:23px;font-weight:600">Starter · yearly</b><div class="m-sub">Valid till 3 Mar 2027 · ₹8,490 + GST</div></div>
+  <div><div class="row" style="justify-content:space-between;font-size:12px"><span>Upload capacity</span><span class="mono">12,480 / 50,000</span></div><div class="meter" style="margin-top:6px"><i style="width:25%"></i></div><div style="font-size:11px;color:var(--ink-3);margin-top:4px">1,200 reserved for guest uploads · <u>how this is calculated</u></div></div>
+  <div><div class="row" style="justify-content:space-between;font-size:12px"><span>Wallet credits</span><b class="mono">₹1,200</b></div><div class="row" style="gap:6px;margin-top:6px"><span class="btn sm">Add credits</span><span class="btn sm ghost">Redeem code</span></div></div>
+  <div><div class="lbl">Client renewals</div><div style="font-size:12px;margin-top:2px">You charge <b class="mono">2.0×</b> the base renewal price. <u>Change</u></div></div></div>
+ <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+ ${[['Starter','₹8,490','50k photos','₹170 per 1,000','Current',0],['Studio','₹15,990','100k photos','₹160 per 1,000','Upgrade',0],['Pro','₹38,490','250k photos','₹154 per 1,000','Upgrade',1],['Agency','₹57,990','500k photos · 5 seats','₹116 per 1,000','Upgrade',0]].map(p=>`<div class="card cardp" style="display:flex;flex-direction:column;gap:7px;${p[5]?'border:1.5px solid var(--accent);background:linear-gradient(180deg,var(--accent-soft),var(--surface) 45%)':''}">${p[5]?'<span class="chip acc" style="align-self:start">Most chosen</span>':'<span style="height:19px"></span>'}<b style="font-family:var(--display);font-size:19px;font-weight:600">${p[0]}</b><div><b class="mono" style="font-size:22px">${p[1]}</b><span style="color:var(--ink-3);font-size:12px"> /year + GST</span></div><div style="color:var(--ink-2);font-size:12px">${p[2]} · ${p[3]}</div><span class="btn ${p[4]==='Current'?'':'pri'}" style="justify-content:center;margin-top:4px">${p[4]}</span></div>`).join('')}</div>
+ <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:12px">
+ <div class="card"><div class="ct-h cardp" style="margin:0;padding-bottom:4px"><h3>One-off event packs</h3><span style="color:var(--ink-3);font-size:12px">For one event beyond your plan · 12 months</span></div>
+ <table class="t"><tbody>${[['1,000 photos','₹700','₹700'],['3,000 photos','₹1,350','₹450'],['10,000 photos','₹3,500','₹350']].map(r=>`<tr><td>${r[0]}</td><td class="r mono">${r[1]}</td><td class="r mono" style="color:var(--ink-3)">${r[2]} / 1k</td><td class="r"><span class="btn sm">Buy</span></td></tr>`).join('')}</tbody></table></div>
+ <div class="card cardp"><div class="ct-h"><h3>Renewal link for a client</h3></div><div style="font-size:12px;color:var(--ink-2)">Send the school or couple a link to extend their event themselves. They pay your price; the markup lands in your wallet. You can also renew at 50% off with credits.</div><div class="row" style="margin-top:10px"><div class="field" style="flex:1">Greenfield Annual Day ${I('chevd',12)}</div><span class="btn pri">Create link</span></div></div></div>
+</div>`),
+notes:{p:'One place for capacity, money in the wallet, and renewals.',u:['Plan with a capacity meter (slots used, guest-reserved, how it’s calculated, valid till), yearly or quarterly, 4 plans with price per 1,000 photos, and upgrade in place','Wallet credits (1 credit = ₹1): add, redeem a coupon, pay for packs and AI enhance','Event packs and client renewal links (use credits at 50% off, or send a link priced with your multiplier) sit on the same page'],r:'/subscription, /subscription-renewal, dashboard credits, coupon and packs, Increase Photo Limit, RenewalLinkModal, /account-settings/renewal-pricing',b:['Razorpay Subscriptions','PhonePe','Plan limits enforced in API']}});
+
+add({id:'support',g:'Account',name:'Support',route:'/support',render:()=>shell('support','app.frameline.in/support',head('Support','Most answers take under a minute to find.',`<span class="btn">${I('chat',14)}WhatsApp us</span>`)+`
+<div class="m-body" style="display:flex;flex-direction:column;gap:14px">
+ <div class="field ph" style="padding:12px 14px;font-size:14px">${I('search',16)}Search help, e.g. "guests can't find their photos"</div>
+ <div class="row" style="gap:8px;flex-wrap:wrap">${['Face search misses people','Change a PIN','Camera FTP setup','Google Drive import limits','Refund an order','GST invoice','Video tutorials · English / हिन्दी'].map(t=>`<span class="chip" style="padding:5px 10px;font-size:12px;border:1px solid var(--line)">${t}</span>`).join('')}</div>
+ <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:14px">
+  <div class="card cardp" style="display:flex;flex-direction:column;gap:10px"><div class="ct-h" style="margin:0"><h3>Ask the team</h3><span style="color:var(--ink-3);font-size:12px">Usual reply: under 2 hours</span></div>
+   <label class="fl"><span>Subject</span><div class="field">Guests say the selfie finds no photos</div></label>
+   <div class="row" style="gap:10px"><label class="fl" style="flex:1"><span>Event</span><div class="field">Riya &amp; Kabir · 6402F9F</div></label><label class="fl" style="flex:1"><span>Where</span><div class="seg"><span class="on">Web gallery</span><span>App</span><span>Admin</span></div></label></div>
+   <label class="fl"><span>Details</span><div class="field" style="height:56px;align-items:flex-start;color:var(--ink-3)">Steps, what you expected, what you saw</div></label>
+   <div class="row" style="justify-content:space-between"><span class="btn sm">${I('upload',12)}Screenshots or video (0/5)</span><span class="btn pri">Send to support</span></div></div>
+  <div class="card cardp"><div class="ct-h"><h3>Watermark missing on downloads</h3><span class="chip ok">Answered</span></div>
+   <div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px"><div style="background:var(--sunk);border-radius:10px;padding:8px 10px;max-width:85%">Downloads from the web gallery have no watermark.</div><div style="background:var(--accent-soft);border-radius:10px;padding:8px 10px;max-width:85%;margin-left:auto"><b style="font-size:11px;color:var(--accent-text)">Support team</b><br>"Guest downloads" was off in Watermarks → Apply to. We've switched it on; existing photos update within an hour.</div><div class="field ph">Add your reply…</div></div></div>
+ </div></div>`),
+notes:{p:'Solve problems in-app before a ticket is needed, and follow tickets as conversations.',u:['Help search, common topics and video tutorials in English and Hindi come first','Ticket form: subject, related event, platform (web gallery, app, admin, desktop), contact number, 5 attachments (images up to 100 MB, video up to 1 GB)','Past tickets open as a threaded conversation with replies; WhatsApp contact and community stay available'],r:'/support (new ticket, past tickets, replies), dashboard support card, Hindi tutorial',b:['Help docs in MDX','Tickets in D1 + R2 attachments']}});
+
+add({id:'account',g:'Account',name:'Settings & team',route:'/settings/team',render:()=>shell('account','app.frameline.in/settings/team',head('Settings','','')+`
+<div class="m-body" style="display:flex;flex-direction:column;gap:14px">
+ ${tabsU(['Studio profile','Team','Notifications','Billing & GST','Security'],1)}
+ <div class="row" style="justify-content:space-between"><div><b style="font-size:15px">Team members</b><div class="m-sub">3 of 5 seats used</div></div><div class="row"><div class="field ph" style="width:250px">${I('mail',14)}name@email.com</div><div class="field" style="width:120px">Uploader ${I('chevd',12)}</div><span class="btn pri">Invite</span></div></div>
+ <div class="card"><table class="t"><thead><tr><th>Name</th><th>Role</th><th>Access</th><th>Last active</th><th></th></tr></thead><tbody>
+ ${[['Aarav Mehta','Owner','All events, billing, payouts','now'],['Meera Iyer','Editor','All events','2 h ago'],['Kunal Shah','Uploader','Tessera Labs Offsite only','yesterday']].map((m,i)=>`<tr><td><div class="row" style="gap:10px"><span style="width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:${['var(--side)','var(--accent-soft)','var(--sunk)'][i]};color:${i===0?'#F2D38A':'var(--ink)'};font-weight:800;font-size:11px">${m[0].split(' ').map(s=>s[0]).join('')}</span><b style="font-weight:700">${m[0]}</b></div></td><td><span class="chip ${i===0?'acc':''}">${m[1]}</span></td><td>${m[2]}</td><td style="color:var(--ink-3)">${m[3]}</td><td class="r">${I('dots',16)}</td></tr>`).join('')}</tbody></table></div>
+ <div class="card cardp"><div class="ct-h"><h3>Notifications</h3><span style="font-size:12px;color:var(--ink-3)">Payment emails are always sent</span></div>
+ ${[['Enquiries also go to','meera@northlight.in, bookings@northlight.in',''],['Event expiry reminders','Before and after an event expires','on'],['Plan expiry reminders','Before and after your plan renews','on'],['Weekly summary','Visits, face searches and sales','']].map(n=>`<div class="srow"><div class="tx"><b>${n[0]}</b><small>${n[1]}</small></div>${n[2]==='on'?'<div class="tg on"></div>':n[0].startsWith('Enquiries')?'<span class="btn sm">Edit list</span>':'<div class="tg"></div>'}</div>`).join('')}</div>
+</div>`),
+notes:{p:'Run a studio, not a single login.',u:['Roles named after what people do: Owner, Editor, and Uploader (can be limited to one event) for second shooters. This replaces per-event hosts and admin requests for staff','Notifications keeps every reference option: extra enquiry emails, event and plan expiry opt-outs, payment emails always sent','Studio profile (company, contact, colours, photos, social, portfolio), Billing & GST and Security (set password, sessions) are tabs on the same page'],r:'/account-settings (enquiry emails, email notifications, billing details, set password, renewal pricing), /profile',b:['Better Auth organizations','Role checks in API']}});
+
+/* ---------------- render screens ---------------- */
+const NEWIDS=['viewer','upload','import','share2','message','guests','storesettings','reports','enhance','studioapp'];
+const idx=document.getElementById('index'),mock=document.getElementById('mock'),stage=document.getElementById('stage');
+const groups=[...new Set(S.map(s=>s.g))];
+idx.innerHTML=groups.map(g=>`<section><h4>${g}</h4><ul>${S.map((s,i)=>s.g===g?`<li><button type="button" data-s="${s.id}"><span>${String(i+1).padStart(2,'0')}</span>${s.name}${NEWIDS.includes(s.id)?'<em>new</em>':''}</button></li>`:'').join('')}</ul></section>`).join('');
+let cur=0;
+function fit(){const k=stage.clientWidth/1280;if(!k)return;mock.style.transform=`scale(${k})`;stage.style.height=(800*k)+'px';}
+new ResizeObserver(fit).observe(stage);
+function show(i,push=true){
+  cur=(i+S.length)%S.length;const s=S[cur];
+  mock.innerHTML=s.render();
+  document.getElementById('sname').textContent=s.name;
+  document.getElementById('route').textContent=s.route;
+  idx.querySelectorAll('button').forEach(b=>b.setAttribute('aria-current',b.dataset.s===s.id?'true':'false'));
+  const n=s.notes;
+  document.getElementById('notes').innerHTML=`<div class="note"><h5>Job of this screen</h5><p>${n.p}</p><h5 style="margin-top:14px">Replaces in the reference app</h5><p class="mono" style="font-size:12px;color:var(--ink-2)">${n.r}</p></div><div class="note"><h5>UX decisions</h5><ul>${n.u.map(x=>`<li>${x}</li>`).join('')}</ul></div><div class="note"><h5>Built with</h5><div class="pills">${n.b.map(x=>`<span class="pill">${x}</span>`).join('')}</div></div>`;
+  if(push){try{history.replaceState(null,'','#'+s.id)}catch(e){}}
+  fit();
+}
+idx.addEventListener('click',e=>{const b=e.target.closest('button[data-s]');if(b)show(S.findIndex(s=>s.id===b.dataset.s));});
+document.getElementById('prev').onclick=()=>show(cur-1);
+document.getElementById('next').onclick=()=>show(cur+1);
+
+/* ---------------- tabs ---------------- */
+const views=['screens','coverage','flows','stack','design'];
+function view(v,push=true){views.forEach(x=>{document.getElementById('v-'+x).hidden=x!==v;});document.querySelectorAll('.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.view===v?'true':'false'));
+ if(v==='screens'){fit();if(push)try{history.replaceState(null,'','#'+S[cur].id)}catch(e){}}else if(push){try{history.replaceState(null,'','#'+v)}catch(e){}}}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>view(b.dataset.view));
+document.addEventListener('keydown',e=>{if(document.getElementById('v-screens').hidden||e.target.matches('input'))return;if(e.key==='ArrowRight')show(cur+1);if(e.key==='ArrowLeft')show(cur-1);});
+
+/* ---------------- coverage ---------------- */
+const C='Covered',M='Improved',L='Later',N='New';
+const F=[
+['Account','Email and password sign-in, forgot and reset password (6-digit code)',M,'signin'],
+['Account','Google sign-in',C,'signin'],
+['Account','Set or change password',C,'account'],
+['Account','Terms of use and privacy consent',C,'signin'],
+['Account','Onboarding survey: user type, city, how you heard about us',M,'onboarding'],
+['Account','Profile wizard: company name, custom subdomain, about',M,'onboarding'],
+['Account','Profile: contact info (email, mobile with country code, website)',C,'onboarding'],
+['Account','Profile: brand colour picker with quick colours',C,'onboarding'],
+['Account','Profile: profile photo and 16:9 cover photo',C,'onboarding'],
+['Account','Profile: social links and portfolio',C,'account'],
+['Account','Profile completion card (steps complete)',M,'home'],
+['Home','Credits balance, buy credits by amount (1 credit = ₹1)',M,'plans'],
+['Home','Redeem coupon code',C,'plans'],
+['Home','Follow-all-events code, follow link and QR',C,'studioapp'],
+['Home','Event packs table with cart and Buy Now',M,'plans'],
+['Home','Support card: ticket, WhatsApp, WhatsApp community',C,'support'],
+['Home','Desktop app download (Mac, Windows)',C,'home'],
+['Home','Website promo card',M,'home'],
+['Home','Expiring events banner',M,'home'],
+['Home','Expiring face-data banner',M,'home'],
+['Home','Tutorial videos, Hindi quick start',C,'support'],
+['Home','Month stats, recent events, live activity feed',N,'home'],
+['Events','Events grid with cover, photo count and limit, validity, trial badge',C,'events'],
+['Events','Search by name or event ID',M,'events'],
+['Events','Edit event name and event ID, delete event',C,'events'],
+['Events','Status filters (live, draft, expiring, archived)',N,'events'],
+['Events','Create event from purchased pack',M,'create'],
+['Events','Event type (wedding, couple, family, baby, product, real estate, themed…)',C,'create'],
+['Events','Hosts (email and mobile) at creation',C,'create'],
+['Events','Max photos for guest upload at creation',C,'create'],
+['Events','Presets that set privacy, downloads and store at once',N,'create'],
+['Workspace','Albums: add, rename, delete, drag to reorder',C,'workspace'],
+['Workspace','Guest uploads album',M,'workspace'],
+['Workspace','Highlights album enable or disable',C,'workspace'],
+['Workspace','Event views: views, unique app views, Android, iOS',M,'workspace'],
+['Workspace','Videos: add YouTube link with name, edit, delete',C,'workspace'],
+['Workspace','Sort photos by capture time, name, name sequence',C,'workspace'],
+['Workspace','Favourites selections count',C,'workspace'],
+['Workspace','Refresh photos list',M,'workspace'],
+['Workspace','Select mode: select all, deselect, move to album, delete selected',M,'workspace'],
+['Workspace','Pagination ("Use pages", photos per page)',C,'workspace'],
+['Workspace','Tile hover: filename, number, AI enhance button',C,'workspace'],
+['Workspace','Face detection status',M,'workspace'],
+['Workspace','Admin request (co-admin access requests)',M,'guests'],
+['Workspace','Increase photo limit (credits, packs, new expiry)',M,'plans'],
+['Workspace','Hide photos from guests, find a person, favourites filter',N,'workspace'],
+['Upload','Standard upload (processed to 2K WebP)',M,'upload'],
+['Upload','Original upload (counts 2×)',M,'upload'],
+['Upload','Add watermark during upload toggle',C,'upload'],
+['Upload','Fast upload for slow connections',C,'upload'],
+['Upload','Advanced duplicate detection, upload duplicates or skip',M,'upload'],
+['Upload','Drag and drop, add more, resume, retry, stop upload',M,'upload'],
+['Upload','Minimisable upload progress panel',C,'workspace'],
+['Upload','Upload capacity counters',M,'upload'],
+['Upload','EXIF orientation, low-memory device handling',C,'upload'],
+['Upload','Photos appear live while processing (no refresh)',N,'workspace'],
+['Import','Import from a public Google Drive folder with preview',C,'import'],
+['Import','Subfolders become albums; merge nested subfolders',C,'import'],
+['Import','Import quality (2K or originals) and watermark',C,'import'],
+['Import','Active imports and import history; skip already imported; safe retry',C,'import'],
+['Import','Google Drive import FAQ',C,'import'],
+['Viewer','Photo counter and filename with copy',C,'viewer'],
+['Viewer','Set as event cover or album cover (shows current cover)',C,'viewer'],
+['Viewer','Share photo',C,'viewer'],
+['Viewer','Download photo and download original',M,'viewer'],
+['Viewer','Delete photo (guarded if it is the cover)',C,'viewer'],
+['Viewer','Previous and next, close, keyboard (arrows, Space, Esc)',M,'viewer'],
+['Viewer','Slideshow play and pause',C,'viewer'],
+['Viewer','Zoom in, zoom out, fit to screen, scroll zoom, full screen',C,'viewer'],
+['Viewer','Rotate left, rotate right, flip horizontal, reset all',C,'viewer'],
+['Viewer','Detected faces, show or hide face boxes, indexing status',M,'viewer'],
+['Viewer','Details: capture time',M,'viewer'],
+['Viewer','Photo and album IDs',C,'viewer'],
+['Viewer','Full EXIF, uploader and source, people with counts, favourites and downloads, filmstrip, hide, move',N,'viewer'],
+['Share','Web gallery link and app code',C,'share'],
+['Share','Shortened links toggle',C,'share'],
+['Share','Share via WhatsApp, email, copy',C,'share'],
+['Share','PIN: view, copy, reset',C,'share'],
+['Share','PIN unlocks download-all (web, 5 times) and view-all under privacy',M,'share'],
+['Share','Reusable message template with event variables (2,000 characters)',M,'message'],
+['Share','QR codes for app and web gallery',C,'share2'],
+['Share','QR style (rounded, soft, hybrid, classic), corners, colour',C,'share2'],
+['Share','Custom QR logo (up to 80 KB), PNG or SVG download',C,'share2'],
+['Share','Album link, open web gallery directly',C,'share2'],
+['Share','Prefilled "My photos" link from an uploaded photo',C,'share2'],
+['Share','Personalised link with guest name and photo URL, start on "My photos"',C,'share2'],
+['Share','VIP link: skip sign-in, embed PIN',C,'share2'],
+['Share','Access level choice and live guest preview; printable QR poster',N,'share'],
+['Settings','Face recognition on or off',C,'settings'],
+['Settings','Face-recognition privacy (guests see only their photos)',C,'settings'],
+['Settings','Anonymous "My photos" (selfie without sign-in)',C,'settings'],
+['Settings','Refresh face recognition',C,'settings'],
+['Settings','Require guest registration (email and mobile)',C,'settings'],
+['Settings','Turn off original watermark; event-specific watermark',C,'settings'],
+['Settings','Event branding (after account branding)',C,'settings'],
+['Settings','Guest uploads: enable, photo limit (reserved), watermark guest photos',C,'settings'],
+['Settings','Edit event name, ID and date',C,'settings'],
+['Settings','Downloads: all, personal only, disabled',C,'settings'],
+['Settings','Anonymous downloads; prevent original quality (2K only)',C,'settings'],
+['Settings','Email all photos as ZIP; download logs',C,'settings'],
+['Settings','Skip app download landing page',C,'settings'],
+['Settings','Disable event; delete event',C,'settings'],
+['Settings','Manage event hosts',C,'settings'],
+['Settings','Show on my website; allow enquiries',C,'settings'],
+['Settings','Plain-language "What guests can do" summary, preview as guest, autosave',N,'settings'],
+['Guests','Who favourited: viewers, photo counts, download their picks as ZIP',C,'guests'],
+['Guests','Guest data (registrations)',M,'guests'],
+['Guests','Approve or decline access requests',M,'guests'],
+['Guests','Export CSV; create album from client picks',N,'guests'],
+['Guest side','Web gallery and mobile app with event code',C,'gallery'],
+['Guest side','Selfie "My photos" search',M,'gallery'],
+['Guest side','Favourite photos',C,'gallery'],
+['Guest side','Download all with PIN; download own photos',C,'gallery'],
+['Guest side','Buy photos (single, multiple, all my photos)',C,'gallery'],
+['Guest side','Enquiry form (leads)',C,'gallery'],
+['Guest side','Guest photo uploads',C,'gallery'],
+['Guest side','Highlights and videos in the gallery',C,'gallery'],
+['Guest side','Welcome greeting by name from personal links',C,'gallery'],
+['Guest side','Installable PWA with no forced app download',N,'gallery'],
+['Watermarks','Standard watermark: position, text (title and subtitle) or image',M,'watermark'],
+['Watermarks','Bigger watermark option; sample image preview',M,'watermark'],
+['Watermarks','Original watermark configurations: asset, X/Y offset, size %, quick presets',C,'watermark'],
+['Watermarks','Asset manager: image assets (25 MB), text watermark creator with fonts and emoji, storage limit',C,'watermark'],
+['Watermarks','Store watermark templates: FOR SALE pattern, large centre, orientation, size 1–5×, opacity, colour',C,'watermark'],
+['Watermarks','Upload your own image to preview',C,'watermark'],
+['Store','Sell photos from events (for-sale uploads)',M,'store'],
+['Store','Pricing: single, multiple, all my photos bundle',C,'store'],
+['Store','Seller dashboard: INR and USD balance, completed and pending orders, revenue chart',C,'store'],
+['Store','Photo orders and payment-pending orders with buyer and GST breakdown',C,'orders'],
+['Store','Carts to recover',M,'store'],
+['Store','Export CSV',C,'store'],
+['Store','Business settings: legal name, GST yes or no, declaration template, PAN',C,'storesettings'],
+['Store','Documents: PAN, ID, GST certificate, cancelled cheque',C,'storesettings'],
+['Store','Business address and bank details (IFSC)',C,'storesettings'],
+['Store','International selling plans ($100 / $250 / $500 by orders per year), buyers pay directly',C,'storesettings'],
+['Store','Photo-selling terms and conditions',C,'storesettings'],
+['Money','My orders: credits used, details, refresh status',C,'orders'],
+['Money','Wallet ledger with date and time',C,'orders'],
+['Money','Commission ledger',M,'orders'],
+['Money','Billing details for GST invoices; invoices',C,'orders'],
+['Money','Checkout, success page, payment callback (Razorpay, PhonePe, PayPal)',C,'plans'],
+['Plans','Subscription plans yearly or quarterly, feature grid, FAQs, contact sales',C,'plans'],
+['Plans','Upload capacity: slots used, guest reserved, how it is calculated, valid till',M,'plans'],
+['Plans','Upgrade mid-cycle',C,'plans'],
+['Plans','Subscription renewal',C,'plans'],
+['Plans','Custom renewal pricing multiplier',C,'plans'],
+['Plans','Renewal link for clients; renew with credits at 50% off',M,'plans'],
+['Reports','Events report: active, expired or expiring, deleted; CSV',C,'reports'],
+['Reports','Usage report: request fresh, emailed, uploads by year, purchases by year',C,'reports'],
+['Camera sync','Up to 10 FTP accounts, each to an event and album',C,'camerasync'],
+['Camera sync','Upload type and "review first" private album',C,'camerasync'],
+['Camera sync','Copy FTP host and copy all credentials',C,'camerasync'],
+['Camera sync','Upload history and clear history',C,'camerasync'],
+['Camera sync','Setup guide, passive mode, camera compatibility',C,'camerasync'],
+['Camera sync','Status per camera and count for today',N,'camerasync'],
+['Smart QR','Reusable QR with name, pointed at any event',C,'qr'],
+['Smart QR','Web gallery or app, platform-specific redirects',C,'qr'],
+['Smart QR','Custom QR logo',C,'qr'],
+['Smart QR','Scan counts and scheduled switching',N,'qr'],
+['Posts','Create, edit and delete posts (text and image) to all users with push',C,'broadcasts'],
+['Posts','Scheduling, audience by event, open rates',N,'broadcasts'],
+['Website','Reserve web address (subdomain)',C,'website'],
+['Website','6 templates, brand colour, logo and cover from profile',C,'website'],
+['Website','About, services with free-text price, testimonials with photo',C,'website'],
+['Website','FAQ presets and custom questions',C,'website'],
+['Website','Galleries on site, including private galleries (cover only)',C,'website'],
+['Website','Contact, location with maps link, social links',C,'website'],
+['Website','Draft, publish, preview on desktop and phone, view live site',C,'website'],
+['Website','Enquiries inbox with notes; notification list',C,'website'],
+['Website','Custom domain: monthly or yearly, DNS records, setup progress, last checked',C,'website'],
+['Studio app','Featured galleries (add, reorder)',C,'studioapp'],
+['Studio app','Show services, show FAQs, list private galleries',C,'studioapp'],
+['Studio app','Live phone preview of the studio profile',N,'studioapp'],
+['AI','AI enhance a photo, cost in credits',C,'enhance'],
+['AI','Custom prompt and example templates',C,'enhance'],
+['AI','Before and after comparison, save as',C,'enhance'],
+['AI','AI enhancement tutorial',C,'support'],
+['Support','New ticket: subject, related event, description, platform, contact, 5 attachments',C,'support'],
+['Support','Past tickets with threaded replies',C,'support'],
+['Settings','Enquiry notification emails (extra recipients)',C,'account'],
+['Settings','Opt out of event and plan expiry emails',C,'account'],
+['Settings','Team roles (owner, editor, uploader) and seats',N,'account'],
+['Settings','⌘K command palette across the app',N,'home'],
+['Desktop','Mac and Windows uploader for large jobs',L,'upload'],
+['Mobile','Native guest and studio app (Expo)',L,'studioapp']
+];
+const where=Object.fromEntries(S.map(s=>[s.id,s.name]));
+const chipFor=s=>({Covered:'<span class="chip ok">Covered</span>',Improved:'<span class="chip acc">Improved</span>',Later:'<span class="chip">Later phase</span>',New:'<span class="chip" style="background:var(--side);color:#F2D38A">New</span>'}[s]);
+let filt='all';
+function renderCov(){const q=(document.getElementById('q').value||'').toLowerCase();
+ const rows=F.filter(r=>(filt==='all'||r[2]===filt)&&(!q||(r[0]+' '+r[1]+' '+where[r[3]]).toLowerCase().includes(q)));
+ document.getElementById('covrows').innerHTML=rows.map(r=>`<tr><td class="area">${r[0]}</td><td>${r[1]}</td><td>${chipFor(r[2])}</td><td class="where"><button type="button" data-go="${r[3]}">${where[r[3]]}</button></td></tr>`).join('')||`<tr><td colspan="4" style="color:var(--ink-3)">No features match "${q}".</td></tr>`;}
+const cnt=k=>F.filter(r=>r[2]===k).length;
+document.getElementById('kpis').innerHTML=[[F.length-cnt(N),'reference features found'],[cnt(C),'covered as they are'],[cnt(M),'covered and improved'],[cnt(N),'new in Frameline']].map(k=>`<div class="kpi"><b>${k[0]}</b><span>${k[1]}</span></div>`).join('');
+document.getElementById('filters').addEventListener('click',e=>{const b=e.target.closest('button[data-f]');if(!b)return;filt=b.dataset.f;document.querySelectorAll('#filters button').forEach(x=>x.setAttribute('aria-pressed',x===b?'true':'false'));renderCov();});
+document.getElementById('q').addEventListener('input',renderCov);
+document.getElementById('covrows').addEventListener('click',e=>{const b=e.target.closest('button[data-go]');if(!b)return;view('screens');show(S.findIndex(s=>s.id===b.dataset.go));window.scrollTo({top:0,behavior:'smooth'});});
+renderCov();
+
+/* ---------------- flows ---------------- */
+const FL=[
+ ['Photographer: from shoot to shared','About 5 minutes of work after the event.',[['Sign in','Google or email code'],['Create event','Name, date, type, preset'],['Add photos','Drop files, import from Drive, or camera sync'],['Review','Duplicates, quality, watermark'],['Faces indexed','Progress in the album rail'],['Share','Link, PIN, QR poster or personal links'],['Follow up','Favourites, leads, orders, renewals']]],
+ ['Guest: from QR to their photos','Target: under 60 seconds, no account needed.',[['Scan QR or tap link','frameline.in/6402f9f'],['Enter PIN','Only if the event uses one'],['Take a selfie','Skipped on face and VIP links'],['See matches','"We found you in 38 photos"'],['Favourite, download or buy','Pinned actions'],['Enquire or follow','Becomes a lead or follower']]],
+ ['Live delivery with a camera','For corporate events and races.',[['Add camera','Event, album, review-first'],['Enter FTP on camera','Copy all four values'],['Shoot','Files arrive in about 10 s'],['Auto-process','Renditions, watermark, faces'],['Approve or auto-publish','Review-first cameras wait for you'],['Guests notified','"New photos" push']]],
+ ['Selling photos','Turned on per event, with prices from defaults.',[['KYC once','PAN, GST, bank'],['Enable store','On any event'],['Guest picks','Watermarked previews'],['Pays by UPI','Razorpay or PhonePe'],['Delivered','Download or print partner'],['Wallet → payout','Every Tuesday']]],
+ ['Client renewal','Old galleries keep earning.',[['Expiry alert on Home','6 days before'],['Send renewal link','Priced with your multiplier'],['Client pays','UPI checkout'],['Event extended','Another 12 months'],['Markup to wallet','Visible in the ledger']]]
+];
+document.getElementById('flowlist').insertAdjacentHTML('beforeend',FL.map(f=>`<div class="flow"><h4>${f[0]}</h4><p>${f[1]}</p><div class="steps">${f[2].map((s,i)=>`<div class="step"><span class="n">Step ${i+1}</span><b>${s[0]}</b><small>${s[1]}</small></div>`).join('')}</div></div>`).join(''));
+
+/* ---------------- stack rows ---------------- */
+const ST=[
+ ['Admin app','React 19 + Vite + TypeScript, TanStack Router + Query, Tailwind CSS v4 + shadcn/ui (Radix), lucide icons','Free · Workers static assets','A fast SPA with components we own and no heavy UI kit'],
+ ['Guest gallery & studio sites','React Router v7 framework mode (SSR) on Workers, installable PWA','Included in $5 plan','Server-rendered previews for WhatsApp links, fast on phones, shares components with admin'],
+ ['API','Hono on Workers, Zod validation, shared types in the monorepo','$5/mo plan (10M requests)','Runs at the edge near guests and scales to zero'],
+ ['Database','Cloudflare D1 (SQLite) + Drizzle ORM, Time Travel backups','Included (5 GB, 25B reads)','Serverless SQL in the same network as the API. Split by studio past 10 GB'],
+ ['Face search','Cloudflare Vectorize, one namespace per event, 512-dimension ArcFace vectors','≈ $0.01 per 1M queried dimensions','Managed vector search with no server to run'],
+ ['Photo storage','R2 with presigned multipart uploads (Uppy), served through Cloudflare CDN on a custom domain','$0.015/GB-mo, no egress fees','Downloads cost nothing, and they are the biggest cost in photo delivery'],
+ ['Processing','Cloudflare Containers: sharp (libvips) for 400/1200/2048 px WebP + AVIF, watermarks, EXIF, pHash; InsightFace (SCRFD + ArcFace) on ONNX Runtime','≈ $0.00002 per photo','Billed per CPU-second while working, so no idle server'],
+ ['Jobs & realtime','Queues for processing, imports and ZIPs; Durable Objects (WebSockets) for upload progress and activity; Cron Triggers for expiry','Included → cents','Replaces Redis, a separate worker host and polling'],
+ ['Auth','Better Auth on D1: email OTP + password, Google, organisations and roles; Turnstile','Free','Open source, runs in our own database'],
+ ['Links & QR','Workers KV for short links and Smart QR redirects','Included','Edge redirects in milliseconds'],
+ ['Camera FTP','SFTPGo on a €4 VPS, per-camera users, upload hook → API → Queue','≈ €4/mo','The only part that can’t run on Cloudflare (raw TCP)'],
+ ['Payments','Razorpay (checkout, UPI, subscriptions, Route payouts), PhonePe; PayPal for international','Per transaction only','Best UPI coverage in India, with payouts and no monthly fee'],
+ ['Email & push','Resend (3,000/mo free), Web Push (VAPID), later Expo push','Free to start','Transactional email and broadcasts'],
+ ['Domains','Wildcard *.frameline.in + Cloudflare for SaaS custom hostnames','First 100 free','Studio websites on their own domains with automatic SSL'],
+ ['AI enhance','Pay-per-call image-edit model API behind a Worker, charged in credits','Passed to the user','No GPU to run; the margin is built into the credit price'],
+ ['Observability','Workers Logs + Sentry + PostHog','Free tiers','Errors, product analytics, session replay'],
+ ['Later','Tauri desktop uploader, Expo mobile app','Free','Reuses TypeScript and the API']
+];
+document.getElementById('stackrows').innerHTML=ST.map(r=>`<tr><td style="font-weight:700">${r[0]}</td><td>${r[1]}</td><td class="cost">${r[2]}</td><td style="color:var(--ink-2)">${r[3]}</td></tr>`).join('');
+
+/* ---------------- design system ---------------- */
+const SW=[['Ivory / Obsidian','--paper','Page ground'],['Surface','--surface','Cards, panels'],['Ink','--ink','Text'],['Espresso sidebar','--side','Navigation, dark cards'],['Gold','--accent','Actions, selection'],['Gold soft','--accent-soft','Active rows, highlights'],['Line','--line','Borders'],['Live','--ok','Healthy states'],['Attention','--warn','Expiring, needs action'],['Error','--bad','Failures, destructive']];
+document.getElementById('swatches').innerHTML=`<div><i style="background:var(--gold)"></i><span>Gold leaf</span><small>--gold · primary buttons, meters</small></div>`+SW.map(s=>{const v=getComputedStyle(document.documentElement).getPropertyValue(s[1]).trim();return `<div><i style="background:var(${s[1]});border-bottom:1px solid var(--line)"></i><span>${s[0]}</span><small>${v} · ${s[2]}</small></div>`}).join('');
+document.getElementById('tiles').innerHTML=ph(3)+ph(6,'sel')+ph(9,'proc');
+document.querySelectorAll('[data-i]').forEach(el=>el.innerHTML=I(el.dataset.i,15));
+
+/* ---------------- boot ---------------- */
+const h=(location.hash||'').slice(1);
+const si=S.findIndex(s=>s.id===h);
+show(si>=0?si:S.findIndex(s=>s.id==='workspace'),false);
+if(views.includes(h)&&h!=='screens')view(h,false);
+</script>

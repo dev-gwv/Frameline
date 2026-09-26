@@ -1,0 +1,16 @@
+{
+  "name": "frameline",
+  "private": true,
+  "packageManager": "pnpm@8.10.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "dev:admin": "pnpm --filter @frameline/admin dev",
+    "dev:mobile": "pnpm --filter @frameline/mobile start"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "~5.8.3"
+  }
+}

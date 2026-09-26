@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "@frameline/ui/styles.css";
+
+/* Let Tailwind see classes used inside the shared UI package. */
+@source "../../../packages/ui/src";
