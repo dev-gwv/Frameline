@@ -236,6 +236,10 @@ const pick = <T extends object, K extends keyof T>(o: T, keys: readonly K[]): Pi
 }
 const chunks = <T,>(xs: T[], n: number): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n))
 const enc = encodeURIComponent
+/** JSON.parse reviver: turns API-relative media paths into absolute URLs. */
+let MEDIA_ORIGIN = ''
+const absolutizeMedia = (_key: string, value: unknown) =>
+  typeof value === 'string' && value.startsWith('/v1/media/') && MEDIA_ORIGIN ? MEDIA_ORIGIN + value : value
 const LOCAL_URL = /^(blob|file|content|ph|assets-library|data):/i
 
 const STUDIO_KEYS = ['name', 'handle', 'logoUrl', 'brandColor', 'phone', 'email', 'website', 'instagram', 'city', 'about'] as const
@@ -246,6 +250,7 @@ const WATERMARK_KEYS = ['mode', 'text', 'subtitle', 'position', 'size', 'opacity
 const WEBSITE_KEYS = ['published', 'template', 'headline', 'sections', 'customDomain'] as const
 
 export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
+  MEDIA_ORIGIN = options.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
   const base = options.baseUrl.replace(/\/+$/, '')
   const fetchImpl: typeof fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init))
   const maxRetries = options.maxRetries ?? 3
@@ -364,7 +369,9 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
       }
       if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T
       const text = await res.text()
-      return (text ? JSON.parse(text) : undefined) as T
+      // Media paths come back relative to the API ("/v1/media/…"); make them absolute so
+      // <img src> works from any origin (admin, gallery, mobile).
+      return (text ? JSON.parse(text, absolutizeMedia) : undefined) as T
     }
   }
 
