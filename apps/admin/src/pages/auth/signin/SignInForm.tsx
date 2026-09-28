@@ -28,12 +28,22 @@ export function Brand() {
  * One flow for sign-in and sign-up: email + 6-digit code (default), Google, or a password.
  * `onDone` decides where the person goes next; `onView` lets the page switch layouts.
  */
-export function SignInForm({ onDone, onGoogle, googleBusy, expired, onView }: {
+/** Friendly text for the OAuth `error` codes Google's own redirect can send back (see authHelpers.ts). */
+function describeGoogleError(code: string): string {
+  if (code === 'access_denied') {
+    return 'Google didn’t complete the sign-in. If your Google Cloud OAuth app is still in "Testing" mode, add this Google account under OAuth consent screen → Test users, or switch the app to "In production".'
+  }
+  return 'Google sign-in didn’t go through. Please try again, or use email instead.'
+}
+
+export function SignInForm({ onDone, onGoogle, googleBusy, expired, googleError, onView }: {
   onDone: (result: VerifyResult) => void
   onGoogle: () => void
   googleBusy?: boolean
   /** Signed out for safety (?expired=1). */
   expired?: boolean
+  /** Google's own `?error=` from the OAuth redirect (e.g. `access_denied`) — the browser lands back here silently otherwise. */
+  googleError?: string | null
   onView?: (v: SignInView) => void
 }) {
   const auth = useAuth()
@@ -98,6 +108,12 @@ export function SignInForm({ onDone, onGoogle, googleBusy, expired, onView }: {
         <p role="status" className="flex items-start gap-2 rounded-[10px] bg-accent-soft px-3.5 py-3 text-[13px] text-ink">
           <Info size={15} className="mt-0.5 shrink-0 text-accent-text" aria-hidden />
           You were signed out for safety. Sign in again to pick up where you left off.
+        </p>
+      )}
+      {googleError && (
+        <p role="alert" className="flex items-start gap-2 rounded-[10px] bg-bad-soft px-3.5 py-3 text-[13px] text-ink">
+          <Info size={15} className="mt-0.5 shrink-0 text-bad" aria-hidden />
+          {describeGoogleError(googleError)}
         </p>
       )}
       <div>

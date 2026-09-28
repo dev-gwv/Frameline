@@ -21,6 +21,7 @@ export default function SignIn() {
   const onView = useCallback((v: SignInView) => setView(v), [])
   const from = safeDestination((location.state as { from?: string } | null)?.from ?? params.get('from'))
   const expired = params.get('expired') === '1'
+  const googleError = params.get('error')
 
   const finish = (r: VerifyResult) => navigate(r.isNewUser ? '/setup' : from, { replace: true })
 
@@ -32,7 +33,7 @@ export default function SignIn() {
     finish({ user: DEMO_USER, isNewUser: false })
   }
 
-  const form = <SignInForm onDone={finish} onGoogle={google} googleBusy={googleBusy} expired={expired} onView={onView} />
+  const form = <SignInForm onDone={finish} onGoogle={google} googleBusy={googleBusy} expired={expired} googleError={googleError} onView={onView} />
 
   // One tree for every step so the form keeps its state when the layout changes.
   const start = view === 'start'

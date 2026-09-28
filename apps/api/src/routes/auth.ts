@@ -298,12 +298,14 @@ authRoutes.openapi(createRoute({
 
   const db = getDb(c.env.DB)
   const [bySub] = await db.select().from(schema.users).where(eq(schema.users.googleSub, info.sub)).limit(1)
-  const { user } = bySub ? { user: bySub } : await ensureUser(db, info.email, { name: info.name, googleSub: info.sub })
+  const { user, isNew } = bySub ? { user: bySub, isNew: false } : await ensureUser(db, info.email, { name: info.name, googleSub: info.sub })
   if (bySub) await ensureUser(db, bySub.email)
   const { id: _id, ...tokens } = await issueSession(c, user)
   audit(c, 'auth.login', { type: 'user', id: user.id }, { method: 'google' }, user.id)
   const frag = new URLSearchParams({ access_token: tokens.accessToken, refresh_token: tokens.refreshToken, expires_in: String(tokens.expiresIn) })
-  const target = stored.redirect.startsWith('/') ? `${appUrl}${stored.redirect}` : stored.redirect
+  let target = stored.redirect.startsWith('/') ? `${appUrl}${stored.redirect}` : stored.redirect
+  // Tell the app to send a brand-new studio to /setup, same as a new email sign-up (isNewUser).
+  if (isNew && stored.redirect.startsWith('/')) target += target.includes('?') ? '&new=1' : '?new=1'
   return c.redirect(`${target}#${frag}`, 302)
 })
 
