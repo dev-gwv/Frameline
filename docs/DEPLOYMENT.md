@@ -21,18 +21,11 @@ against `--remote` once you're ready for real users (see "Going to real data" be
   Worker, then builds and deploys both Pages sites. Also runnable by hand from the Actions tab
   ("Deploy" → "Run workflow") to redeploy without a new commit.
 
-### One-time setup this repo still needs from you
+### One-time setup
 
-GitHub Actions needs two repository secrets (**Settings → Secrets and variables → Actions → New repository
-secret** on github.com/dev-gwv/Frameline) — add these yourself; I don't handle your Cloudflare token:
-
-| Secret | Value |
-|---|---|
-| `CLOUDFLARE_ACCOUNT_ID` | `d9b73b5a2afa3689965e35065b313604` (not secret, but kept alongside the token) |
-| `CLOUDFLARE_API_TOKEN` | A token you create at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens) → **Create Token** → start from the **"Edit Cloudflare Workers"** template, then also add **Account → D1 → Edit** and **Account → Cloudflare Pages → Edit** under Permissions (the template alone doesn't cover D1/Pages) |
-
-Until that secret exists, `deploy.yml` will fail at the first Cloudflare step — CI (typecheck/tests) still
-runs fine without it.
+Done — `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are set as repository secrets on
+github.com/dev-gwv/Frameline (**Settings → Secrets and variables → Actions**). `deploy.yml` deploys for real
+on every push to `master` from here on.
 
 ### Required Worker secrets (already set on `frameline-api`, `env.production`)
 
