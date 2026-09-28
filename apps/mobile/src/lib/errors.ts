@@ -44,6 +44,8 @@ export function friendlyError(e: unknown): FriendlyError {
     case 'pin_required':
     case 'guest_token_expired':
     case 'invalid_guest_token': return out('Enter the PIN again', 'Your gallery session has ended. Enter the PIN to keep browsing.')
+    case 'guest_removed': return out('You can’t open this gallery now', 'The host removed your access. Ask them if you think this is a mistake.')
+    case 'already_live': return out('The photos are here', 'Open the gallery to see them.')
     case 'registration_required': return out('Register first', 'Add your name and email to open this gallery.')
     case 'wrong_event': return out('Open the gallery again', 'This session belongs to a different gallery.')
     case 'face_privacy': return out('Take a selfie first', 'This gallery shows each guest only their own photos.')
@@ -78,7 +80,10 @@ export function friendlyError(e: unknown): FriendlyError {
     case 'otp_cooldown': return out('A code is on its way', `Check your inbox. ${waitText(retryAfterSeconds(e))}`)
     case 'invalid_credentials': return out('Email or password is wrong', 'Try again, or sign in with an email code.')
     case 'invalid_current_password': return out('Current password is wrong', 'Check it and try again.')
-    case 'insufficient_credits': return out('Not enough credits', e.detail)
+    case 'insufficient_credits': {
+      const have = Number(e.problem.available)
+      return out('Add money to your wallet', Number.isFinite(have) ? `You have ₹${have.toLocaleString('en-IN')} in your wallet. Add money on the web, or pay by card.` : 'Add money on the web, or pay by card.')
+    }
     case 'validation_failed': return out('Check the form', e.fieldErrors[0]?.message ?? e.detail)
   }
   if (e.status === 429) return out('Too many tries', waitText(retryAfterSeconds(e)))

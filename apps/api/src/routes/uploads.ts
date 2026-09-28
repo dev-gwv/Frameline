@@ -1,5 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { and, eq, max, sql } from 'drizzle-orm'
+import { and, eq, isNull, max, sql } from 'drizzle-orm'
 import type { Context } from 'hono'
 import { hash, tone } from '@frameline/shared'
 import type { AppEnv, PhotoJob } from '../env'
@@ -123,6 +123,8 @@ export async function completeUploadSession(c: Context<AppEnv>, a: {
       db.update(schema.studios).set({ photosUsed: sql`${schema.studios.photosUsed} + ${cost}` }).where(eq(schema.studios.id, up.studioId)),
       db.update(schema.events).set({ status: 'uploading' }).where(and(eq(schema.events.id, up.eventId), eq(schema.events.status, 'draft'))),
       ...recountStatements(db, up.eventId),
+      // Camera sync: the camera feeding this album last sent something now.
+      ...(source === 'camera' ? [db.update(schema.cameras).set({ lastUploadAt: now }).where(and(eq(schema.cameras.eventId, up.eventId), eq(schema.cameras.albumId, up.albumId)))] : []),
     ])
     const jobs: { body: PhotoJob }[] = rows.map((r) => ({ body: { kind: 'process-photo', photoId: r.id, eventId: up.eventId, studioId: up.studioId, key: r.r2Key ?? null, quality: up.quality, ...(opts.watermark ? { watermark: true } : {}) } }))
     for (let i = 0; i < jobs.length; i += 100) await c.env.PHOTO_QUEUE.sendBatch(jobs.slice(i, i + 100))
@@ -184,14 +186,14 @@ uploadRoutes.openapi(createRoute({
   const db = getDb(c.env.DB)
   const ev = await eventForMember(db, m, c.req.valid('param').id)
   const input = c.req.valid('json')
-  const [album] = await db.select().from(schema.albums).where(and(eq(schema.albums.id, input.albumId), eq(schema.albums.eventId, ev.id))).limit(1)
+  const [album] = await db.select().from(schema.albums).where(and(eq(schema.albums.id, input.albumId), eq(schema.albums.eventId, ev.id), isNull(schema.albums.deletedAt))).limit(1)
   if (!album) throw new ValidationFailed([{ field: 'albumId', in: 'body', message: 'Album not found in this event', code: 'unknown_album' }])
 
   const [studio] = await db.select().from(schema.studios).where(eq(schema.studios.id, m.studioId)).limit(1)
   const guestUpload = (input.source ?? (album.kind === 'guest' ? 'guest' : 'web')) === 'guest'
   const cost = guestUpload ? 0 : input.files.length * (input.quality === 'original' ? 2 : 1)
   if (cost && studio.photosUsed + cost > studio.photosLimit) {
-    throw new AppError(402, 'quota_exceeded', 'Photo quota exceeded', `This upload needs ${cost} photo credits but only ${Math.max(0, studio.photosLimit - studio.photosUsed)} are left on your plan. Add a photo pack or upgrade.`)
+    throw new AppError(402, 'quota_exceeded', 'Photo quota exceeded', `This upload needs room for ${cost} photos but your plan has ${Math.max(0, studio.photosLimit - studio.photosUsed)} left. Add a photo pack or upgrade.`)
   }
 
   const session = await createUploadSession(c, {

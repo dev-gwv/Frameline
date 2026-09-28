@@ -56,7 +56,7 @@ describe('mock API: contract v2', () => {
     expect(order).toMatchObject({ paid: 298, share: 268.2, status: 'paid' })
     expect((await m.listLedger())[0]).toMatchObject({ type: 'sale', amount: 268.2 })
 
-    const change = await m.changePlan('pro', 'yearly')
+    const change = await m.changePlan('pro', { billing: 'yearly' })
     expect(change.usage).toMatchObject({ planId: 'pro', photosLimit: 250000 })
     expect(change.charged).toBe(38490 - change.credit)
   })

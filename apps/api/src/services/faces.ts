@@ -5,8 +5,8 @@ import { getDb, schema } from '../db/client'
 import { ServiceUnavailable, ValidationFailed } from '../lib/errors'
 import { vectorIndex } from './vectors'
 
-/** Photos a guest may see: not hidden, processed, and not waiting for review. */
-export const visiblePhotos = (p = schema.photos): SQL => and(eq(p.hidden, false), eq(p.status, 'ready'), or(isNull(p.reviewStatus), eq(p.reviewStatus, 'approved')))!
+/** Photos a guest may see: not hidden, processed, not in the trash, and not waiting for (or failed) review. */
+export const visiblePhotos = (p = schema.photos): SQL => and(eq(p.hidden, false), eq(p.status, 'ready'), isNull(p.deletedAt), or(isNull(p.reviewStatus), eq(p.reviewStatus, 'approved')))!
 
 const chunk = <T,>(xs: T[], n = 80): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n))
 
@@ -44,7 +44,7 @@ export async function matchFaces(env: Env, eventId: string, key: string, embeddi
     throw new ServiceUnavailable('Face search is not available right now.', 'face_search_unavailable')
   }
   const p = schema.photos
-  const albumsSql = sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${eventId} AND kind = 'album')`
+  const albumsSql = sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${eventId} AND kind = 'album' AND deleted_at IS NULL)`
   if (personId) {
     const rows = await db.select({ id: p.id }).from(p).where(and(eq(p.eventId, eventId), visiblePhotos(p), albumsSql, sql`${p.id} IN (SELECT photo_id FROM faces WHERE person_id = ${personId})`)).orderBy(asc(p.capturedAt))
     photoIds = rows.map((r) => r.id)

@@ -3,6 +3,7 @@ import type { BuildZipJob, Env, PhotoJob, ProcessPhotoJob } from '../env'
 import { getMailer } from './mailer'
 import { getDb, schema } from '../db/client'
 import { newId } from '../lib/ids'
+import { notifyWaitingGuests } from './notify'
 import { publishTopics } from './realtime'
 import { vectorIndex } from './vectors'
 
@@ -90,6 +91,7 @@ export async function applyResult(env: Env, job: ProcessPhotoJob, result: Proces
     db.delete(schema.faces).where(eq(schema.faces.photoId, photo.id)),
     db.update(schema.photos).set({
       status: 'ready',
+      facesIndexedAt: new Date().toISOString(),
       url: result.previewUrl ?? photo.url,
       capturedAt: result.capturedAt ?? photo.capturedAt,
       exif: { ...photo.exif, ...result.exif, width: result.width, height: result.height, sizeBytes: result.sizeBytes ?? photo.exif.sizeBytes },
@@ -127,6 +129,8 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
         AND NOT EXISTS (SELECT 1 FROM photos WHERE event_id = ${eventId} AND status = 'processing')`)
     }
     await publishTopics(env, studioId, ['photos', 'events']).catch(() => undefined)
+    // Guests who asked to be told when the first photos arrive.
+    await notifyWaitingGuests(env, [...eventIds]).catch((e) => console.error(JSON.stringify({ level: 'error', msg: 'notify sweep failed', error: String(e) })))
   }
 }
 

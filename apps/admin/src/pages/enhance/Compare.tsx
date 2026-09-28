@@ -37,7 +37,7 @@ export function Compare({ photo, filter, processing }: { photo: Photo; filter: s
       <Layer photo={photo} />
       <Layer photo={photo} style={{ filter, clipPath: `inset(0 0 0 ${pos}%)`, transition: 'filter 300ms' }} />
       {processing && <div className="shimmer absolute inset-0" aria-hidden />}
-      <div className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-side-gold" style={{ left: `${pos}%` }} />
+      <div className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-white shadow-[0_0_4px_rgba(0,0,0,.35)]" style={{ left: `${pos}%` }} />
       <button
         type="button" role="slider" aria-label="Compare before and after" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pos)}
         aria-valuetext={`${Math.round(pos)}% before`}
@@ -48,13 +48,13 @@ export function Compare({ photo, filter, processing }: { photo: Photo; filter: s
           if (e.key === 'Home') { e.preventDefault(); setPos(0) }
           if (e.key === 'End') { e.preventDefault(); setPos(100) }
         }}
-        className="absolute top-1/2 grid size-9 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize place-items-center rounded-full bg-gold text-accent-ink shadow-float"
+        className="absolute top-1/2 grid size-9 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize place-items-center rounded-full bg-white text-[#1C1814] shadow-float"
         style={{ left: `${pos}%` }}
       >
         <ArrowLeftRight size={16} />
       </button>
       <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-bold text-white">Before</span>
-      <span className="pointer-events-none absolute right-3 top-3 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-bold text-side-gold">After</span>
+      <span className="pointer-events-none absolute right-3 top-3 rounded-full bg-gold px-2 py-0.5 text-[11px] font-bold text-accent-ink">After</span>
     </div>
   )
 }

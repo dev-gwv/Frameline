@@ -23,10 +23,10 @@ cache; registered guests reload them from `listMyFavourites`), last-known Downlo
 | Route | Screen |
 | --- | --- |
 | `/` | Open your photos (event code), recently opened events, follow a studio by code |
-| `/:shortId` | Event landing: gates (app interstitial → PIN → registration), hero, Find my photos, Browse all, albums, films, highlights, guest upload, enquiry |
+| `/:shortId` | Event landing: gates (app interstitial → PIN → registration), hero, Find my photos, Browse all, albums, films, highlights, guest upload, enquiry (hidden while `FEATURES.website` is off) |
 | `/:shortId/me` | "We found you in N photos", album chips, Buy + Download N |
 | `/:shortId/a/:albumId` | Album grid with infinite loading. `all` = every album, `highlights` = most-favourited |
-| `/:shortId/p/:photoId?from=me\|fav\|all\|highlights\|<albumId>` | Photo viewer (dark): swipe/arrow keys, Favourite, Download, Share, Buy print, enquiry |
+| `/:shortId/p/:photoId?from=me\|fav\|all\|highlights\|<albumId>` | Photo viewer (dark): swipe/arrow keys, Favourite, Download, Share, Buy print, enquiry (hidden while `FEATURES.website` is off) |
 | `/:shortId/favourites` | The guest's favourites |
 | `/:shortId/orders` | The guest's orders (`listMyOrders`) |
 | `/s/:token`, `/v/:token` | Personal links (below) |
@@ -97,7 +97,24 @@ hand-written `public/sw.js`: app shell cached on install, navigations network-fi
 hashed assets and fonts cache-first, viewed photo renditions (`destination === 'image'`) cache-first capped at 300.
 The worker registers only in production builds (`src/lib/pwa.ts`).
 
+## Contract v5 wiring
+
+- Sign-up needs a name and a mobile number; email is optional (`registerGuest` takes either).
+- "Notify me" on a gallery with no photos calls `requestNotify(shortId, phone)` (409 `already_live` reloads the
+  gallery) and "Stop notifications" calls `cancelNotify`; the API messages everyone waiting when the first photos go live.
+- "Message on WhatsApp" links use `PublicStudio.whatsapp` (`waLink` in `src/lib/brand.ts`).
+- Selfie search sends the image size (`image: { width, height }`) and shows "We couldn't see a face" when the API
+  answers `faceFound: false`.
+- Photos honour `Photo.rotation` in the grid, the viewer and canvas downloads; the download watermark supports all six
+  positions (`watermarkAnchor`, incl. top/bottom centre) and the watermark's `edgeOffset`.
+- Opening a photo in the viewer counts one view (`recordPhotoViews`, once per photo per page session).
+- Events that sell with the "For sale" watermark on get `PublicWatermark.sale`; grid tiles and the viewer draw it as a
+  CSS overlay (5 templates: pattern, centre, logo grid, corner stamp, frame) on photos the guest hasn't bought. Downloads
+  never carry it.
+- The mock (no `VITE_API_URL`) uses `localStoragePersistence`, so open tabs stay in sync.
+
 ## Still simulated / TODO(api)
 
-A face embedding for `searchFaces` (the dev match uses the selfie key `${event.id}:${file.name}:${file.size}`), and
+A face embedding for `searchFaces` (the dev match uses the selfie key `${event.id}:${file.name}:${file.size}`; no-face
+detection is the API's size rule until an on-device detector sends `faces`), and
 favourites for guests who haven't registered (device copy only; taps still reach the studio's counts).

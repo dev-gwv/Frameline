@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Copy, Download, Link2, QrCode } from 'lucide-react'
 import { fmt, type Studio } from '@frameline/shared'
-import { Button, DarkCard, Modal, QRCode } from '@frameline/ui'
+import { Button, Card, CardHeader, Modal, QRCode } from '@frameline/ui'
 import { downloadBlob, svgMarkup, useCopy } from './util'
 
 export const followLink = (code: string) => `https://frameline.in/follow/${code}`
@@ -18,36 +18,34 @@ export function FollowCodeCard({ studio }: { studio: Studio }) {
   }
 
   return (
-    <DarkCard>
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-[10.5px] uppercase tracking-[.09em] text-side-ink-2">Follow code</span>
-        <span className="text-[11.5px] text-side-ink-2"><b className="font-mono text-side-ink">{fmt.count(studio.followers)}</b> {studio.followers === 1 ? 'follower' : 'followers'}</span>
+    <Card>
+      <CardHeader title="Let guests follow you"
+        description="Anyone with this code sees all your events in the Frameline app."
+        action={<span className="text-[12.5px] text-ink-3 tnum">{fmt.count(studio.followers)} {studio.followers === 1 ? 'follower' : 'followers'}</span>} />
+      <div className="flex flex-wrap items-center gap-2">
+        <b className="mr-auto basis-full text-[22px] tracking-[.08em] tnum sm:basis-auto">{studio.followCode}</b>
+        <Button size="sm" icon={<Copy size={13} />} onClick={() => copy(studio.followCode, 'Follow code')}>Copy</Button>
+        <Button size="sm" icon={<QrCode size={13} />} onClick={() => setQrOpen(true)}>QR code</Button>
       </div>
-      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
-        <b className="font-mono text-[24px] tracking-[.12em] text-side-gold">{studio.followCode}</b>
-        <Button size="sm" variant="side" icon={<Copy size={12} />} onClick={() => copy(studio.followCode, 'Follow code')}>Copy</Button>
-      </div>
-      <p className="mb-3 mt-1 text-[12px] text-side-ink-2">Anyone with this code follows all your events in the app.</p>
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="side" icon={<Link2 size={12} />} onClick={() => copy(link, 'Follow link')}>Follow link</Button>
-        <Button size="sm" variant="side" icon={<QrCode size={12} />} onClick={() => setQrOpen(true)}>QR code</Button>
-      </div>
+      <button type="button" onClick={() => copy(link, 'Follow link')} className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded text-[12.5px] text-ink-3 hover:text-ink">
+        <Link2 size={13} className="shrink-0" /><span className="truncate">{link.replace('https://', '')}</span><span className="shrink-0 font-bold text-accent-text">Copy link</span>
+      </button>
 
-      <Modal open={qrOpen} onOpenChange={setQrOpen} title="Follow QR code" description="Print it at your studio or on albums. Scanning opens the follow page." width={420}
+      <Modal open={qrOpen} onOpenChange={setQrOpen} title="Follow QR code" description="Print it at your studio or on albums. Scanning it opens your follow page." width={420}
         footer={<>
-          <Button icon={<Link2 size={14} />} onClick={() => copy(link, 'Follow link')}>Copy link</Button>
+          <Button variant="ghost" icon={<Link2 size={14} />} onClick={() => copy(link, 'Follow link')}>Copy link</Button>
           <Button variant="primary" icon={<Download size={14} />} onClick={download}>Download SVG</Button>
         </>}>
-        <div className="flex flex-col items-center gap-3 px-6 py-5">
+        <div className="flex flex-col items-center gap-3">
           <div ref={qrRef} className="rounded-card border border-line bg-white p-4">
             <QRCode value={link} logo={studio.logoUrl || undefined} size={220} rounded />
           </div>
           <div className="text-center">
-            <div className="font-mono text-[18px] font-bold tracking-[.12em]">{studio.followCode}</div>
-            <div className="select-all font-mono text-[12px] text-ink-3">{link.replace('https://', '')}</div>
+            <div className="text-[18px] font-extrabold tracking-[.08em]">{studio.followCode}</div>
+            <div className="select-all text-[12.5px] text-ink-3">{link.replace('https://', '')}</div>
           </div>
         </div>
       </Modal>
-    </DarkCard>
+    </Card>
   )
 }

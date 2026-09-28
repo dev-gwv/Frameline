@@ -1,295 +1,322 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, Eye, EyeOff, FolderInput, ImageIcon, Info, Share2, Trash2, X,
+  ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Eye, FolderInput, ImageIcon, Info, MoreHorizontal, Pause, Play,
+  Plus, RotateCw, Share2, Trash2, Wand2, X, ZoomIn, ZoomOut,
 } from 'lucide-react'
-import { fmt, type PhotoSort } from '@frameline/shared'
-import { Button, ConfirmDialog, EmptyState, Menu, Modal, Skeleton, useToast } from '@frameline/ui'
-import { useApi } from '../../lib/api'
-import { useAction, useAlbums, useEvent, usePeople, usePhoto, usePhotoIds, usePhotos, useStudio, useWatermark } from '../../lib/queries'
-import { GALLERY_URL, copyText, downloadBlob, liveUrl } from '../workspace/lib'
-import { renderPhoto } from './download'
+import { ENHANCE_COST, fmt, type Album, type Photo } from '@frameline/shared'
+import { Button, EmptyState, Menu, Modal, PhotoTile, Skeleton, useToast } from '@frameline/ui'
+import { errorMessage, useApi } from '../../lib/api'
+import { useAlbums, useEvent, usePeople, usePhoto, usePhotos, useStudio, useWatermark } from '../../lib/queries'
+import { GALLERY_URL, copyText, downloadBlob, liveUrl, parseSort, photosLabel } from '../workspace/lib'
+import { trashWithUndo, usePendingDeletes } from '../workspace/pending'
+import { useGridIds } from '../workspace/photoQuery'
+import { NewAlbumModal, useMovePhotos } from '../workspace/SelectionBar'
+import { downloadPhoto } from './download'
 import { InfoPanel } from './InfoPanel'
 import { INITIAL_VIEW, MIN_SCALE, Stage, type ViewState } from './Stage'
-import { BottomToolbar, Filmstrip, Sep, VBtn } from './ViewerControls'
+import { Kbd, VBtn } from './ViewerControls'
 
-const SORTS: PhotoSort[] = ['capture', 'name', 'sequence']
-
+/**
+ * /events/:eventId/photos/:photoId — the photo first, tools on demand. Dark, no app shell.
+ * Top: back · "12 of 401 · filename" · Details / Share / Download ▾ / ⋯ / close. Side panel closed by default (?info=1).
+ * Keys: ← → next · Space slideshow · D download · I details · Esc close.
+ */
 export default function PhotoViewer() {
   const { eventId: eventParam = '', photoId = '' } = useParams()
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
   const api = useApi()
   const toast = useToast()
   const albumParam = params.get('album') ?? undefined
-  const sort = (SORTS.includes(params.get('sort') as PhotoSort) ? params.get('sort') : 'capture') as PhotoSort
+  const sort = parseSort(params.get('sort'))
+  const personId = params.get('person') ?? undefined
+  const infoOpen = params.get('info') === '1'
+  const setInfo = (v: boolean) => setParams((p) => { const n = new URLSearchParams(p); if (v) n.set('info', '1'); else n.delete('info'); return n }, { replace: true })
 
   const event = useEvent(eventParam).data
   const eventId = event?.id
   const photoQ = usePhoto(photoId)
   const photo = photoQ.data
-  // Every id in this album/sort for previous/next; only the photos around this one are loaded for the filmstrip.
-  const idsQ = usePhotoIds(eventId, { albumId: albumParam, sort })
-  const ids = useMemo(() => idsQ.data ?? [], [idsQ.data])
+  const pending = usePendingDeletes()
+  const idsQ = useGridIds(eventId, sort, albumParam, personId)
+  const ids = useMemo(() => (idsQ.data ?? []).filter((id) => !pending.photos.has(id) || id === photoId), [idsQ.data, pending.photos, photoId])
   const index = ids.indexOf(photoId)
-  const windowStart = Math.max(0, index - 5)
-  const stripQ = usePhotos(index >= 0 ? eventId : undefined, { albumId: albumParam, sort, offset: windowStart, limit: 11 })
   const albums = useAlbums(eventId).data ?? []
   const people = usePeople(eventId).data ?? []
   const studio = useStudio().data
   const wm = useWatermark().data
-
   const album = albums.find((a) => a.id === photo?.albumId)
   const url = liveUrl(photo?.url)
+  const move = useMovePhotos(eventParam)
 
   /* ---------- Navigation ---------- */
-  const qs = useMemo(() => { const q = new URLSearchParams(); if (albumParam) q.set('album', albumParam); if (sort !== 'capture') q.set('sort', sort); return q.size ? `?${q}` : '' }, [albumParam, sort])
-  const backUrl = `/events/${eventParam}${qs}`
+  const qs = useMemo(() => {
+    const q = new URLSearchParams()
+    if (albumParam) q.set('album', albumParam)
+    if (sort !== 'newest') q.set('sort', sort)
+    if (personId) q.set('person', personId)
+    return q
+  }, [albumParam, sort, personId])
+  const backUrl = `/events/${eventParam}${qs.size ? `?${qs}` : ''}`
   const close = useCallback(() => navigate(backUrl), [navigate, backUrl])
-  const goTo = useCallback((id: string) => navigate(`/events/${eventParam}/photos/${id}${qs}`, { replace: true }), [navigate, eventParam, qs])
-  const prev = index > 0 ? { id: ids[index - 1] } : undefined
-  const next = index >= 0 && index < ids.length - 1 ? { id: ids[index + 1] } : undefined
+  const goTo = useCallback((id: string) => {
+    const q = new URLSearchParams(qs)
+    if (infoOpen) q.set('info', '1')
+    navigate(`/events/${eventParam}/photos/${id}${q.size ? `?${q}` : ''}`, { replace: true })
+  }, [navigate, eventParam, qs, infoOpen])
+  const prev = index > 0 ? ids[index - 1] : undefined
+  const next = index >= 0 && index < ids.length - 1 ? ids[index + 1] : undefined
 
-  /* ---------- View state ---------- */
+  /* ---------- View ---------- */
   const [view, setView] = useState<ViewState>(INITIAL_VIEW)
   const [natural, setNatural] = useState(4)
   const maxScale = Math.max(8, natural)
-  const [faces, setFaces] = useState(true)
   const [playing, setPlaying] = useState(false)
-  const [fullscreen, setFullscreen] = useState(false)
-  const [infoOpen, setInfoOpen] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [moveOpen, setMoveOpen] = useState(false)
+  const [newAlbum, setNewAlbum] = useState(false)
   const [coverGuard, setCoverGuard] = useState(false)
   useEffect(() => setView(INITIAL_VIEW), [photoId])
+  // Rotation is stored on the photo (api.rotatePhotos), so every device and download sees it.
+  const savedRotation = photo?.id === photoId ? photo.rotation : undefined
+  useEffect(() => { if (savedRotation !== undefined) setView((v) => ({ ...v, rotate: savedRotation })) }, [savedRotation])
   const zoomBy = (k: number) => setView((v) => { const s = Math.min(maxScale, Math.max(MIN_SCALE, v.scale * k)); return s <= 1 ? { ...v, scale: s, x: 0, y: 0 } : { ...v, scale: s } })
 
   useEffect(() => {
-    const on = () => setFullscreen(!!document.fullscreenElement)
-    document.addEventListener('fullscreenchange', on)
-    return () => document.removeEventListener('fullscreenchange', on)
-  }, [])
-  const toggleFullscreen = useCallback(async () => {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen()
-      else await document.documentElement.requestFullscreen()
-    } catch {
-      toast.error('Full screen isn’t available', 'Your browser blocked it. Press F11 instead.')
-    }
-  }, [toast])
-
-  // Slideshow: 3 s per photo, stops at the end.
-  useEffect(() => {
     if (!playing) return
     const t = setTimeout(() => {
-      if (next) goTo(next.id)
-      else { setPlaying(false); toast.toast({ kind: 'info', title: 'Slideshow finished', body: `That was the last photo in ${album?.name ?? 'this album'}.` }) }
+      if (next) goTo(next)
+      else { setPlaying(false); toast.toast({ kind: 'info', title: 'Slideshow finished', body: 'That was the last photo.' }) }
     }, 3000)
     return () => clearTimeout(t)
-  }, [playing, next, goTo, toast, album?.name])
+  }, [playing, next, goTo, toast])
 
   /* ---------- Actions ---------- */
   const personName = useCallback((pid: string) => {
     const p = people.find((x) => x.id === pid)
     if (!p) return ''
-    if (p.name) return p.name
-    return `Guest ${people.filter((x) => !x.name).indexOf(p) + 1}`
+    return p.name ?? `Guest ${people.filter((x) => !x.name).indexOf(p) + 1}`
   }, [people])
 
-  const setCover = useAction((scope: 'event' | 'album') => api.setCover(eventId!, photoId, scope), {
-    success: (_d, s) => (s === 'event' ? 'Event cover updated' : `${album?.name ?? 'Album'} cover updated`),
-  })
-  const hide = useAction((hidden: boolean) => api.updatePhotos([photoId], { hidden }), { success: (_d, h) => (h ? 'Hidden from guests' : 'Visible to guests again') })
-  const move = useAction((a: { id: string; name: string }) => api.updatePhotos([photoId], { albumId: a.id }), {
-    success: (_d, a) => `Moved to ${a.name}`,
-    onSuccess: (_d, a) => { if (albumParam) navigate(`/events/${eventParam}/photos/${photoId}?album=${a.id}${sort !== 'capture' ? `&sort=${sort}` : ''}`, { replace: true }) },
-  })
-  const remove = useAction(() => api.deletePhotos([photoId]), {
-    success: 'Photo deleted',
-    onSuccess: () => { const to = next ?? prev; if (to) goTo(to.id); else close() },
-  })
+  const setCover = async (scope: 'event' | 'album') => {
+    if (!eventId) return
+    const before = scope === 'event' ? event?.coverPhotoId : album?.coverPhotoId
+    try {
+      await api.setCover(eventId, photoId, scope)
+      const what = scope === 'event' ? 'Event cover' : `${album?.name ?? 'Album'} cover`
+      if (before && before !== photoId) toast.undo(`${what} changed`, () => { api.setCover(eventId, before, scope).catch((e) => toast.error('Couldn’t undo', errorMessage(e))) })
+      else toast.success(`${what} set`)
+    } catch (e) { toast.error('Couldn’t set the cover', errorMessage(e)) }
+  }
+  const hide = async () => {
+    if (!photo) return
+    const hidden = !photo.hidden
+    try {
+      await api.updatePhotos([photoId], { hidden })
+      toast.undo(hidden ? 'Hidden from guests' : 'Guests can see it again', () => { api.updatePhotos([photoId], { hidden: !hidden }).catch((e) => toast.error('Couldn’t undo', errorMessage(e))) })
+    } catch (e) { toast.error('Couldn’t change who sees it', errorMessage(e)) }
+  }
+  const rotate = () => {
+    const id = photoId
+    setView((v) => ({ ...v, rotate: v.rotate + 90, x: 0, y: 0 }))
+    api.rotatePhotos([id], 90).then(
+      () => toast.undo('Rotated', () => { api.rotatePhotos([id], -90).catch((e) => toast.error('Couldn’t undo', errorMessage(e))) }),
+      (e) => { setView((v) => ({ ...v, rotate: v.rotate - 90 })); toast.error('Couldn’t rotate the photo', errorMessage(e)) },
+    )
+  }
+  const moveTo = async (a: Album) => {
+    if (!photo) return
+    setMoveOpen(false)
+    await move([photoId], a, new Map([[photoId, photo]]))
+  }
+  const trashNow = () => {
+    const id = photoId
+    const undo = trashWithUndo('photos', [id], () => api.deletePhotos([id]), () => api.restorePhotos([id]),
+      (e, what) => toast.error(what === 'trash' ? 'Couldn’t trash the photo' : 'Couldn’t bring the photo back', errorMessage(e)))
+    toast.undo('Photo moved to trash', () => { undo(); goTo(id) }, 'It’s deleted for good after 30 days.')
+    const to = next ?? prev
+    if (to) goTo(to); else close()
+  }
+  const trash = () => (event?.coverPhotoId === photoId ? setCoverGuard(true) : trashNow())
 
   const shareUrl = event ? `${GALLERY_URL}/${event.shortId}/p/${photoId}` : ''
+  const copyLink = async () => { if (await copyText(shareUrl)) toast.success('Link copied', shareUrl.replace(/^https?:\/\//, '')); else toast.error('Couldn’t copy the link', shareUrl) }
   const share = async () => {
     if (navigator.share) {
       try { await navigator.share({ title: photo?.filename, text: event?.name, url: shareUrl }); return } catch (e) { if ((e as Error).name === 'AbortError') return }
     }
-    const ok = await copyText(shareUrl)
-    if (ok) toast.success('Link copied', shareUrl.replace(/^https?:\/\//, '')); else toast.error('Couldn’t copy the link', shareUrl)
+    await copyLink()
   }
   const [downloading, setDownloading] = useState(false)
   const download = useCallback(async (kind: 'web' | 'original') => {
     if (!photo) return
     setDownloading(true)
     try {
-      // Real file first: the API's download link (web size = 2048 px), then the uploaded file for originals.
-      // Tone placeholders (no file yet) are drawn in the browser.
-      const signed = await api.getPhotoDownloadUrl(photo.id, kind === 'web' ? { size: 2048 } : {}).catch(() => null)
-      const source = signed ?? (kind === 'original' ? url : undefined)
-      if (source) {
-        const res = await fetch(source).catch(() => null)
-        if (res?.ok) {
-          const file = await res.blob()
-          const base = photo.filename.replace(/\.[^.]+$/, '')
-          downloadBlob(file, kind === 'web' && signed ? `${base}_2048.jpg` : photo.filename)
-          toast.success(kind === 'web' ? 'Web size downloaded' : 'Original downloaded', `${fmt.bytes(file.size)} · ${photo.filename}`)
-          return
-        }
-        if (signed) { window.open(signed, '_blank', 'noopener'); return }
-      }
-      const blob = await renderPhoto(photo, url, kind === 'web'
-        ? { maxEdge: 2048, watermark: event?.settings.watermarkOff ? undefined : `© ${wm?.text || studio?.name || 'Studio'}` }
-        : {})
-      const base = photo.filename.replace(/\.[^.]+$/, '')
-      downloadBlob(blob, kind === 'web' ? `${base}_2048.jpg` : `${base}.jpg`)
-      toast.success(kind === 'web' ? 'Web size downloaded' : 'Original downloaded', `${fmt.bytes(blob.size)} · ${photo.filename}`)
-    } catch (e) {
-      toast.error('Download failed', (e as Error).message)
-    } finally { setDownloading(false) }
+      const size = await downloadPhoto(api, photo, kind, { url, watermark: event?.settings.watermarkOff ? undefined : `© ${wm?.text || studio?.name || 'Studio'}`, save: downloadBlob })
+      toast.success(kind === 'web' ? 'Web size downloaded' : 'Original downloaded', `${fmt.bytes(size)} · ${photo.filename}`)
+    } catch (e) { toast.error('Download failed', errorMessage(e)) } finally { setDownloading(false) }
   }, [api, photo, url, event?.settings.watermarkOff, wm?.text, studio?.name, toast])
-
-  const askDelete = () => (event?.coverPhotoId === photoId ? setCoverGuard(true) : setConfirmDelete(true))
 
   /* ---------- Keyboard ---------- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
-      if (t.closest('input, textarea, select, [contenteditable=true]') || document.querySelector('[role="dialog"][data-state="open"], [role="menu"]')) return
+      if (t.closest('input, textarea, select, [contenteditable=true]') || document.querySelector('[role="dialog"], [role="menu"]')) return
       if (e.metaKey || e.ctrlKey || e.altKey) return
       switch (e.key) {
-        case 'ArrowLeft': if (prev) goTo(prev.id); break
-        case 'ArrowRight': if (next) goTo(next.id); break
+        case 'ArrowLeft': if (prev) goTo(prev); break
+        case 'ArrowRight': if (next) goTo(next); break
         case ' ': e.preventDefault(); setPlaying((p) => !p); break
-        case 'f': case 'F': setFaces((f) => !f); break
-        case 'd': case 'D': download('web'); break
+        case 'd': case 'D': void download('web'); break
+        case 'i': case 'I': setInfo(!infoOpen); break
         case '+': case '=': zoomBy(1.25); break
         case '-': zoomBy(0.8); break
-        case '0': setView(INITIAL_VIEW); break
-        case 'Escape': if (infoOpen) setInfoOpen(false); else if (!document.fullscreenElement) close(); break
+        case 'Escape': if (infoOpen) setInfo(false); else close(); break
         default: return
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // Capture phase: runs before an open menu or dialog closes itself on Esc, so Esc only closes that.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   })
 
-  /* ---------- Render ---------- */
   if (photoQ.isError) {
     return (
-      <div className="grid h-full place-items-center bg-side text-side-ink">
-        <EmptyState title="This photo isn’t available" body="It may have been deleted or moved. Go back to the event to see what’s there now."
+      <div className="grid min-h-dvh place-items-center bg-side px-4 text-side-ink">
+        <EmptyState title="This photo isn’t here any more" body="It may have been moved to trash. Go back to the event to see what’s there now."
           action={<Button variant="primary" onClick={close}>Back to the event</Button>} />
       </div>
     )
   }
 
-  const neighbours = index >= 0 && stripQ.data ? stripQ.data.items : photo ? [photo] : []
   const isEventCover = event?.coverPhotoId === photoId
   const isAlbumCover = !!album && album.coverPhotoId === photoId
-  const moveTargets = albums.filter((a) => a.kind === 'album' && a.id !== photo?.albumId)
+  const downloadMenu = (trigger: ReactNode) => (
+    <Menu tone="dark" align="end" width={240} trigger={trigger} items={[
+      { label: 'Web size', description: `2048 px${event?.settings.watermarkOff ? '' : ', with your watermark'}`, icon: <Download size={15} />, onSelect: () => void download('web') },
+      { label: 'Original', description: photo ? `${photo.exif.width} × ${photo.exif.height} · ${fmt.bytes(photo.exif.sizeBytes)}` : undefined, icon: <Download size={15} />, onSelect: () => void download('original') },
+      'separator',
+      { label: 'Copy link', icon: <Copy size={15} />, onSelect: () => void copyLink() },
+    ]} />
+  )
+  const position = index >= 0 ? `${fmt.count(index + 1)} of ${fmt.count(ids.length)}` : ''
 
   return (
-    <div className="flex h-full flex-col bg-side text-side-ink md:grid md:grid-cols-[1fr_300px]">
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* Top bar */}
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-4">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <button type="button" onClick={close} className="inline-flex h-7 items-center gap-1.5 rounded-[7px] border border-side-line px-2.5 text-[12px] font-bold hover:bg-side-2">
-              <ArrowLeft size={13} /><span className="max-w-[120px] truncate">{albums.find((a) => a.id === albumParam)?.name ?? 'All photos'}</span>
-            </button>
-            <span className="font-mono text-[12px] text-side-ink-2" aria-label="Photo position">
-              <b className="text-side-gold">{index >= 0 ? index + 1 : '–'}</b> / {fmt.count(ids.length)}
-            </span>
-            {photo && (
-              <span className="hidden min-w-0 items-center gap-1.5 rounded-control border border-side-line bg-side-2 py-0.5 pl-2 pr-0.5 sm:inline-flex">
-                <span className="truncate font-mono text-[12px]">{photo.filename}</span>
-                <VBtn label="Copy filename" icon={<Copy size={12} />} className="h-6 px-1.5 text-side-ink-2" onClick={async () => { if (await copyText(photo.filename)) toast.success('Filename copied') }} />
-              </span>
-            )}
-          </div>
-          <div className="flex max-w-full items-center gap-0.5 overflow-x-auto rounded-card border border-side-line bg-side-2 p-1 scrollbar-thin">
-            <Menu align="end" width={240} trigger={<button type="button" className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] px-2 text-[12px] font-bold hover:bg-side"><ImageIcon size={13} /><span className="hidden lg:inline">Cover</span><ChevronDown size={11} /></button>}
-              items={[
-                { label: 'Set as event cover', icon: isEventCover ? <Check size={14} /> : <ImageIcon size={14} />, hint: isEventCover ? 'Current' : undefined, onSelect: () => setCover.mutate('event'), disabled: !eventId },
-                { label: `Set as ${album?.name ?? 'album'} cover`, icon: isAlbumCover ? <Check size={14} /> : <FolderInput size={14} />, hint: isAlbumCover ? 'Current' : undefined, onSelect: () => setCover.mutate('album'), disabled: !eventId },
-              ]} />
-            {photo && (
-              <VBtn label={photo.hidden ? 'Unhide' : 'Hide from guests'} icon={photo.hidden ? <Eye size={13} /> : <EyeOff size={13} />} onClick={() => hide.mutate(!photo.hidden)}>
-                <span className="hidden lg:inline">{photo.hidden ? 'Unhide' : 'Hide'}</span>
-              </VBtn>
-            )}
-            <Menu align="end" trigger={<button type="button" className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] px-2 text-[12px] font-bold hover:bg-side" aria-label="Move to album"><FolderInput size={13} /><span className="hidden lg:inline">Move</span><ChevronDown size={11} /></button>}
-              items={moveTargets.length ? moveTargets.map((a) => ({ label: a.name, hint: fmt.count(a.photoCount), onSelect: () => move.mutate(a) })) : [{ label: 'No other albums yet', disabled: true }]} />
-            <VBtn label="Share" icon={<Share2 size={13} />} onClick={share}><span className="hidden lg:inline">Share</span></VBtn>
-            <Menu align="end" width={250} trigger={<button type="button" disabled={downloading} className="ml-0.5 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] bg-gold px-2 text-[12px] font-bold text-accent-ink disabled:opacity-60" aria-label="Download"><Download size={13} /><span className="hidden sm:inline">{downloading ? 'Preparing…' : 'Download'}</span><ChevronDown size={11} /></button>}
-              items={[
-                { label: 'Download web size', hint: `2048 px${event?.settings.watermarkOff ? '' : ' · watermarked'}`, icon: <Download size={14} />, onSelect: () => download('web') },
-                { label: 'Download original', hint: photo ? `${photo.exif.width} × ${photo.exif.height}` : undefined, icon: <Download size={14} />, onSelect: () => download('original') },
-                'separator',
-                { label: 'Copy share link', icon: <Copy size={14} />, onSelect: async () => { if (await copyText(shareUrl)) toast.success('Link copied') } },
-              ]} />
-            <VBtn label="Delete photo" icon={<Trash2 size={13} />} danger onClick={askDelete} />
-            <Sep />
-            <VBtn label="Close (Esc)" icon={<X size={14} />} onClick={close} />
-          </div>
+    <div className="flex h-dvh flex-col overflow-hidden bg-side text-side-ink">
+      {/* Top bar */}
+      <header className="flex items-center justify-between gap-3 px-3 py-2.5 sm:px-5 sm:py-3.5">
+        <div className="flex min-w-0 items-center gap-3">
+          <VBtn icon={<ArrowLeft size={17} />} aria-label="Back to the event" onClick={close} className="border-transparent" />
+          <span className="min-w-0 truncate text-[13.5px] text-side-ink-2 tnum">{position}{photo && <span className="hidden sm:inline"> · {photo.filename}</span>}</span>
+          {photo?.hidden && <span className="hidden shrink-0 rounded-full border border-side-line px-2 py-0.5 text-[12px] font-bold text-side-ink-2 sm:inline">Hidden</span>}
         </div>
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <div className="hidden items-center gap-2 sm:flex">
+            <VBtn icon={<Info size={15} />} active={infoOpen} aria-pressed={infoOpen} onClick={() => setInfo(!infoOpen)}>Details</VBtn>
+            <VBtn icon={<Share2 size={15} />} onClick={() => void share()}>Share</VBtn>
+            {downloadMenu(<VBtn icon={<Download size={15} />} disabled={downloading}>{downloading ? 'Preparing…' : 'Download'}</VBtn>)}
+          </div>
+          <Menu tone="dark" align="end" width={270} trigger={<VBtn icon={<MoreHorizontal size={17} />} aria-label="More photo actions" />} items={[
+            { label: 'Set as event cover', description: isEventCover ? 'This is the cover now' : 'Guests see it first', icon: <ImageIcon size={15} />, disabled: isEventCover, onSelect: () => void setCover('event') },
+            { label: `Set as ${album?.name ?? 'album'} cover`, description: isAlbumCover ? 'This is the album cover now' : undefined, icon: <ImageIcon size={15} />, disabled: isAlbumCover || !album, onSelect: () => void setCover('album') },
+            { label: 'Move to album…', icon: <FolderInput size={15} />, onSelect: () => setMoveOpen(true) },
+            { label: 'Rotate', icon: <RotateCw size={15} />, onSelect: rotate },
+            { label: photo?.hidden ? 'Show to guests' : 'Hide from guests', icon: photo?.hidden ? <Eye size={15} /> : <EyeOff size={15} />, onSelect: () => void hide() },
+            { label: 'Improve with AI', description: `Uses your wallet: ${fmt.rupees(ENHANCE_COST)} a photo`, icon: <Wand2 size={15} />, onSelect: () => navigate(`/enhance/${photoId}`) },
+            'separator',
+            { label: 'Move to trash', description: isEventCover ? 'Pick a new cover first' : 'You can undo', icon: <Trash2 size={15} />, danger: true, onSelect: trash },
+          ]} />
+          <VBtn icon={<X size={18} />} aria-label="Close (Esc)" onClick={close} className="border-transparent" />
+        </div>
+      </header>
 
-        {/* Stage */}
-        <div className="relative min-h-[240px] flex-1">
+      {/* Stage + side panel */}
+      <div className="relative flex min-h-0 flex-1">
+        <div className="relative min-w-0 flex-1">
           {photo ? (
-            <Stage photo={photo} url={url} view={view} setView={setView} showFaces={faces} personName={personName} maxScale={maxScale}
+            <Stage photo={photo} url={url} view={view} setView={setView} showFaces={false} personName={personName} maxScale={maxScale}
               watermark={event?.settings.watermarkOff ? undefined : wm?.text || studio?.name} onNaturalScale={setNatural} />
           ) : <div className="grid h-full place-items-center"><Skeleton className="h-[60%] w-[70%] bg-side-2" /></div>}
-          <NavArrow side="left" disabled={!prev} onClick={() => prev && goTo(prev.id)} />
-          <NavArrow side="right" disabled={!next} onClick={() => next && goTo(next.id)} />
+          <NavArrow side="left" disabled={!prev} onClick={() => prev && goTo(prev)} />
+          <NavArrow side="right" disabled={!next} onClick={() => next && goTo(next)} />
         </div>
-
-        {/* Bottom */}
-        <div className="flex flex-col gap-2 pb-2.5 pt-1.5">
-          <div className="flex justify-center px-3">
-            <BottomToolbar playing={playing} onPlay={() => setPlaying((p) => !p)} zoomPct={Math.round((view.scale / natural) * 100)}
-              onZoomOut={() => zoomBy(0.8)} onFit={() => setView((v) => ({ ...v, scale: 1, x: 0, y: 0 }))} onZoomIn={() => zoomBy(1.25)}
-              on100={() => setView((v) => ({ ...v, scale: Math.min(maxScale, natural), x: 0, y: 0 }))}
-              fullscreen={fullscreen} onFullscreen={toggleFullscreen}
-              onRotate={(d) => setView((v) => ({ ...v, rotate: v.rotate + d, x: 0, y: 0 }))} onFlip={() => setView((v) => ({ ...v, flip: !v.flip }))}
-              onReset={() => setView(INITIAL_VIEW)} faces={faces} onFaces={() => setFaces((f) => !f)} />
-          </div>
-          <Filmstrip photos={neighbours} currentId={photoId} onPick={(p) => goTo(p.id)} />
-          <div className="flex items-center justify-between gap-3 px-4">
-            <span className="hidden font-mono text-[10.5px] text-side-ink-2 sm:block">← → photos · Space slideshow · F face boxes · D download · Esc close</span>
-            <button type="button" onClick={() => setInfoOpen(true)} className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-control border border-side-line px-3 text-[12px] font-bold md:hidden">
-              <Info size={14} />Info
-            </button>
-          </div>
-        </div>
+        {infoOpen && photo && (
+          <>
+            <button type="button" aria-label="Close details" className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={() => setInfo(false)} />
+            <aside aria-label="Photo details"
+              className="fixed inset-x-0 bottom-0 z-40 h-[70dvh] rounded-t-[22px] border-t border-side-line bg-side-2 md:static md:z-auto md:h-auto md:w-[330px] md:rounded-none md:border-l md:border-t-0">
+              <span className="mx-auto mt-2.5 block h-1 w-9 rounded-full bg-side-line md:hidden" aria-hidden />
+              <InfoPanel photo={photo} album={album} event={event} people={people} personName={personName} />
+            </aside>
+          </>
+        )}
       </div>
 
-      {/* Right panel (desktop) / bottom sheet (phone) */}
-      <aside className="hidden min-h-0 border-l border-side-line bg-side-2 md:block">
-        {photo && <InfoPanel photo={photo} album={album} position={index + 1} total={ids.length} people={people} personName={personName} eventId={eventParam} />}
-      </aside>
-      {infoOpen && photo && (
-        <div className="fixed inset-0 z-40 flex flex-col justify-end md:hidden">
-          <button type="button" aria-label="Close details" className="flex-1 bg-black/50" onClick={() => setInfoOpen(false)} />
-          <div role="dialog" aria-label="Photo details" className="max-h-[70vh] rounded-t-modal border-t border-side-line bg-side-2">
-            <div className="flex justify-between px-4 pt-3">
-              <span className="truncate font-mono text-[12px]">{photo.filename}</span>
-              <button type="button" aria-label="Close details" onClick={() => setInfoOpen(false)} className="rounded p-1 hover:bg-side"><X size={16} /></button>
-            </div>
-            <div className="h-[60vh]"><InfoPanel photo={photo} album={album} position={index + 1} total={ids.length} people={people} personName={personName} eventId={eventParam} /></div>
-          </div>
+      {/* Bottom row */}
+      <footer className="flex flex-wrap items-center justify-center gap-2 px-3 py-2.5 pb-[max(10px,env(safe-area-inset-bottom))] sm:gap-4 sm:py-3.5">
+        <VBtn icon={playing ? <Pause size={15} /> : <Play size={15} />} onClick={() => setPlaying((p) => !p)} aria-pressed={playing}>{playing ? 'Pause' : 'Slideshow'}</VBtn>
+        <div className="flex items-center gap-1">
+          <VBtn icon={<ZoomOut size={15} />} aria-label="Zoom out" onClick={() => zoomBy(0.8)} className="border-transparent" />
+          <button type="button" onClick={() => setView((v) => ({ ...v, scale: 1, x: 0, y: 0 }))} className="min-h-[34px] w-12 text-center text-[12.5px] font-bold text-side-ink-2 tnum hover:text-side-ink" aria-label="Fit to screen">
+            {view.scale === 1 ? 'Fit' : `${Math.round((view.scale / natural) * 100)}%`}
+          </button>
+          <VBtn icon={<ZoomIn size={15} />} aria-label="Zoom in" onClick={() => zoomBy(1.25)} className="border-transparent" />
+        </div>
+        <div className="flex items-center gap-2 sm:hidden">
+          <VBtn icon={<Info size={15} />} active={infoOpen} onClick={() => setInfo(!infoOpen)}>Details</VBtn>
+          <VBtn icon={<Share2 size={15} />} onClick={() => void share()}>Share</VBtn>
+          {downloadMenu(<VBtn icon={<Download size={15} />}>Download</VBtn>)}
+        </div>
+        <span className="hidden items-center gap-1.5 text-[12px] text-side-ink-2 lg:flex">
+          <Kbd>←</Kbd><Kbd>→</Kbd> next · <Kbd>Space</Kbd> slideshow · <Kbd>D</Kbd> download · <Kbd>I</Kbd> details · <Kbd>Esc</Kbd> close
+        </span>
+      </footer>
+
+      <Modal open={moveOpen} onOpenChange={setMoveOpen} title="Move to album" width={400}>
+        <ul className="-mx-2 flex flex-col">
+          {albums.filter((a) => a.kind === 'album' && !pending.albums.has(a.id)).sort((a, b) => a.order - b.order).map((a) => (
+            <li key={a.id}>
+              <button type="button" disabled={a.id === photo?.albumId} onClick={() => void moveTo(a)}
+                className="flex min-h-[44px] w-full items-center justify-between rounded-control px-2.5 text-left text-[14px] font-bold hover:bg-sunk disabled:opacity-50">
+                {a.name}<span className="text-[12.5px] font-medium text-ink-3">{a.id === photo?.albumId ? 'It’s here now' : photosLabel(a.photoCount)}</span>
+              </button>
+            </li>
+          ))}
+          <li className="mt-1 border-t border-line pt-1">
+            <button type="button" onClick={() => { setMoveOpen(false); setNewAlbum(true) }} className="flex min-h-[44px] w-full items-center gap-2 rounded-control px-2.5 text-[14px] font-bold text-accent-text hover:bg-accent-soft"><Plus size={15} />New album…</button>
+          </li>
+        </ul>
+      </Modal>
+      <NewAlbumModal open={newAlbum} onOpenChange={setNewAlbum} eventId={eventParam} count={1} onCreated={(a) => void moveTo(a)} />
+      <CoverGuard open={coverGuard} onOpenChange={setCoverGuard} eventId={eventParam} albumId={albumParam} currentId={photoId}
+        onPicked={async (p) => {
+          try { await api.setCover(eventParam, p.id, 'event'); setCoverGuard(false); toast.success('New event cover set'); trashNow() }
+          catch (e) { toast.error('Couldn’t set the cover', errorMessage(e)) }
+        }} />
+    </div>
+  )
+}
+
+/** Trashing the event cover: pick another photo as the cover first. */
+function CoverGuard({ open, onOpenChange, eventId, albumId, currentId, onPicked }: {
+  open: boolean; onOpenChange: (v: boolean) => void; eventId: string; albumId?: string; currentId: string; onPicked: (p: Photo) => Promise<void>
+}) {
+  const photos = usePhotos(open ? eventId : undefined, { albumId, limit: 13 }).data?.items.filter((p) => p.id !== currentId && p.status === 'ready').slice(0, 12)
+  const [busy, setBusy] = useState<string | null>(null)
+  return (
+    <Modal open={open} onOpenChange={onOpenChange} title="Pick a new cover first" width={560}
+      description="This photo is the event cover, the first thing guests see. Choose another one, then this photo goes to trash.">
+      {!photos ? <Skeleton className="h-40" /> : (
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {photos.map((p) => (
+            <button key={p.id} type="button" disabled={!!busy} onClick={async () => { setBusy(p.id); await onPicked(p); setBusy(null) }}
+              aria-label={`Use ${p.filename} as the cover`} className="rounded-[8px] outline-offset-2 hover:outline hover:outline-2 hover:outline-accent disabled:opacity-60">
+              <PhotoTile tone={p.tone} url={liveUrl(p.url)} alt={p.filename} rounded="rounded-[8px]" />
+            </button>
+          ))}
         </div>
       )}
-
-      <ConfirmDialog open={confirmDelete} onOpenChange={setConfirmDelete} danger title="Delete this photo?" confirmLabel="Delete photo"
-        body={<><b className="font-mono text-ink">{photo?.filename}</b> disappears from the gallery and from guests’ favourites straight away. This can’t be undone.</>}
-        onConfirm={() => remove.mutate(undefined)} />
-      <Modal open={coverGuard} onOpenChange={setCoverGuard} title="This photo is the event cover" width={440}
-        footer={<Button variant="primary" onClick={() => setCoverGuard(false)}>Got it</Button>}>
-        <div className="px-6 py-4 text-[13.5px] text-ink-2">
-          Guests see it first when they open the gallery. Set another photo as the cover first, then delete this one.
-        </div>
-      </Modal>
-    </div>
+    </Modal>
   )
 }
 
@@ -297,8 +324,8 @@ function NavArrow({ side, disabled, onClick }: { side: 'left' | 'right'; disable
   const Icon = side === 'left' ? ChevronLeft : ChevronRight
   return (
     <button type="button" aria-label={side === 'left' ? 'Previous photo (←)' : 'Next photo (→)'} disabled={disabled} onClick={onClick}
-      className={`absolute top-1/2 z-10 grid size-[38px] -translate-y-1/2 place-items-center rounded-full border border-side-line bg-side-2 text-side-ink hover:bg-side disabled:opacity-30 ${side === 'left' ? 'left-3 sm:left-4' : 'right-3 sm:right-4'}`}>
-      <Icon size={18} />
+      className={`absolute top-1/2 z-10 grid size-11 -translate-y-1/2 place-items-center rounded-full text-side-ink/80 hover:bg-side-2 hover:text-side-ink disabled:opacity-0 ${side === 'left' ? 'left-2 sm:left-5' : 'right-2 sm:right-5'}`}>
+      <Icon size={24} />
     </button>
   )
 }

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, type UseMutationOptions } from '@tanstack/react-query'
-import type { ID, ListPhotosQuery, PhotoIdsQuery } from '@frameline/shared'
+import { ApiError, type ID, type ListPhotosQuery, type NeedsYouItem, type PhotoIdsQuery } from '@frameline/shared'
 import { useToast } from '@frameline/ui'
 import { errorMessage, useApi } from './api'
 
@@ -18,7 +18,11 @@ export const usePhotos = (eventId: ID | undefined, q: ListPhotosQuery = {}) => {
   const api = useApi()
   return useQuery({ queryKey: ['photos', eventId, q], queryFn: () => api.listPhotos(eventId!, q), enabled: !!eventId, placeholderData: (prev) => prev })
 }
-export const usePhoto = (id?: ID) => { const api = useApi(); return useQuery({ queryKey: ['photo', id], queryFn: () => api.getPhoto(id!), enabled: !!id }) }
+/** A 404 (trashed or gone) is final: no retry, so the viewer shows its “isn’t here any more” state at once. */
+export const usePhoto = (id?: ID) => {
+  const api = useApi()
+  return useQuery({ queryKey: ['photo', id], queryFn: () => api.getPhoto(id!), enabled: !!id, retry: (n, e) => !(e instanceof ApiError && e.status === 404) && n < 1 })
+}
 export const usePeople = (eventId?: ID) => { const api = useApi(); return useQuery({ queryKey: ['people', eventId], queryFn: () => api.listPeople(eventId!), enabled: !!eventId }) }
 export const useFilms = (eventId?: ID) => { const api = useApi(); return useQuery({ queryKey: ['films', eventId], queryFn: () => api.listFilms(eventId!), enabled: !!eventId }) }
 export const useGuests = (eventId?: ID) => { const api = useApi(); return useQuery({ queryKey: ['guests', eventId], queryFn: () => api.listGuests(eventId!), enabled: !!eventId }) }
@@ -94,4 +98,70 @@ export const useDeletedEvents = (enabled = true) => {
   const api = useApi()
   return useQuery({ queryKey: ['events', 'deleted'], queryFn: () => api.listDeletedEvents(), enabled })
 }
+/** One event's totals (visits, downloads, favourites, face finding progress). Refreshes on live changes. */
+export const useEventStats = (eventId?: ID) => {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['event-stats', eventId], queryFn: () => api.getEventStats(eventId!), enabled: !!eventId,
+    // While faces are still being found, check again every few seconds.
+    refetchInterval: (q) => ((q.state.data?.faces.pending ?? 0) > 0 || (q.state.data?.processing ?? 0) > 0 ? 4000 : false),
+  })
+}
+/** Studio totals for Reports (`month` 'YYYY-MM', default this month). */
+export const useStudioStats = (month?: string) => { const api = useApi(); return useQuery({ queryKey: ['studio-stats', month], queryFn: () => api.getStudioStats(month ? { month } : undefined) }) }
 export const useCarts = () => { const api = useApi(); return useQuery({ queryKey: ['orders', 'carts'], queryFn: () => api.listCarts() }) }
+
+// ── Redesign foundation (contract v4) ────────────────────────────────────────
+
+/**
+ * The studio's money (owner only; other roles get a 403 → `isError`). Show `data.balance` as "Wallet",
+ * cap Withdraw at `data.withdrawable`. Never derive the wallet from ledger rows.
+ */
+export const useWalletBalance = (enabled = true) => { const api = useApi(); return useQuery({ queryKey: ['wallet'], queryFn: () => api.getWallet(), enabled }) }
+
+/** Where each "Needs you" item goes in the admin, and the button label for it. */
+export function needsYouTarget(item: NeedsYouItem): { to: string; actionLabel: string } {
+  switch (item.kind) {
+    case 'access-request': return { to: `/events/${item.eventId}/guests?f=requests`, actionLabel: 'Review' }
+    case 'guest-uploads': return { to: `/events/${item.eventId}/guests?f=uploads`, actionLabel: 'Review' }
+    case 'event-expiring': return { to: `/plan?renew=${item.eventId}`, actionLabel: 'Renew' }
+    case 'face-data-expiring': return { to: `/plan?renew=${item.eventId}&faces=1`, actionLabel: 'Renew' }
+  }
+}
+export type NeedsYouEntry = NeedsYouItem & { to: string; actionLabel: string }
+
+/**
+ * Home "Needs you": pending access requests, guest uploads awaiting review, events expiring within 14 days
+ * (or in the 7-day grace period) and face data about to lapse, most recent/urgent first. Each item has
+ * `to` (admin link) and `actionLabel` ("Review" / "Renew"); access requests also carry `accessRequestId`
+ * so Home can approve/decline in place with `api.resolveAccessRequest`.
+ */
+export const useNeedsYou = () => {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['needs-you'], queryFn: () => api.listNeedsYou(),
+    select: (items): NeedsYouEntry[] => items.map((i) => ({ ...i, ...needsYouTarget(i) })),
+    // Uploaders can't see it (403); don't retry.
+    retry: false,
+  })
+}
+
+/** Count for the event's Guests tab badge: pending access requests + guest photos awaiting review. */
+export const useGuestsAttention = (eventId?: ID) => {
+  const q = useNeedsYou()
+  return (q.data ?? []).filter((i) => i.eventId === eventId).reduce((n, i) => n + (i.kind === 'access-request' ? 1 : i.kind === 'guest-uploads' ? i.count ?? 0 : 0), 0)
+}
+
+/**
+ * Refund an order in full (owner). Ask first with ConfirmDialog (rule 8), then:
+ *   const refund = useRefundOrder()
+ *   <ConfirmDialog danger confirmLabel={`Refund ${fmt.rupees(o.paid)}`} onConfirm={() => refund.mutateAsync({ orderId: o.id, reason })} … />
+ * Errors: 409 `order_not_refundable` (already refunded / not paid through Frameline) → toast with the server's detail.
+ */
+export const useRefundOrder = () => {
+  const api = useApi()
+  return useAction((v: { orderId: ID; reason: string }) => api.refundOrder(v.orderId, v.reason), {
+    success: (o) => `Refunded ${o.currency === 'USD' ? `$${o.paid}` : `₹${o.paid.toLocaleString('en-IN')}`} to ${o.buyer}`,
+    error: 'Couldn’t refund this order',
+  })
+}

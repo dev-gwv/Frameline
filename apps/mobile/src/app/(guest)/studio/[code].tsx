@@ -3,7 +3,7 @@ import { Linking, Pressable, ScrollView, Share, StyleSheet, View } from 'react-n
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
-import { EVENT_TYPE_LABELS, fmt } from '@frameline/shared'
+import { EVENT_TYPE_LABELS, FEATURES, fmt } from '@frameline/shared'
 import { Button, Card, Chip, EmptyState, ErrorState, Icon, IconButton, LoadingList, Screen, SectionHeader, SettingRow, ToneView, Txt } from '@/components'
 import { EnquiryPrompt } from '@/components/guest'
 import { useQueryClient } from '@tanstack/react-query'
@@ -73,7 +73,7 @@ export default function StudioProfileScreen() {
         {studio.about ? <Txt v="small">{studio.about}</Txt> : null}
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Button label={following ? 'Following' : 'Follow'} icon={following ? 'check' : 'plus'} variant={following ? 'secondary' : 'primary'} style={{ flex: 1 }} loading={busy} onPress={toggleFollow} />
-          <Button label="Enquire" icon="message-circle" style={{ flex: 1 }} onPress={() => router.push({ pathname: '/enquiry', params: { studio: studio.followCode, studioName: studio.name, source: 'Studio app' } })} />
+          {FEATURES.website ? <Button label="Enquire" icon="message-circle" style={{ flex: 1 }} onPress={() => router.push({ pathname: '/enquiry', params: { studio: studio.followCode, studioName: studio.name, source: 'Studio app' } })} /> : null}
         </View>
 
         {featured.length ? (
@@ -142,11 +142,11 @@ export default function StudioProfileScreen() {
         <SectionHeader title="Contact" />
         <Card padded={false} style={{ paddingHorizontal: 16 }}>
           <SettingRow first icon="phone" title="Call" detail={studio.phone} onPress={() => Linking.openURL(`tel:${studio.phone.replace(/\s/g, '')}`)} />
-          <SettingRow icon="message-circle" title="WhatsApp" detail="Usually replies within an hour" onPress={() => Linking.openURL(`https://wa.me/${studio.phone.replace(/\D/g, '')}`)} />
+          <SettingRow icon="message-circle" title="WhatsApp" detail="Usually replies within an hour" onPress={() => Linking.openURL(`https://wa.me/${(studio.whatsapp || studio.phone).replace(/\D/g, '')}`)} />
           <SettingRow icon="mail" title="Email" detail={studio.email} onPress={() => Linking.openURL(`mailto:${studio.email}`)} />
           {studio.website ? <SettingRow icon="globe" title="Website" detail={studio.website.replace(/^https?:\/\//, '')} onPress={() => Linking.openURL(studio.website!)} /> : null}
         </Card>
-        <EnquiryPrompt studioCode={studio.followCode} studioName={studio.name} source="Studio app" />
+        {FEATURES.website ? <EnquiryPrompt studioCode={studio.followCode} studioName={studio.name} source="Studio app" /> : null}
         <View style={{ alignItems: 'center' }}><Chip label={`Follow code ${studio.followCode}`} tone="accent" /></View>
       </Screen>
     </View>

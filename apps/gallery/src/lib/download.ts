@@ -1,4 +1,4 @@
-import type { Photo, PublicEvent, PublicStudio, WatermarkSettings } from '@frameline/shared'
+import { watermarkAnchor, type Photo, type PublicEvent, type PublicStudio, type WatermarkSettings } from '@frameline/shared'
 
 /**
  * Downloads: first the API's rendition (api.getPhotoDownloadUrl — watermarked server-side, counted by the API).
@@ -44,21 +44,29 @@ async function ensureFont(family: string) {
 
 export async function renderPhoto(photo: Photo, opts: RenderOptions): Promise<Blob> {
   const long = opts.original ? 3072 : 2048
+  const rotation = photo.rotation ?? 0
+  const sideways = rotation === 90 || rotation === 270
   const w0 = photo.exif?.width || 6000, h0 = photo.exif?.height || 4000
   const scale = long / Math.max(w0, h0)
-  const W = Math.round(w0 * scale), H = Math.round(h0 * scale)
+  // The photo is drawn in its own orientation (pw × ph), then turned by Photo.rotation onto a W × H canvas.
+  const pw = Math.round(w0 * scale), ph = Math.round(h0 * scale)
+  const W = sideways ? ph : pw, H = sideways ? pw : ph
   const canvas = document.createElement('canvas')
   canvas.width = W; canvas.height = H
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas is not available in this browser')
 
+  ctx.save()
+  ctx.translate(W / 2, H / 2)
+  ctx.rotate((rotation * Math.PI) / 180)
+  ctx.translate(-pw / 2, -ph / 2)
   let drewImage = false
   if (photo.url) {
     try {
       const img = await loadImage(photo.url)
-      const r = Math.max(W / img.width, H / img.height)
+      const r = Math.max(pw / img.width, ph / img.height)
       const dw = img.width * r, dh = img.height * r
-      ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh)
+      ctx.drawImage(img, (pw - dw) / 2, (ph - dh) / 2, dw, dh)
       drewImage = true
     } catch { /* fall back to the tone */ }
   }
@@ -66,17 +74,18 @@ export async function renderPhoto(photo: Photo, opts: RenderOptions): Promise<Bl
     // Same geometry as CSS linear-gradient(<angle>deg, a, b 55%, c)
     const rad = (photo.tone.angle * Math.PI) / 180
     const dx = Math.sin(rad), dy = -Math.cos(rad)
-    const len = Math.abs(W * dx) + Math.abs(H * dy)
-    const cx = W / 2, cy = H / 2
+    const len = Math.abs(pw * dx) + Math.abs(ph * dy)
+    const cx = pw / 2, cy = ph / 2
     const g = ctx.createLinearGradient(cx - (dx * len) / 2, cy - (dy * len) / 2, cx + (dx * len) / 2, cy + (dy * len) / 2)
     g.addColorStop(0, photo.tone.stops[0]); g.addColorStop(0.55, photo.tone.stops[1]); g.addColorStop(1, photo.tone.stops[2])
     ctx.fillStyle = g
-    ctx.fillRect(0, 0, W, H)
-    const v = ctx.createRadialGradient(W / 2, H * 0.35, Math.min(W, H) * 0.25, W / 2, H * 0.35, Math.max(W, H) * 0.8)
+    ctx.fillRect(0, 0, pw, ph)
+    const v = ctx.createRadialGradient(pw / 2, ph * 0.35, Math.min(pw, ph) * 0.25, pw / 2, ph * 0.35, Math.max(pw, ph) * 0.8)
     v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.28)')
     ctx.fillStyle = v
-    ctx.fillRect(0, 0, W, H)
+    ctx.fillRect(0, 0, pw, ph)
   }
+  ctx.restore()
 
   const wm = opts.watermark
   if (opts.applyWatermark && wm) {
@@ -89,12 +98,13 @@ export async function renderPhoto(photo: Photo, opts: RenderOptions): Promise<Bl
     ctx.fillStyle = '#FFFFFF'
     ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = base * 0.35
     ctx.font = `600 ${base}px "${font}", Georgia, serif`
-    const pad = Math.min(W, H) * 0.04
-    const right = wm.position === 'tr' || wm.position === 'br'
-    const bottom = wm.position === 'bl' || wm.position === 'br'
-    ctx.textAlign = right ? 'right' : 'left'
+    // edgeOffset is % of the short side (default 3).
+    const pad = Math.min(W, H) * ((wm.edgeOffset ?? 3) / 100 || 0.04)
+    const anchor = watermarkAnchor(wm.position)
+    const bottom = anchor.y === 'bottom'
+    ctx.textAlign = anchor.x
     ctx.textBaseline = bottom ? 'alphabetic' : 'top'
-    const x = right ? W - pad : pad
+    const x = anchor.x === 'right' ? W - pad : anchor.x === 'center' ? W / 2 : pad
     const sub = wm.subtitle?.trim()
     const subSize = base * 0.42
     let y = bottom ? H - pad - (sub ? subSize * 1.5 : 0) : pad

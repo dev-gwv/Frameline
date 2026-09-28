@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, Download, KeyRound, Mail, ShoppingBag } from 'lucide-react'
-import { Button, Field, Input, Meter, Skeleton, useToast } from '@frameline/ui'
+import { CheckCircle2, Download, Lock, Mail, ShoppingBag } from 'lucide-react'
+import { Field, Input, Meter, Skeleton, useToast } from '@frameline/ui'
 import { fmt, type DownloadAllowance, type FramelineApi, type Photo, type PublicEvent, type PublicStudio, type PublicWatermark } from '@frameline/shared'
 import { useApi } from '../lib/api'
 import { ensureWatermark, fallbackWatermark, useWatermark } from '../lib/queries'
@@ -9,7 +9,9 @@ import { guest, useGuest, type EventSession } from '../lib/guest'
 import { canDownloadAll, DIRECT_DOWNLOAD_LIMIT, MAX_DOWNLOAD_ALL } from '../lib/access'
 import { errorCode, friendlyError } from '../lib/errors'
 import { downloadPhotos, savePhoto, type RenderOptions } from '../lib/download'
-import { Sheet } from './Sheet'
+import { PinBoxes } from './Gates'
+import { PrimaryButton, StateBlock, WideButton } from './common'
+import { RadioCard, Sheet } from './Sheet'
 
 /** Tells the studio about locally rendered downloads; a failure here never blocks the guest. */
 const countDownloads = (api: FramelineApi, ids: string[], shortId: string) => { if (ids.length) api.recordDownload(ids, shortId).catch(() => {}) }
@@ -49,21 +51,21 @@ export function useDownloadOne(event: PublicEvent, studio: PublicStudio) {
     try {
       const opts = await resolve()
       await savePhoto(photo, event, opts)
-      success('Downloaded', `${photo.filename} · ${opts.original ? 'original quality' : 'web quality'}`)
+      success('Photo saved', `${opts.original ? 'Full size' : 'Web size'} · check your Downloads or Photos`)
     } catch (e) {
-      error('Download failed', e instanceof Error ? e.message : 'Try again in a moment.')
+      error('Download didn’t finish', e instanceof Error ? e.message : 'Try again in a moment.')
     } finally { setBusy(false) }
   }
   return { run, busy }
 }
 
 type Stage = 'pin' | 'choose' | 'running' | 'done' | 'emailed' | 'blocked'
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 /**
  * Downloads several photos. `all` = "Download all": api.verifyDownloadPin checks the PIN (or the VIP link's
  * embedded PIN) and uses one of the guest's 5 uses, counted by the API.
- * `zip` says what an emailed ZIP should contain (default: these photo ids).
- * Up to DIRECT_DOWNLOAD_LIMIT files download one by one; bigger sets offer an emailed ZIP.
+ * Fewer than 10 photos save straight away; more offer "Email me a ZIP" (default) or "Save one by one".
  */
 export function DownloadSheet({ open, onOpenChange, photos, event, studio, session, all, title, onBuy, loading, zip }: {
   open: boolean; onOpenChange: (v: boolean) => void; photos: Photo[]; event: PublicEvent; studio: PublicStudio; session: EventSession
@@ -77,27 +79,31 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
     ? canDownloadAll(event, session)
     : { ok: event.settings.downloads !== 'none' || photos.every((p) => session.purchased.includes(p.id)), reason: 'The photographer has turned off downloads for this event.', buy: event.settings.storeEnabled }
   const initial: Stage = !verdict.ok ? 'blocked' : all && verdict.needsPin ? 'pin' : 'choose'
+  const knownEmail = [session.registration?.email, profileEmail].find((e) => !!e) ?? ''
   const [stage, setStage] = useState<Stage>(initial)
-  const [pin, setPin] = useState('')
+  const [how, setHow] = useState<'zip' | 'one'>('zip')
+  const [pinShake, setPinShake] = useState(0)
   const [pinError, setPinError] = useState<string | null>(null)
   const [done, setDone] = useState(0)
-  const [email, setEmail] = useState(session.registration?.email ?? profileEmail ?? '')
+  const [email, setEmail] = useState(knownEmail)
   const [pinBusy, setPinBusy] = useState(false)
   const [zipBusy, setZipBusy] = useState(false)
   const [emailError, setEmailError] = useState<string | null>(null)
   const [allowance, setAllowance] = useState<DownloadAllowance | null>(null)
   const [unlockError, setUnlockError] = useState<string | null>(null)
+  const [blockReason, setBlockReason] = useState<string | null>(null)
   const abort = useRef<AbortController | null>(null)
   const { error } = useToast()
 
   useEffect(() => {
-    if (open) { setStage(initial); setPin(''); setPinError(null); setDone(0); setAllowance(null); setUnlockError(null); setEmailError(null) }
+    if (open) { setStage(initial); setHow('zip'); setPinError(null); setDone(0); setAllowance(null); setUnlockError(null); setEmailError(null); setBlockReason(null) }
     else abort.current?.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   const n = photos.length
   const big = n > DIRECT_DOWNLOAD_LIMIT
+  const word = n === 1 ? 'photo' : 'photos'
 
   /** Uses one "Download all" (once per opening of the sheet). Returns false and explains when it can't. */
   async function unlock(withPin?: string): Promise<boolean> {
@@ -110,25 +116,23 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
     } catch (err) {
       const code = errorCode(err)
       const f = friendlyError(err, 'We couldn’t unlock the download')
-      if (code === 'download_limit') { guest.patchSession(event.shortId, { downloadsLeft: 0 }); setStage('blocked') }
+      if (code === 'download_limit') { guest.patchSession(event.shortId, { downloadsLeft: 0 }); setBlockReason(f.body); setStage('blocked') }
       else if (code === 'pin_required') { setStage('pin'); setPinError(null) }
-      else if (code === 'invalid_pin') setPinError('That PIN didn\'t match. Check the message from the host.')
+      else if (code === 'invalid_pin') { setPinError('That PIN didn’t match. Check the message from the host.'); setPinShake((x) => x + 1) }
       else if (withPin !== undefined) setPinError(`${f.title}. ${f.body}`)
       else setUnlockError(`${f.title}. ${f.body}`)
       return false
     }
   }
 
-  async function submitPin(e: FormEvent) {
-    e.preventDefault()
-    if (pin.length < 4) { setPinError('Enter all 4 digits.'); return }
+  async function submitPin(pin: string) {
     setPinBusy(true)
     const ok = await unlock(pin)
     setPinBusy(false)
-    if (ok) { setPinError(null); setStage('choose') } else setPin('')
+    if (ok) { setPinError(null); setStage('choose') }
   }
 
-  async function start() {
+  async function saveHere() {
     setUnlockError(null)
     if (!(await unlock())) return
     setStage('running'); setDone(0)
@@ -143,9 +147,9 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
     }
   }
 
-  async function emailZip(e: FormEvent) {
-    e.preventDefault()
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) { setEmailError('Enter an email like name@example.com.'); return }
+  async function emailZip(e?: FormEvent) {
+    e?.preventDefault()
+    if (!EMAIL.test(email.trim())) { setEmailError('Enter an email like name@example.com.'); document.getElementById('dl-email')?.focus(); return }
     setZipBusy(true); setEmailError(null)
     try {
       if (!(await unlock())) return
@@ -155,86 +159,87 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
       guest.setProfile({ email: email.trim() })
       setStage('emailed')
     } catch (err) {
-      const f = friendlyError(err, 'We couldn’t request the ZIP')
+      const f = friendlyError(err, 'We couldn’t send the ZIP')
       setEmailError(`${f.title}. ${f.body}`)
     } finally { setZipBusy(false) }
   }
 
-  const quality = opts.original ? 'Original quality' : 'Web quality, 2048 px'
-  const heading = title ?? (all ? 'Download all' : `Download ${fmt.count(n)} ${n === 1 ? 'photo' : 'photos'}`)
+  const quality = opts.original ? 'Full size' : 'Web size (2048 px)'
+  const heading = title ?? `Download ${fmt.count(n)} ${word}`
+  const canClose = stage !== 'running'
+
+  const footer = stage === 'choose' && !loading ? (
+    big && how === 'zip'
+      ? <PrimaryButton icon={<Mail size={16} />} loading={zipBusy} onClick={() => void emailZip()}>{EMAIL.test(email.trim()) ? `Send to ${email.trim()}` : 'Email me the ZIP'}</PrimaryButton>
+      : <PrimaryButton icon={<Download size={16} />} onClick={() => void saveHere()}>Save {fmt.count(n)} {word}</PrimaryButton>
+  ) : stage === 'running' ? (
+    <WideButton onClick={() => { abort.current?.abort(); setStage('done') }}>Stop</WideButton>
+  ) : stage === 'done' || stage === 'emailed' ? (
+    <WideButton onClick={() => onOpenChange(false)}>Done</WideButton>
+  ) : undefined
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange} title={heading}
-      description={stage === 'blocked' || loading ? undefined : `${fmt.count(n)} ${n === 1 ? 'photo' : 'photos'} · ${quality}${opts.applyWatermark ? ' · watermarked' : ''}`}>
+    <Sheet open={open} onOpenChange={(v) => { if (canClose) onOpenChange(v) }} hideClose={!canClose} footer={footer}
+      title={stage === 'blocked' ? 'Can’t download these photos' : stage === 'emailed' ? 'Your ZIP is on its way' : stage === 'done' ? (done === n ? 'All saved' : `${done} of ${n} saved`) : heading}
+      description={stage === 'choose' || stage === 'pin' ? `${quality}${opts.applyWatermark ? ' · with the studio’s watermark' : ''}` : undefined}>
       {stage === 'blocked' && (
         <div className="flex flex-col gap-3">
-          <p className="rounded-card bg-sunk p-3 text-[13.5px] text-ink-2">{verdict.reason}</p>
-          {verdict.buy && onBuy && <Button variant="primary" size="lg" icon={<ShoppingBag size={16} />} className="w-full justify-center" onClick={() => { onOpenChange(false); onBuy() }}>Buy these photos</Button>}
+          <p className="rounded-card bg-sunk p-3.5 text-[14px] text-ink-2">{blockReason ?? verdict.reason}</p>
+          {verdict.buy && onBuy && <PrimaryButton icon={<ShoppingBag size={16} />} onClick={() => { onOpenChange(false); onBuy() }}>Buy these photos</PrimaryButton>}
+          {!(verdict.buy && onBuy) && <WideButton onClick={() => onOpenChange(false)}>Close</WideButton>}
         </div>
       )}
       {stage === 'pin' && (
-        <form onSubmit={submitPin} className="flex flex-col gap-3" noValidate>
-          <p className="flex items-start gap-2 text-[13px] text-ink-2"><KeyRound size={15} className="mt-0.5 shrink-0 text-accent-text" />Download all needs the gallery PIN. You can use it {MAX_DOWNLOAD_ALL} times{verdict.left !== undefined ? <> — <b className="text-ink">{verdict.left} left</b></> : ''}.</p>
-          <Field label="Gallery PIN" htmlFor="dl-pin" error={pinError}>
-            <Input id="dl-pin" inputMode="numeric" autoComplete="off" maxLength={4} value={pin} autoFocus
-              onChange={(e) => { setPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setPinError(null) }}
-              className="h-12 text-center font-mono text-[22px] tracking-[0.5em]" aria-invalid={!!pinError} />
-          </Field>
-          <Button type="submit" variant="primary" size="lg" loading={pinBusy} className="w-full justify-center">Unlock download</Button>
-        </form>
+        <div className="flex flex-col items-center gap-3 text-center">
+          <p className="flex items-start gap-2 text-left text-[13.5px] text-ink-2"><Lock size={15} className="mt-0.5 shrink-0 text-accent-text" />
+            <span>Download all needs the gallery PIN. You can use it {MAX_DOWNLOAD_ALL} times{verdict.left !== undefined ? <> · <b className="text-ink">{verdict.left} left</b></> : ''}.</span>
+          </p>
+          <PinBoxes label="Gallery PIN" shakeKey={pinShake} disabled={pinBusy} invalid={!!pinError} onComplete={(p) => void submitPin(p)} />
+          <div aria-live="polite" className="min-h-5 text-[13px] font-bold text-bad">{pinError}</div>
+        </div>
       )}
       {stage === 'choose' && loading && (
-        <div className="flex flex-col gap-2" aria-busy aria-label="Preparing photos"><Skeleton className="h-11" /><Skeleton className="h-4 w-1/2" /></div>
+        <div className="flex flex-col gap-2" aria-busy aria-label="Getting your photos ready"><Skeleton className="h-14" /><Skeleton className="h-14" /></div>
       )}
       {stage === 'choose' && !loading && (
-        <div className="flex flex-col gap-3">
-          {all && (allowance
-            ? <p className="text-[12.5px] text-ink-3">Unlocked. You have {allowance.remaining} of {allowance.limit} Download all left after this one.</p>
-            : <p className="text-[12.5px] text-ink-3">This uses 1 of your {verdict.left ?? MAX_DOWNLOAD_ALL} Download all.</p>)}
+        <div className="flex flex-col gap-2.5">
+          {all && <p className="text-[12.5px] text-ink-3">{allowance ? `Unlocked. ${allowance.remaining} of ${allowance.limit} Download all left after this one.` : `This uses 1 of your ${verdict.left ?? MAX_DOWNLOAD_ALL} Download all.`}</p>}
           {unlockError && <p role="alert" className="rounded-card bg-bad-soft p-3 text-[13px] font-semibold text-bad">{unlockError}</p>}
           {big ? (
             <>
-              <form onSubmit={emailZip} className="flex flex-col gap-2.5 rounded-card border border-line p-3.5" noValidate>
-                <div className="flex items-center gap-2"><Mail size={16} className="text-accent-text" /><b className="text-[14px]">Email me a ZIP</b><span className="ml-auto rounded-full bg-accent-soft px-2 py-0.5 text-[10.5px] font-bold text-accent-text">Best for {fmt.count(n)} photos</span></div>
-                <p className="text-[12.5px] text-ink-2">We'll pack every photo into one ZIP and email a download link, usually within 10 minutes.</p>
-                <Field htmlFor="dl-email" error={emailError}>
-                  <Input id="dl-email" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(null) }} className="h-11 text-[15px]" aria-label="Email for the ZIP link" />
-                </Field>
-                <Button type="submit" variant="primary" size="lg" loading={zipBusy} className="w-full justify-center">Email me the ZIP</Button>
-              </form>
-              <Button size="lg" icon={<Download size={16} />} className="w-full justify-center" onClick={start}>Download here, one by one</Button>
-              <p className="text-[11.5px] text-ink-3">Your browser may ask to allow multiple downloads.</p>
+              <div role="radiogroup" aria-label="How to download" className="flex flex-col gap-2">
+                <RadioCard checked={how === 'zip'} onSelect={() => setHow('zip')} title="Email me a ZIP" detail="Best for many photos. Arrives in a few minutes." />
+                <RadioCard checked={how === 'one'} onSelect={() => setHow('one')} title="Save one by one" detail="Keeps this page open while they save." />
+              </div>
+              {how === 'zip' && (
+                <form onSubmit={(e) => void emailZip(e)} noValidate>
+                  <Field label="Send the link to" htmlFor="dl-email" error={emailError}>
+                    <Input id="dl-email" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email}
+                      onChange={(e) => { setEmail(e.target.value); setEmailError(null) }} className="h-11 text-[15px]" aria-invalid={!!emailError} />
+                  </Field>
+                </form>
+              )}
+              {how === 'one' && <p className="text-[12.5px] text-ink-3">Your browser may ask to allow several downloads.</p>}
             </>
           ) : (
-            <>
-              <Button variant="primary" size="lg" icon={<Download size={16} />} className="w-full justify-center" onClick={start}>Download {fmt.count(n)} {n === 1 ? 'photo' : 'photos'}</Button>
-              {n > 1 && <p className="text-[11.5px] text-ink-3">Photos save one after another. Your browser may ask to allow multiple downloads.</p>}
-            </>
+            <p className="text-[14px] text-ink-2">{n > 1 ? `Your ${fmt.count(n)} photos save one after another. Your browser may ask to allow several downloads.` : 'The photo saves to your Downloads or Photos.'}</p>
           )}
         </div>
       )}
       {stage === 'running' && (
         <div className="flex flex-col gap-3 py-2" role="status" aria-live="polite">
-          <div className="flex items-baseline justify-between"><b className="text-[14px]">Saving photos…</b><span className="font-mono text-[12px] tnum text-ink-2">{done} / {n}</span></div>
+          <div className="flex items-baseline justify-between"><b className="text-[14px]">Saving photos…</b><span className="text-[13px] tnum text-ink-2">{done} of {n}</span></div>
           <Meter value={done} max={n} height={8} />
-          <Button variant="ghost" onClick={() => { abort.current?.abort(); setStage('done') }}>Stop</Button>
+          <p className="text-[12.5px] text-ink-3">Keep this page open until they’re all saved.</p>
         </div>
       )}
       {stage === 'done' && (
-        <div className="flex flex-col items-center gap-2 py-4 text-center">
-          <CheckCircle2 size={36} className="text-ok" />
-          <b className="font-display text-[18px]">{done === n ? 'All saved' : `${done} of ${n} saved`}</b>
-          <p className="text-[13px] text-ink-2">Check your Downloads folder or Photos app.</p>
-          <Button className="mt-2" onClick={() => onOpenChange(false)}>Done</Button>
-        </div>
+        <StateBlock className="py-4" icon={<CheckCircle2 size={26} />} tone="ok" title={done === n ? `${fmt.count(n)} ${word} saved` : `Stopped after ${done}`}
+          body="Check your Downloads folder or Photos app." />
       )}
       {stage === 'emailed' && (
-        <div className="flex flex-col items-center gap-2 py-4 text-center">
-          <Mail size={34} className="text-accent-text" />
-          <b className="font-display text-[18px]">Your ZIP is on its way</b>
-          <p className="text-[13px] text-ink-2">We'll email <b className="text-ink">{email.trim()}</b> a link to {fmt.count(n)} photos within 10 minutes. The link works for 7 days.</p>
-          <Button className="mt-2" onClick={() => onOpenChange(false)}>Done</Button>
-        </div>
+        <StateBlock className="py-4" icon={<Mail size={24} />} tone="gold" title={`Sent to ${email.trim()}`}
+          body={`We’ll email a link to ${fmt.count(n)} ${word} in a few minutes. The link works for 7 days.`} />
       )}
     </Sheet>
   )

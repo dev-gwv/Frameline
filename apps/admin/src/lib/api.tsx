@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
-import { ApiError, createHttpApi, createMockApi, storageGuestTokenStore, storageTokenStore, type ChangeTopic, type FramelineApi, type FramelineHttpApi } from '@frameline/shared'
+import { ApiError, createHttpApi, createMockApi, localStoragePersistence, storageGuestTokenStore, storageTokenStore, type ChangeTopic, type FramelineApi, type FramelineHttpApi } from '@frameline/shared'
 
 const STORAGE_KEY = 'frameline.mock.v1'
 /** Set to the API origin (e.g. http://localhost:8787) to use the real backend instead of sample data. */
@@ -8,11 +8,9 @@ export const API_URL: string | undefined = import.meta.env.VITE_API_URL || undef
 
 export const tokenStore = storageTokenStore('frameline.tokens')
 
+/** Sample data in localStorage; other tabs' changes arrive through the `storage` event, so tabs don't overwrite each other. */
 function mockApi(): FramelineApi {
-  return createMockApi({
-    load: () => { try { return localStorage.getItem(STORAGE_KEY) } catch { return null } },
-    save: (d) => { try { localStorage.setItem(STORAGE_KEY, d) } catch { /* quota or private mode */ } },
-  })
+  return createMockApi(localStoragePersistence(STORAGE_KEY))
 }
 
 /**
@@ -64,14 +62,14 @@ export const queryClient = new QueryClient({
 
 /** Which query-key roots to refresh when the backend announces a change. */
 const TOPIC_KEYS: Record<ChangeTopic, string[]> = {
-  events: ['events', 'event'],
+  events: ['events', 'event', 'needs-you', 'event-stats', 'studio-stats'],
   albums: ['albums'],
-  photos: ['photos', 'photo'],
+  photos: ['photos', 'photo', 'needs-you', 'event-stats', 'studio-stats'],
   studio: ['studio'],
-  usage: ['usage'],
-  guests: ['guests', 'access-requests'],
-  activity: ['activity'],
-  misc: ['films', 'zips', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'website', 'enquiries', 'ledger', 'orders'],
+  usage: ['usage', 'wallet'],
+  guests: ['guests', 'access-requests', 'needs-you', 'event-stats'],
+  activity: ['activity', 'event-stats', 'studio-stats'],
+  misc: ['films', 'zips', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'website', 'enquiries', 'ledger', 'orders', 'wallet', 'studio-stats'],
 }
 
 function LiveUpdates({ api }: { api: FramelineApi }) {

@@ -3,9 +3,14 @@
 Photo delivery for event photographers: upload a shoot, share one link, and guests find their own photos with a
 selfie. "Frameline" is a working name.
 
-The approved product design lives in [`docs/design/frameline-design.html`](docs/design/frameline-design.html)
-(open it in a browser: Screens, Feature coverage, UX & flows, Tech stack, Design system). The reference-app
-analysis is in [`docs/KAMERO_ANALYSIS.md`](docs/KAMERO_ANALYSIS.md).
+The approved layout and navigation is the Kamero-style redesign in
+[`docs/design/frameline-redesign.html`](docs/design/frameline-redesign.html) (Journeys, Coverage, Design rules) —
+built per [`docs/REDESIGN_BRIEF.md`](docs/REDESIGN_BRIEF.md), which is also the living reference for API/UI
+conventions added since. The original design ([`docs/design/frameline-design.html`](docs/design/frameline-design.html))
+and reference-app analysis ([`docs/KAMERO_ANALYSIS.md`](docs/KAMERO_ANALYSIS.md)) are kept for background.
+
+**Deployed on Cloudflare** — see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for URLs, how CI/CD works, and the
+one remaining manual step (a GitHub Actions secret only you can create).
 
 ## Repository
 
@@ -23,7 +28,10 @@ docs/        Design, analysis, build brief
 
 Every client talks to data through one contract, `FramelineApi` (`packages/shared/src/api.ts`):
 
-- `createMockApi()` keeps the apps fully usable offline with realistic sample data (persisted locally).
+- `createMockApi()` keeps the apps fully usable offline with realistic sample data (persisted locally; on the web
+  `localStoragePersistence(key)` keeps open tabs in sync).
+- The current contract is v5 (trash/restore, stats, per-event prices, notify me…): see "API contract v5" in
+  `docs/REDESIGN_BRIEF.md`; rules shared by the mock and the API live in `packages/shared/src/rules.ts`.
 - `createHttpApi()` talks to `apps/api` over `/v1` with auth refresh, retries and live updates.
 
 Set `VITE_API_URL` (web) or `EXPO_PUBLIC_API_URL` (mobile) to switch from sample data to the real API.

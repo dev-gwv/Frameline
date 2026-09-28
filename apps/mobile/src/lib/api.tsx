@@ -155,14 +155,14 @@ export const queryClient = new QueryClient({
 
 /** Which query-key roots to refresh when the backend announces a change (same pattern as apps/admin). */
 const TOPIC_KEYS: Record<ChangeTopic, string[]> = {
-  events: ['events', 'event', 'public-event'],
+  events: ['events', 'event', 'public-event', 'needs-you'],
   albums: ['albums', 'public-event'],
-  photos: ['photos', 'photo', 'public-photos', 'my-photos', 'highlights'],
+  photos: ['photos', 'photo', 'public-photos', 'my-photos', 'highlights', 'needs-you'],
   studio: ['studio', 'studio-profile'],
-  usage: ['usage'],
-  guests: ['guests', 'access-requests'],
+  usage: ['usage', 'wallet'],
+  guests: ['guests', 'access-requests', 'needs-you'],
   activity: ['activity'],
-  misc: ['films', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'public-watermark', 'website', 'enquiries', 'ledger', 'orders'],
+  misc: ['films', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'public-watermark', 'website', 'enquiries', 'ledger', 'orders', 'wallet'],
 }
 
 function LiveUpdates({ api }: { api: FramelineApi }) {

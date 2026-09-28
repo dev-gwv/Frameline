@@ -1,0 +1,37 @@
+name: CI
+
+# Runs on every push and pull request. This is what deploy.yml requires to pass before it deploys anything.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 8.10.0 }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+
+      # Expo's postinstall probes for a project-wide node-linker setting; keep this in sync with .npmrc.
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm turbo run typecheck --filter=!@frameline/mobile
+
+      - run: pnpm --filter @frameline/api test
+
+      # apps/mobile isn't deployed yet (paused per the team's own decision) but should still typecheck on its own,
+      # without failing the whole pipeline if Expo's typed-routes generation needs a dev server it doesn't have here.
+      - name: Typecheck mobile (advisory)
+        working-directory: apps/mobile
+        run: npx tsc --noEmit
+        continue-on-error: true

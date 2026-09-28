@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { BellRing, CalendarClock, CreditCard, Mail, Plus, X } from 'lucide-react'
-import type { NotificationPrefs } from '@frameline/shared'
+import { FEATURES, type NotificationPrefs } from '@frameline/shared'
 import { Button, Card, Chip, Input, Modal, SettingRow, Skeleton, Toggle } from '@frameline/ui'
 import { useApi } from '../../lib/api'
 import { useAction, useNotificationPrefs } from '../../lib/queries'
 import { QueryError } from '../system'
 import { EMAIL_RE } from '../wallet/lib'
+import { SectionTitle } from './SideList'
 
 const KEY = ['team', 'notification-prefs']
 type Flag = 'eventExpiry' | 'planExpiry' | 'weeklySummary'
@@ -39,24 +40,23 @@ export function NotificationsTab() {
   const toggle = (k: Flag) => prefs && <Toggle label={LABELS[k]} checked={prefs[k]} onCheckedChange={(v) => save.mutate({ [k]: v })} />
 
   return (
-    <Card>
-      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-display text-[15px] font-semibold">Notifications</h3>
-        <span className="text-[12px] text-ink-3">Payment emails are always sent</span>
-      </div>
+    <div>
+    <SectionTitle title="Notifications" description="Emails we send you. Payment and invoice emails always go out." />
+    <Card className="max-w-[720px]">
       {!prefs ? <Skeleton className="h-64" /> : <>
-        <SettingRow icon={<Mail size={15} />} title="Enquiries also go to"
+        {FEATURES.website && <SettingRow icon={<Mail size={15} />} title="Enquiries also go to"
           description={prefs.enquiryEmails.length ? prefs.enquiryEmails.join(', ') : 'Only your studio email'}
-          control={<Button size="sm" onClick={() => setEditing(true)}>Edit list</Button>} />
+          control={<Button size="sm" onClick={() => setEditing(true)}>Edit list</Button>} />}
         <SettingRow icon={<CalendarClock size={15} />} title={LABELS.eventExpiry} description="Before and after an event expires" control={toggle('eventExpiry')} />
         <SettingRow icon={<BellRing size={15} />} title={LABELS.planExpiry} description="Before and after your plan renews" control={toggle('planExpiry')} />
         <SettingRow icon={<Mail size={15} />} title={LABELS.weeklySummary} description="Visits, face searches and sales, every Monday" control={toggle('weeklySummary')} />
         <SettingRow icon={<CreditCard size={15} />} title="Payment and invoice emails" description="Receipts, payouts and failed payments. Needed for your records, so they can’t be turned off."
-          control={<Chip>Always on</Chip>} />
+          control={<Chip tone="ok">Always on</Chip>} />
         <EmailListModal open={editing} onOpenChange={setEditing} value={prefs.enquiryEmails} saving={save.isPending}
           onSave={(list) => save.mutate({ enquiryEmails: list }, { onSuccess: () => setEditing(false) })} />
       </>}
     </Card>
+    </div>
   )
 }
 
@@ -79,7 +79,7 @@ function EmailListModal({ open, onOpenChange, value, onSave, saving }: { open: b
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="Enquiry recipients" description="Website and gallery enquiries go to your studio email plus these addresses." width={480}
       footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" loading={saving} onClick={() => onSave(list)}>Save list</Button></>}>
-      <div className="flex flex-col gap-3 px-6 py-4">
+      <div className="flex flex-col gap-3">
         <div className="flex min-h-9 flex-wrap gap-1.5">
           {list.map((e) => (
             <Chip key={e} tone="accent" className="py-1 pl-2.5 pr-1 text-[12px]">

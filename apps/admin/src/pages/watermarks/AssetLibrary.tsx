@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Plus, Trash2, Type, Upload } from 'lucide-react'
 import { fmt } from '@frameline/shared'
-import { Button, Card, CardHeader, cn, ConfirmDialog, EmptyState, Field, Input, Meter, Modal, Select, Tip, useToast } from '@frameline/ui'
+import { Button, Card, CardHeader, cn, EmptyState, Field, Input, Meter, Modal, Select, useToast } from '@frameline/ui'
 import { FONTS, fontStack, readAsDataUrl, uid } from './lib'
 import { ASSET_STORAGE, AssetMark, MAX_ASSET_FILE, MAX_ASSETS, type Asset } from './advanced'
 import { PhotoFrame, SAMPLES } from './samples'
@@ -9,11 +9,11 @@ import { PhotoFrame, SAMPLES } from './samples'
 const EMOJI = ['📷', '✨', '❤️', '©', '★', '🌸', '🎉', '🌿', '💍', '🪔']
 const COLOURS = ['#FFFFFF', '#1B1712', '#E2B458', '#8C2F39', '#2A8A8F']
 
-export function AssetLibrary({ assets, onAdd, onRemove, studioName }: { assets: Asset[]; onAdd: (a: Asset) => void; onRemove: (id: string) => void; studioName: string }) {
+/** `onRemove` acts at once and returns an undo function (rule 8: Undo, not “Are you sure?”). */
+export function AssetLibrary({ assets, onAdd, onRemove, studioName }: { assets: Asset[]; onAdd: (a: Asset) => void; onRemove: (id: string) => () => void; studioName: string }) {
   const toast = useToast()
   const fileRef = useRef<HTMLInputElement>(null)
   const [textOpen, setTextOpen] = useState(false)
-  const [removing, setRemoving] = useState<Asset>()
   const used = assets.reduce((s, a) => s + a.bytes, 0)
   const full = assets.length >= MAX_ASSETS
 
@@ -21,10 +21,10 @@ export function AssetLibrary({ assets, onAdd, onRemove, studioName }: { assets: 
     let room = MAX_ASSETS - assets.length
     let space = ASSET_STORAGE - used
     for (const f of Array.from(files)) {
-      if (room <= 0) { toast.error('Asset library is full', `You can keep up to ${MAX_ASSETS} assets. Remove one to add more.`); break }
+      if (room <= 0) { toast.error('Your marks library is full', `You can keep up to ${MAX_ASSETS} marks. Remove one to add more.`); break }
       if (!f.type.startsWith('image/')) { toast.error(`${f.name} isn’t an image`, 'Use PNG, SVG, JPG or WebP.'); continue }
-      if (f.size > MAX_ASSET_FILE) { toast.error(`${f.name} is too large`, 'Each asset must be 25 MB or smaller.'); continue }
-      if (f.size > space) { toast.error('Not enough asset storage', 'Remove an asset or use a smaller file.'); break }
+      if (f.size > MAX_ASSET_FILE) { toast.error(`${f.name} is too large`, 'Each logo must be 25 MB or smaller.'); continue }
+      if (f.size > space) { toast.error('Not enough space for marks', 'Remove an asset or use a smaller file.'); break }
       try {
         onAdd({ id: uid('as'), kind: 'image', name: f.name, dataUrl: await readAsDataUrl(f), bytes: f.size })
         room--; space -= f.size
@@ -34,46 +34,41 @@ export function AssetLibrary({ assets, onAdd, onRemove, studioName }: { assets: 
 
   return (
     <Card>
-      <CardHeader title="Assets" action={<span className="font-mono text-[12px] text-ink-3">{assets.length} of {MAX_ASSETS}</span>} />
-      <p className="mb-3 text-[12px] text-ink-2">Logos and text marks you can use in the rules above.</p>
+      <CardHeader title="Your marks" description="Logos and text marks you can use for originals and events above."
+        action={<span className="text-[12.5px] text-ink-3 tnum">{assets.length} of {MAX_ASSETS}</span>} />
       <div className="mb-3 flex flex-wrap gap-2">
         <input ref={fileRef} type="file" multiple accept="image/png,image/svg+xml,image/jpeg,image/webp" className="hidden" onChange={(e) => { if (e.target.files?.length) void upload(e.target.files); e.target.value = '' }} />
-        <Button size="sm" icon={<Upload size={12} />} disabled={full} onClick={() => fileRef.current?.click()}>Upload images</Button>
-        <Button size="sm" icon={<Type size={12} />} disabled={full} onClick={() => setTextOpen(true)}>Create text mark</Button>
+        <Button size="sm" icon={<Upload size={13} />} disabled={full} onClick={() => fileRef.current?.click()}>Upload a logo</Button>
+        <Button size="sm" icon={<Type size={13} />} disabled={full} onClick={() => setTextOpen(true)}>Create text mark</Button>
       </div>
       {assets.length === 0 ? (
-        <EmptyState className="py-8" title="No assets yet" body="Upload a logo (PNG or SVG, up to 25 MB) or create a text mark with your own font and emoji." />
+        <EmptyState className="py-8" title="No marks yet" body="Upload a logo (PNG or SVG, up to 25 MB) or create a text mark with your own font and emoji."
+          action={<Button size="sm" icon={<Type size={13} />} onClick={() => setTextOpen(true)}>Create text mark</Button>} />
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
           {assets.map((a) => (
             <div key={a.id} className="group relative overflow-hidden rounded-control border border-line">
-              <div className="flex h-20 items-center justify-center bg-side p-2" style={{ containerType: 'inline-size' }}>
+              <div className="flex h-20 items-center justify-center p-2" style={{ containerType: 'inline-size', background: SAMPLES[3].bg }}>
                 <AssetMark asset={a} fallbackText={studioName} fallbackFont="Fraunces" width={80} style={{ maxHeight: '64px', objectFit: 'contain' }} />
               </div>
               <div className="flex items-center gap-1 px-2 py-1.5">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[11.5px] font-bold">{a.name}</div>
-                  <div className="font-mono text-[10px] text-ink-3">{a.kind === 'text' ? 'Text mark' : fmt.bytes(a.bytes)}</div>
+                  <div className="truncate text-[12.5px] font-bold">{a.name}</div>
+                  <div className="text-[11.5px] text-ink-3">{a.kind === 'text' ? 'Text mark' : fmt.bytes(a.bytes)}</div>
                 </div>
-                <Tip label="Remove asset">
-                  <button type="button" aria-label={`Remove ${a.name}`} onClick={() => setRemoving(a)} className="rounded-md p-1 text-ink-3 hover:bg-bad-soft hover:text-bad"><Trash2 size={13} /></button>
-                </Tip>
+                <Button size="sm" variant="ghost" className="px-2" icon={<Trash2 size={13} />} aria-label={`Remove ${a.name}`}
+                  onClick={() => { const undo = onRemove(a.id); toast.undo(`${a.name} removed`, undo) }}>Remove</Button>
               </div>
             </div>
           ))}
         </div>
       )}
       <div className="mt-3">
-        <div className="mb-1 flex justify-between text-[11.5px] text-ink-2"><span>Asset storage</span><span className="font-mono">{fmt.bytes(used)} of {fmt.bytes(ASSET_STORAGE)}</span></div>
+        <div className="mb-1 flex justify-between text-[12px] text-ink-2"><span>Space for marks</span><span className="tnum">{fmt.bytes(used)} of {fmt.bytes(ASSET_STORAGE)}</span></div>
         <Meter value={used} max={ASSET_STORAGE} />
       </div>
 
       <TextMarkModal open={textOpen} onOpenChange={setTextOpen} onCreate={(a) => { onAdd(a); toast.success('Text mark added') }} />
-      <ConfirmDialog
-        open={!!removing} onOpenChange={(v) => !v && setRemoving(undefined)} danger confirmLabel="Remove asset" title="Remove this asset?"
-        body={<>Rules using <b>{removing?.name}</b> fall back to your studio name.</>}
-        onConfirm={() => { if (removing) { onRemove(removing.id); toast.success('Asset removed') } }}
-      />
     </Card>
   )
 }
@@ -92,7 +87,7 @@ function TextMarkModal({ open, onOpenChange, onCreate }: { open: boolean; onOpen
           onOpenChange(false)
         }}>Add text mark</Button>
       </>}>
-      <div className="flex flex-col gap-3.5 p-5 sm:px-6">
+      <div className="flex flex-col gap-3.5">
         <Field label="Text" htmlFor="tm-text" error={!ok ? 'Type at least one character.' : undefined}>
           <Input id="tm-text" value={text} maxLength={32} onChange={(e) => setText(e.target.value)} />
         </Field>

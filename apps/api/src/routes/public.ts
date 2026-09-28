@@ -1,10 +1,10 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import type { Context } from 'hono'
 import { and, asc, count, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
-import { DOWNLOAD_ALL_LIMIT, STORE_COMMISSION } from '@frameline/shared'
+import { DOWNLOAD_ALL_LIMIT, STORE_COMMISSION, effectivePrices, selfieHasNoFace } from '@frameline/shared'
 import type { AppEnv, GuestClaims } from '../env'
 import { getDb, schema } from '../db/client'
-import { albumOut, enquiryOut, filmOut, orderOut, photoOut, priceOut, publicStudioOut, studioOut, watermarkOut, zipOut } from '../db/mappers'
+import { albumOut, enquiryOut, filmOut, hostOut, orderOut, photoOut, priceOut, publicStudioOut, storeSettingsOut, studioOut, watermarkOut, zipOut } from '../db/mappers'
 import { sha256Hex, timingSafeEqual } from '../lib/crypto'
 import { AppError, Forbidden, NotConfigured, NotFound, RateLimited, ServiceUnavailable, Unauthorized, ValidationFailed } from '../lib/errors'
 import { background, clientIp } from '../lib/http'
@@ -17,9 +17,11 @@ import { guestFromRequest } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
 import { limits, storeFor } from '../middleware/rate-limit'
 import {
-  DownloadAllowance, Enquiry, GuestLinkPayload, GuestSession, Order, Photo, Price, PublicEvent, PublicEventSummary, PublicStudio,
+  DownloadAllowance, Enquiry, FaceSearchInput, FaceSearchResult, GuestLinkPayload, GuestSession, NotifyRequest, Order, Photo, Price, PublicEvent, PublicEventSummary, PublicStudio,
   PublicWatermark, ShippingAddressInput, StudioProfile, ZipRequest,
 } from '../schemas/domain'
+import { bumpDaily } from '../services/stats'
+import { PhotoSortEnum } from './photos'
 import { addLedger } from '../services/billing'
 import { matchFaces, visiblePhotos as visible } from '../services/faces'
 import { resolveLink } from '../services/guest-links'
@@ -77,6 +79,10 @@ async function guestAccess(c: Context<AppEnv>, e: EventRow): Promise<Claims | nu
   if (g && g.eventId !== e.id) throw new Forbidden('This gallery token belongs to a different event.', 'wrong_event')
   if (e.settings.access === 'link-pin' && !g) throw new Unauthorized('Enter the gallery PIN first.', 'pin_required')
   if (e.settings.access === 'registered' && !g?.guestId) throw new Unauthorized('Register with your name and email first.', 'registration_required')
+  if (g?.guestId) {
+    const [row] = await getDb(c.env.DB).select({ removedAt: schema.guests.removedAt }).from(schema.guests).where(eq(schema.guests.id, g.guestId)).limit(1)
+    if (row?.removedAt) throw new Forbidden('The photographer removed your access to this gallery. Ask them if you think this is a mistake.', 'guest_removed')
+  }
   if (g) c.set('guest', g)
   return g
 }
@@ -113,13 +119,14 @@ publicRoutes.openapi(createRoute({
   const db = getDb(c.env.DB)
   const platform = c.req.valid('query').platform
   background(c, db.run(sql`UPDATE events SET visits = json_set(visits, ${'$.' + platform}, coalesce(json_extract(visits, ${'$.' + platform}), 0) + 1) WHERE id = ${e.id}`))
+  background(c, bumpDaily(db, e.studioId, e.id, 'visits'))
   const g = await readGuest(c).catch(() => null)
   rememberGallery(c, e, guestIdentity(c, g?.eventId === e.id ? g : null))
-  const albums = await db.select().from(schema.albums).where(and(eq(schema.albums.eventId, e.id), sql`${schema.albums.kind} != 'store'`)).orderBy(asc(schema.albums.order))
+  const albums = await db.select().from(schema.albums).where(and(eq(schema.albums.eventId, e.id), isNull(schema.albums.deletedAt), sql`${schema.albums.kind} != 'store'`)).orderBy(asc(schema.albums.order))
   const films = await db.select().from(schema.films).where(eq(schema.films.eventId, e.id)).orderBy(asc(schema.films.createdAt))
   let coverUrl: string | undefined
   if (e.coverPhotoId) {
-    const [cp] = await db.select().from(schema.photos).where(eq(schema.photos.id, e.coverPhotoId)).limit(1)
+    const [cp] = await db.select().from(schema.photos).where(and(eq(schema.photos.id, e.coverPhotoId), isNull(schema.photos.deletedAt))).limit(1)
     if (cp) coverUrl = photoOut(cp, c.env.PUBLIC_MEDIA_BASE).url
   }
   const { pin: _pin, ...settings } = e.settings
@@ -164,8 +171,15 @@ const GuestOut = z.object({
 
 publicRoutes.openapi(createRoute({
   method: 'post', path: '/events/{shortId}/register', tags: ['Public gallery'], summary: 'Register as a guest (appears in the studio’s Guests list)',
-  description: 'Send the PIN session token (if any) so a typed PIN keeps its "see all" right.',
-  request: { params: ShortIdParam, body: body(z.object({ name: z.string().trim().min(1).max(120), email: z.email().max(254), phone: z.string().max(40).optional() })) },
+  description: 'Name plus an email or a mobile number (at least one). Returning guests are matched by email, else by phone. Signing up with a host’s email or phone marks that host as accepted. Send the PIN session token (if any) so a typed PIN keeps its "see all" right.',
+  request: {
+    params: ShortIdParam,
+    body: body(z.object({
+      name: z.string().trim().min(1).max(120),
+      email: z.email().max(254).or(z.literal('')).optional(),
+      phone: z.string().trim().max(40).regex(/^(\+?[\d\s()-]{8,20})?$/, 'Enter a mobile number like +91 98450 55012').optional(),
+    }).refine((b) => !!(b.email || b.phone), { message: 'Add your email or your mobile number', path: ['email'] })),
+  },
   responses: { 200: json(GuestSession.extend({ guest: GuestOut })), ...problems(401, 403, 404, 422) },
 }), async (c) => {
   const { e } = await openEvent(c, c.req.valid('param').shortId)
@@ -174,54 +188,77 @@ publicRoutes.openapi(createRoute({
   if (e.settings.access === 'link-pin' && !prior) throw new Unauthorized('Enter the gallery PIN first.', 'pin_required')
   const input = c.req.valid('json')
   const db = getDb(c.env.DB)
-  const email = input.email.toLowerCase()
+  const email = (input.email ?? '').toLowerCase()
+  const phone = (input.phone ?? '').trim()
+  const digits = (v: string) => v.replace(/\D/g, '').slice(-10)
   const now = nowIso()
-  let [g] = await db.select().from(schema.guests).where(and(eq(schema.guests.eventId, e.id), eq(schema.guests.email, email))).limit(1)
+  const gt = schema.guests
+  let g: typeof gt.$inferSelect | undefined = email ? (await db.select().from(gt).where(and(eq(gt.eventId, e.id), eq(gt.email, email))).limit(1))[0] : undefined
+  if (!g && phone) {
+    const same = await db.select().from(gt).where(and(eq(gt.eventId, e.id), sql`${gt.phone} != ''`)).limit(2000)
+    g = same.find((x) => digits(x.phone) === digits(phone))
+  }
+  if (g?.removedAt) throw new Forbidden('The photographer removed your access to this gallery. Ask them if you think this is a mistake.', 'guest_removed')
   if (g) {
-    g = { ...g, name: input.name, phone: input.phone ?? g.phone, lastActive: now }
-    await db.update(schema.guests).set({ name: g.name, phone: g.phone, lastActive: now }).where(eq(schema.guests.id, g.id)).run()
+    g = { ...g, name: input.name, phone: phone || g.phone, email: email || g.email, lastActive: now }
+    await db.update(gt).set({ name: g.name, phone: g.phone, email: g.email, lastActive: now }).where(eq(gt.id, g.id)).run()
   } else {
-    g = { id: newId('g'), eventId: e.id, name: input.name, email, phone: input.phone ?? '', role: 'guest', favourites: [], lastActive: now, registeredAt: now }
+    g = { id: newId('g'), eventId: e.id, name: input.name, email, phone, role: 'guest', favourites: [], lastActive: now, registeredAt: now, removedAt: null }
     await db.batch([
       db.insert(schema.guests).values(g),
       db.insert(schema.activity).values({ id: newId('act'), studioId: e.studioId, kind: 'registration', title: `${input.name} registered`, detail: e.name, at: now }),
     ])
     emit(c, e.studioId, 'guests', 'activity')
   }
+  // A host who opens the gallery with the email/phone they were invited with has accepted.
+  const hostMatch = (h: typeof e.hosts[number]) => (!!email && h.email.toLowerCase() === email) || (!!phone && !!h.phone && digits(h.phone) === digits(phone))
+  if (e.hosts.some((h) => hostMatch(h) && h.status !== 'accepted')) {
+    const hosts = e.hosts.map((h) => (hostMatch(h) ? { ...hostOut(h), status: 'accepted' as const } : h))
+    await db.update(schema.events).set({ hosts }).where(eq(schema.events.id, e.id)).run()
+    emit(c, e.studioId, 'events')
+  }
   const seeAll = prior?.all === true || !e.settings.facePrivacy || !e.settings.faceSearch
   rememberGallery(c, e, guestIdentity(c, { eventId: e.id, studioId: e.studioId, guestId: g.id }))
-  return c.json({ ...(await issueGuestSession(c, e, { guestId: g.id, seeAll, vipPin: prior?.vp })), guest: g }, 200)
+  const { removedAt: _r, ...guest } = g
+  return c.json({ ...(await issueGuestSession(c, e, { guestId: g.id, seeAll, vipPin: prior?.vp })), guest }, 200)
 })
 
 publicRoutes.openapi(createRoute({
-  method: 'get', path: '/events/{shortId}/prices', tags: ['Public gallery'], summary: 'The studio’s store prices for this gallery',
+  method: 'get', path: '/events/{shortId}/prices', tags: ['Public gallery'], summary: 'The store prices for this gallery',
+  description: 'The studio’s price list with this event’s `priceOverrides` applied.',
   request: { params: ShortIdParam },
   responses: { 200: json(z.object({ items: z.array(Price) })), ...problems(401, 403, 404) },
 }), async (c) => {
   const { e } = await openEvent(c, c.req.valid('param').shortId)
   await guestAccess(c, e)
   const rows = await getDb(c.env.DB).select().from(schema.prices).where(eq(schema.prices.studioId, e.studioId)).orderBy(asc(schema.prices.sortOrder))
-  return c.json({ items: rows.map(priceOut) }, 200)
+  return c.json({ items: effectivePrices(rows.map(priceOut), e.settings.priceOverrides) }, 200)
 })
 
 publicRoutes.openapi(createRoute({
   method: 'get', path: '/events/{shortId}/watermark', tags: ['Public gallery'], summary: 'The watermark guests’ downloads must carry',
-  description: '`enabled` is false when the event turns watermarks off.',
+  description: '`enabled` is false when the event turns watermarks off. `sale` is the studio’s "For sale" watermark when the event sells photos with `forSaleWatermark` on (omitted otherwise).',
   request: { params: ShortIdParam },
   responses: { 200: json(PublicWatermark), ...problems(401, 403, 404) },
 }), async (c) => {
   const { e } = await openEvent(c, c.req.valid('param').shortId)
   await guestAccess(c, e)
-  const [w] = await getDb(c.env.DB).select().from(schema.watermarks).where(eq(schema.watermarks.studioId, e.studioId)).limit(1)
+  const db = getDb(c.env.DB)
+  const [w] = await db.select().from(schema.watermarks).where(eq(schema.watermarks.studioId, e.studioId)).limit(1)
   if (!w) throw new NotFound('Watermark')
-  return c.json({ enabled: !e.settings.watermarkOff, settings: watermarkOut(w.settings) }, 200)
+  let sale: ReturnType<typeof storeSettingsOut>['saleWatermark'] | undefined
+  if (e.settings.storeEnabled && e.settings.forSaleWatermark !== false) {
+    const [st] = await db.select().from(schema.studios).where(eq(schema.studios.id, e.studioId)).limit(1)
+    if (st) sale = storeSettingsOut(st).saleWatermark
+  }
+  return c.json({ enabled: !e.settings.watermarkOff, settings: watermarkOut(w.settings), ...(sale ? { sale } : {}) }, 200)
 })
 
 // ── Photos, faces, favourites, downloads ────────────────────────────────────
 const PublicPhotoQuery = z.object({
   albumId: z.string().max(128).optional(),
   personId: z.string().max(128).optional(),
-  sort: z.enum(['capture', 'name', 'sequence']).default('capture'),
+  sort: PhotoSortEnum.default('capture'),
   highlights: z.enum(['true', 'false']).optional().transform((v) => v === 'true'),
   limit: z.coerce.number().int().min(1).max(200).default(60),
   offset: z.coerce.number().int().min(0).max(1_000_000).optional(),
@@ -244,7 +281,7 @@ publicRoutes.openapi(createRoute({
   const p = schema.photos
   const where = and(
     eq(p.eventId, e.id), visible(p),
-    q.albumId ? eq(p.albumId, q.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${e.id} AND kind = 'album')`,
+    q.albumId ? eq(p.albumId, q.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${e.id} AND kind = 'album' AND deleted_at IS NULL)`,
     q.personId ? sql`${p.id} IN (SELECT photo_id FROM faces WHERE person_id = ${q.personId})` : undefined,
   )
   const [{ total }] = await db.select({ total: count() }).from(p).where(where)
@@ -253,7 +290,8 @@ publicRoutes.openapi(createRoute({
     return c.json({ items: rows.map((r) => photoOut(r, c.env.PUBLIC_MEDIA_BASE)), total, nextCursor: null }, 200)
   }
   const sortCol = q.sort === 'name' ? p.filename : q.sort === 'sequence' ? p.index : p.capturedAt
-  let query = db.select().from(p).where(and(where, afterCursor(sortCol, p.id, 'asc', q.cursor))).orderBy(asc(sortCol), asc(p.id)).limit(q.limit + 1)
+  const dir = q.sort === 'newest' ? 'desc' : 'asc'
+  let query = db.select().from(p).where(and(where, afterCursor(sortCol, p.id, dir, q.cursor))).orderBy(...(dir === 'desc' ? [desc(sortCol), desc(p.id)] : [asc(sortCol), asc(p.id)])).limit(q.limit + 1)
   if (q.offset !== undefined && !q.cursor) query = query.offset(q.offset) as typeof query
   const rows = await query
   const more = rows.length > q.limit
@@ -265,27 +303,26 @@ publicRoutes.openapi(createRoute({
 
 publicRoutes.openapi(createRoute({
   method: 'post', path: '/events/{shortId}/faces/search', tags: ['Public gallery'], summary: 'Find my photos (selfie search)',
-  description: 'With Vectorize configured and an `embedding`, queries the event’s namespace and returns the best-matching person. In development without Vectorize, matches deterministically from `key` (same rule as the mock).',
-  request: {
-    params: ShortIdParam,
-    body: body(z.object({ key: z.string().min(1).max(512), embedding: z.array(z.number().finite()).min(64).max(2048).optional(), minScore: z.number().min(0).max(1).default(0.5) })),
-  },
-  responses: { 200: json(z.object({ personId: z.string().nullable(), photoIds: z.array(z.string()) })), ...problems(401, 403, 404, 422, 503) },
+  description: 'With Vectorize configured and an `embedding`, queries the event’s namespace and returns the best-matching person. In development without Vectorize, matches deterministically from `key` (same rule as the mock). When the client reports no face (`faces: 0`) or the image is too small, answers `faceFound: false` with `reason: no_face`.',
+  request: { params: ShortIdParam, body: body(FaceSearchInput) },
+  responses: { 200: json(FaceSearchResult), ...problems(401, 403, 404, 422, 503) },
 }), async (c) => {
   const { e } = await openEvent(c, c.req.valid('param').shortId)
   await guestAccess(c, e)
   if (!e.settings.faceSearch) throw new Forbidden('Face search is turned off for this gallery.', 'face_search_disabled')
-  const { key, embedding, minScore } = c.req.valid('json')
-  const result = await matchFaces(c.env, e.id, key, embedding, minScore)
+  const input = c.req.valid('json')
+  if (selfieHasNoFace(input)) return c.json({ faceFound: false, reason: 'no_face' as const, personId: null, photoIds: [] }, 200)
+  const result = await matchFaces(c.env, e.id, input.key, input.embedding, input.minScore)
   if (result.photoIds.length) {
     const db = getDb(c.env.DB)
+    background(c, bumpDaily(db, e.studioId, e.id, 'faceSearches'))
     background(c, db.batch([
       db.update(schema.events).set({ faceMatches: sql`${schema.events.faceMatches} + 1` }).where(eq(schema.events.id, e.id)),
       db.insert(schema.activity).values({ id: newId('act'), studioId: e.studioId, kind: 'face', title: `A guest found ${result.photoIds.length} photos of themselves`, detail: e.name, at: nowIso() }),
     ]))
     emit(c, e.studioId, 'activity', 'events')
   }
-  return c.json(result, 200)
+  return c.json({ faceFound: true, ...result }, 200)
 })
 
 async function visiblePhoto(c: Context<AppEnv>, photoId: string) {
@@ -348,11 +385,76 @@ publicRoutes.openapi(createRoute({
   const db = getDb(c.env.DB)
   const p = schema.photos
   const studios = new Set<string>()
+  const perEvent = new Map<string, { studioId: string; n: number }>()
   for (const part of chunk([...new Set(c.req.valid('json').photoIds)])) {
     await db.update(p).set({ downloads: sql`${p.downloads} + 1` }).where(and(inArray(p.id, part), visible(p))).run()
-    for (const r of await db.select({ s: p.studioId }).from(p).where(inArray(p.id, part))) studios.add(r.s)
+    for (const r of await db.select({ s: p.studioId, e: p.eventId }).from(p).where(and(inArray(p.id, part), visible(p)))) {
+      studios.add(r.s)
+      const x = perEvent.get(r.e) ?? { studioId: r.s, n: 0 }
+      x.n++
+      perEvent.set(r.e, x)
+    }
   }
+  for (const [eventId, x] of perEvent) await bumpDaily(db, x.studioId, eventId, 'downloads', x.n)
   for (const s of studios) emit(c, s, 'photos')
+  return c.body(null, 204)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'post', path: '/views', tags: ['Public gallery'], summary: 'Count photo views',
+  description: 'Call when a guest opens photos in the viewer (one view per photo per call). Feeds `Photo.views` and the studio’s stats.',
+  request: { body: body(z.object({ photoIds: z.array(z.string().max(128)).min(1).max(200) })) },
+  responses: { 204: NoContent, ...problems(422) },
+}), async (c) => {
+  const db = getDb(c.env.DB)
+  const p = schema.photos
+  const perEvent = new Map<string, { studioId: string; n: number }>()
+  for (const part of chunk([...new Set(c.req.valid('json').photoIds)])) {
+    const rows = await db.select({ id: p.id, s: p.studioId, e: p.eventId }).from(p).where(and(inArray(p.id, part), visible(p)))
+    if (!rows.length) continue
+    await db.update(p).set({ views: sql`${p.views} + 1` }).where(inArray(p.id, rows.map((r) => r.id))).run()
+    for (const r of rows) {
+      const x = perEvent.get(r.e) ?? { studioId: r.s, n: 0 }
+      x.n++
+      perEvent.set(r.e, x)
+    }
+  }
+  for (const [eventId, x] of perEvent) await bumpDaily(db, x.studioId, eventId, 'photoViews', x.n)
+  return c.body(null, 204)
+})
+
+// ── Notify me ──────────────────────────────────────────────────────────────
+const NotifyBody = z.object({ phone: z.string().trim().regex(/^\+?[\d\s()-]{8,20}$/, 'Enter a mobile number like +91 98450 55012') })
+const normPhone = (v: string) => { const d = v.replace(/\D/g, ''); return d.length === 10 ? `+91${d}` : `+${d}` }
+
+publicRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{shortId}/notify', tags: ['Public gallery'], summary: '"Notify me" when the first photos go live',
+  description: 'For galleries with no photos yet. When the first photos become visible the API messages this number once (SMS/WhatsApp; simulated as a log line until a provider is configured). 409 `already_live` when there are photos already. Asking again with the same number is fine.',
+  middleware: [idempotent] as const,
+  request: { params: ShortIdParam, headers: IdempotencyHeader, body: body(NotifyBody) },
+  responses: { 201: json(NotifyRequest, 'Subscribed'), ...problems(404, 409, 422) },
+}), async (c) => {
+  const { e } = await eventByShortId(c, c.req.valid('param').shortId)
+  const db = getDb(c.env.DB)
+  const [live] = await db.select({ id: schema.photos.id }).from(schema.photos).where(and(eq(schema.photos.eventId, e.id), visible())).limit(1)
+  if (live && !blockedReason(e)) throw new AppError(409, 'already_live', 'Photos are here', 'The photos are already in this gallery. Open it to see them.')
+  const phone = normPhone(c.req.valid('json').phone)
+  const n = schema.notifyRequests
+  const createdAt = nowIso()
+  await db.insert(n).values({ id: newId('ntf'), eventId: e.id, studioId: e.studioId, phone, createdAt })
+    .onConflictDoUpdate({ target: [n.eventId, n.phone], set: { cancelledAt: null, notifiedAt: null, createdAt } }).run()
+  return c.json({ eventId: e.id, phone, createdAt }, 201)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{shortId}/notify/cancel', tags: ['Public gallery'], summary: 'Stop a "Notify me" request',
+  middleware: [idempotent] as const,
+  request: { params: ShortIdParam, headers: IdempotencyHeader, body: body(NotifyBody) },
+  responses: { 204: NoContent, ...problems(404, 422) },
+}), async (c) => {
+  const { e } = await eventByShortId(c, c.req.valid('param').shortId)
+  const n = schema.notifyRequests
+  await getDb(c.env.DB).update(n).set({ cancelledAt: nowIso() }).where(and(eq(n.eventId, e.id), eq(n.phone, normPhone(c.req.valid('json').phone)))).run()
   return c.body(null, 204)
 })
 
@@ -414,7 +516,7 @@ publicRoutes.openapi(createRoute({
   let photoCount = ids?.length ?? 0
   if (!ids) {
     const [{ n }] = await db.select({ n: count() }).from(p).where(and(eq(p.eventId, e.id), visible(p),
-      input.albumId ? eq(p.albumId, input.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${e.id} AND kind = 'album')`))
+      input.albumId ? eq(p.albumId, input.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${e.id} AND kind = 'album' AND deleted_at IS NULL)`))
     photoCount = n
   }
   const row = {
@@ -442,7 +544,10 @@ publicRoutes.openapi(createRoute({
   const obj = key && c.env.PROCESSOR_URL ? await c.env.MEDIA.get(key) : null
   if (!obj) throw new AppError(404, 'rendition_unavailable', 'Not found', 'No download rendition exists for this photo yet. Use the photo URL instead.')
   // HEAD (clients checking the link exists) must not count as a download.
-  if (c.req.method !== 'HEAD') background(c, getDb(c.env.DB).update(schema.photos).set({ downloads: sql`${schema.photos.downloads} + 1` }).where(eq(schema.photos.id, p.id)).run())
+  if (c.req.method !== 'HEAD') {
+    background(c, getDb(c.env.DB).update(schema.photos).set({ downloads: sql`${schema.photos.downloads} + 1` }).where(eq(schema.photos.id, p.id)).run())
+    background(c, bumpDaily(getDb(c.env.DB), e.studioId, e.id, 'downloads'))
+  }
   return new Response(c.req.method === 'HEAD' ? null : obj.body, {
     headers: { 'Content-Type': 'image/jpeg', 'Content-Disposition': `attachment; filename="${p.filename.replace(/"/g, '')}"`, 'Cache-Control': 'private, max-age=3600' },
   })
@@ -453,7 +558,7 @@ async function guestUploadTarget(c: Context<AppEnv>, shortId: string) {
   const { e } = await openEvent(c, shortId)
   const g = await guestAccess(c, e)
   if (!e.settings.guestUploads) throw new Forbidden('This gallery doesn’t take guest uploads.', 'guest_uploads_disabled')
-  const [album] = await getDb(c.env.DB).select().from(schema.albums).where(and(eq(schema.albums.eventId, e.id), eq(schema.albums.kind, 'guest'))).limit(1)
+  const [album] = await getDb(c.env.DB).select().from(schema.albums).where(and(eq(schema.albums.eventId, e.id), eq(schema.albums.kind, 'guest'), isNull(schema.albums.deletedAt))).limit(1)
   if (!album) throw new AppError(409, 'no_guest_album', 'Conflict', 'This gallery has no guest uploads album.')
   return { e, g, album }
 }
@@ -470,7 +575,7 @@ publicRoutes.openapi(createRoute({
 }), async (c) => {
   const { e, g, album } = await guestUploadTarget(c, c.req.valid('param').shortId)
   const input = c.req.valid('json')
-  const [{ n }] = await getDb(c.env.DB).select({ n: count() }).from(schema.photos).where(eq(schema.photos.albumId, album.id))
+  const [{ n }] = await getDb(c.env.DB).select({ n: count() }).from(schema.photos).where(and(eq(schema.photos.albumId, album.id), isNull(schema.photos.deletedAt)))
   const room = Math.max(0, e.settings.guestUploadLimit - n)
   if (input.files.length > room) {
     throw new AppError(409, 'guest_upload_limit', 'Upload limit reached', `This gallery takes ${e.settings.guestUploadLimit} guest photos and has room for ${room} more.`, { extensions: { remaining: room } })
@@ -574,7 +679,9 @@ publicRoutes.openapi(createRoute({
     throw new ValidationFailed([{ field: 'shipping', in: 'body', message: 'Add a delivery address for prints', code: 'required' }])
   }
   const db = getDb(c.env.DB)
-  const priceRows = await db.select().from(schema.prices).where(eq(schema.prices.studioId, e.studioId))
+  const overrides = e.settings.priceOverrides ?? {}
+  const priceRows = (await db.select().from(schema.prices).where(eq(schema.prices.studioId, e.studioId)))
+    .map((r) => (typeof overrides[r.id] === 'number' ? { ...r, pricePaise: Math.round(overrides[r.id] * 100) } : r))
   let paidPaise = 0
   const labels: string[] = []
   const photoIds = new Set<string>()
@@ -611,7 +718,7 @@ publicRoutes.openapi(createRoute({
   const row = {
     id, studioId: e.studioId, number, buyer: input.buyer.name, eventId: e.id, eventName: e.name, items: labels.join(', '), paidPaise, currency: 'INR' as const,
     sharePaise, status, providerRef: checkout?.orderId ?? null, at: nowIso(), photoIds: ids, buyerEmail: input.buyer.email.toLowerCase(), method: input.method,
-    guestId: g?.guestId ?? null, shipping: input.shipping ?? null, remindedAt: null, reminderCount: 0,
+    guestId: g?.guestId ?? null, shipping: input.shipping ?? null, remindedAt: null, reminderCount: 0, refundedAt: null, refundReason: null, trackingNumber: null, linkSentAt: null,
   }
   await db.insert(schema.orders).values(row).run()
   if (status !== 'pending') {
@@ -783,10 +890,10 @@ publicRoutes.openapi(createRoute({
   const p = schema.photos
   const rows: (typeof p.$inferSelect)[] = []
   if (z0.photoIds?.length) {
-    for (const part of chunk(z0.photoIds)) rows.push(...await db.select().from(p).where(and(inArray(p.id, part), eq(p.status, 'ready'))))
+    for (const part of chunk(z0.photoIds)) rows.push(...await db.select().from(p).where(and(inArray(p.id, part), eq(p.status, 'ready'), isNull(p.deletedAt))))
   } else {
-    rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), eq(p.status, 'ready'),
-      z0.albumId ? eq(p.albumId, z0.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${z0.eventId} AND kind = 'album')`)).orderBy(asc(p.capturedAt)).limit(5000))
+    rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), eq(p.status, 'ready'), isNull(p.deletedAt),
+      z0.albumId ? eq(p.albumId, z0.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${z0.eventId} AND kind = 'album' AND deleted_at IS NULL)`)).orderBy(asc(p.capturedAt)).limit(5000))
   }
   return c.json({ eventName: ev?.name ?? '', photos: rows.map((r) => ({ id: r.id, filename: r.filename, url: photoOut(r, c.env.PUBLIC_MEDIA_BASE).url ?? null })) }, 200)
 })

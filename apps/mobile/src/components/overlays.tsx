@@ -4,8 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, { Circle, G, Rect } from 'react-native-svg'
 import { FlashList } from '@shopify/flash-list'
 import { encode } from 'uqr'
-import type { Photo } from '@frameline/shared'
-import { dismiss, useToasts } from '@/lib/toast'
+import { gold, palette, type Photo } from '@frameline/shared'
+import { dismiss, useToasts, type ToastItem } from '@/lib/toast'
 import { font, radius, shadow, useTheme } from '@/theme'
 import { Icon } from './Icon'
 import { IconButton, Txt } from './primitives'
@@ -39,33 +39,40 @@ export function Sheet({ open, onClose, title, children, footer }: { open: boolea
 
 /* ---------------- Toasts ---------------- */
 
+/** Dark pill at the bottom, above the tab bar (dark floating UI is allowed); the action (Undo) is gold. */
 export function ToastHost() {
   const items = useToasts()
   const insets = useSafeAreaInsets()
   return (
-    <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { justifyContent: 'flex-start', paddingTop: insets.top + 8, paddingHorizontal: 16 }]}>
-      {items.map((t) => <ToastRow key={t.id} id={t.id} kind={t.kind} title={t.title} detail={t.detail} />)}
+    <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { justifyContent: 'flex-end', paddingBottom: insets.bottom + 64, paddingHorizontal: 12 }]}>
+      {items.map((t) => <ToastRow key={t.id} item={t} />)}
     </View>
   )
 }
 
-function ToastRow({ id, kind, title, detail }: { id: number; kind: 'success' | 'error' | 'info'; title: string; detail?: string }) {
+function ToastRow({ item }: { item: ToastItem }) {
   const { c, dark } = useTheme()
-  const y = useAnimatedValue(-30)
+  const y = useAnimatedValue(30)
   const o = useAnimatedValue(0)
   useEffect(() => {
     Animated.parallel([Animated.spring(y, { toValue: 0, useNativeDriver: true }), Animated.timing(o, { toValue: 1, duration: 160, useNativeDriver: true })]).start()
   }, [o, y])
-  const color = kind === 'error' ? c.bad : kind === 'success' ? c.ok : c.accent
+  const color = item.kind === 'error' ? c.bad : item.kind === 'success' ? palette.dark.ok : gold.highlight
   return (
-    <Animated.View accessibilityLiveRegion="polite" style={{ transform: [{ translateY: y }], opacity: o, marginBottom: 8 }}>
-      <Pressable accessibilityRole="alert" onPress={() => dismiss(id)} style={[styles.toast, { backgroundColor: dark ? c.side2 : c.side, borderColor: c.sideLine }, shadow.float]}>
-        <Icon name={kind === 'error' ? 'alert-triangle' : kind === 'success' ? 'check-circle' : 'info'} size={18} color={color} />
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: c.sideInk, fontFamily: font.bodyBold, fontSize: 14 }}>{title}</Text>
-          {detail ? <Text style={{ color: c.sideInk2, fontFamily: font.body, fontSize: 12.5, marginTop: 2 }}>{detail}</Text> : null}
-        </View>
-      </Pressable>
+    <Animated.View accessibilityLiveRegion="polite" style={{ transform: [{ translateY: y }], opacity: o, marginTop: 8, alignSelf: 'center', maxWidth: 520, width: '100%' }}>
+      <View accessibilityRole="alert" style={[styles.toast, { backgroundColor: dark ? c.line2 : c.side }, shadow.float]}>
+        <Icon name={item.kind === 'error' ? 'alert-triangle' : item.kind === 'success' ? 'check-circle' : 'info'} size={18} color={color} />
+        <Pressable style={{ flex: 1, paddingVertical: 2 }} onPress={() => dismiss(item.id)} accessibilityRole="button" accessibilityLabel={`${item.title}. Dismiss`}>
+          <Text style={{ color: c.sideInk, fontFamily: font.bodyBold, fontSize: 14 }}>{item.title}</Text>
+          {item.detail ? <Text style={{ color: c.sideInk2, fontFamily: font.body, fontSize: 12.5, marginTop: 2 }}>{item.detail}</Text> : null}
+        </Pressable>
+        {item.action ? (
+          <Pressable accessibilityRole="button" accessibilityLabel={item.action.label} hitSlop={8} onPress={() => { item.action!.onPress(); dismiss(item.id) }}
+            style={({ pressed }) => ({ minHeight: 44, minWidth: 56, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, opacity: pressed ? 0.6 : 1 })}>
+            <Text style={{ color: gold.highlight, fontFamily: font.bodyHeavy, fontSize: 14.5 }}>{item.action.label}</Text>
+          </Pressable>
+        ) : null}
+      </View>
     </Animated.View>
   )
 }
@@ -137,5 +144,5 @@ const styles = StyleSheet.create({
   sheet: { borderTopLeftRadius: radius.modal + 6, borderTopRightRadius: radius.modal + 6, paddingTop: 8 },
   grabber: { width: 40, height: 5, borderRadius: 3, alignSelf: 'center', marginBottom: 6 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, gap: 8 },
-  toast: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: radius.card, borderWidth: 1 },
+  toast: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 14, paddingRight: 6, paddingVertical: 8, borderRadius: radius.card + 4, minHeight: 52 },
 })

@@ -31,4 +31,4 @@ export function downloadCsv(filename: string, header: string[], rows: (string | 
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export const roleLabel = (role: 'guest' | 'host' | 'client') => (role === 'client' ? 'client · host' : role)
+export const firstName = (name: string) => name.trim().split(/\s+/)[0] || name

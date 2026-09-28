@@ -1,106 +1,82 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, ImagePlus, Images, Upload } from 'lucide-react'
-import { fmt, type ID, type Photo, type PhotoFilter, type PhotoSort } from '@frameline/shared'
-import { Button, EmptyState, Select, Skeleton, useToast } from '@frameline/ui'
-import { errorMessage, useApi } from '../../lib/api'
-import { useAlbums, useEvent, usePeople, usePhotos } from '../../lib/queries'
+import { Link, useNavigate } from 'react-router-dom'
+import { ArrowUpDown, Check, HardDriveDownload, Images, Upload, Camera, X } from 'lucide-react'
+import { fmt, type ID, type Photo } from '@frameline/shared'
+import { Button, EmptyState, Menu, Skeleton, useToast } from '@frameline/ui'
+import { errorMessage } from '../../lib/api'
+import { useAlbums, usePeople } from '../../lib/queries'
+import { useModalParam, useParamState } from '../../lib/url'
+import { useEventContext } from '../event/EventLayout'
 import { QueryError } from '../system'
-import { AlbumRail } from './AlbumRail'
-import { ImportModal } from './ImportModal'
-import { captureRange } from './lib'
+import { AlbumRail, useVisibleAlbums } from './AlbumRail'
+import { GRID_SORTS, parseSort, photosLabel, type GridSort } from './lib'
+import { isImage, setPendingFiles, usePendingDeletes } from './pending'
 import { GRID_COLS, PhotoGrid } from './PhotoGrid'
-import { SelectionBar } from './SelectionBar'
-import { SHARE_TABS, ShareModal, type ShareTab } from './share/ShareModal'
-import { Toolbar, type ViewMode } from './Toolbar'
-import { UploadModal, isImage } from './UploadModal'
-import { WorkspaceHeader } from './WorkspaceHeader'
+import { useGridIds, usePhotoPages } from './photoQuery'
+import { PhotoSelectionBar } from './SelectionBar'
+import { UploadStrip } from './UploadStrip'
+import { useEventUploads } from '../../layout/UploadDock'
 
-const SORTS: PhotoSort[] = ['capture', 'name', 'sequence']
-const FILTERS: PhotoFilter[] = ['all', 'people', 'favourites', 'hidden']
-const SCROLL_STEP = 64
-const MODE_KEY = 'frameline.workspace.view'
-
-function readView(): { mode: ViewMode; perPage: number } {
-  try { const v = JSON.parse(localStorage.getItem(MODE_KEY) ?? ''); if (v.mode && v.perPage) return v } catch { /* default */ }
-  return { mode: 'scroll', perPage: 64 }
-}
-
+/**
+ * /events/:eventId (index): the Photos tab. Left rail of albums, a grid that loads as you scroll, one Sort menu
+ * (newest, oldest, name, people, favourites, hidden) and Select. Drop photos anywhere on the tab to upload.
+ * The event header, tabs and every modal (?modal=upload|share|import|films|faces) come from EventLayout / EventModals.
+ */
 export default function Workspace() {
-  const { eventId: eventParam = '' } = useParams()
-  const [params, setParams] = useSearchParams()
+  const { event } = useEventContext()
   const navigate = useNavigate()
-  const api = useApi()
   const toast = useToast()
-  const eventQ = useEvent(eventParam)
-  const event = eventQ.data
-  const id = event?.id
-  const albumsQ = useAlbums(id)
+  const m = useModalParam()
+  const [params, setParams] = useParamState()
+  const albumsQ = useAlbums(event.id)
   const albums = useMemo(() => albumsQ.data ?? [], [albumsQ.data])
-  const people = usePeople(id).data
+  const regular = useVisibleAlbums(albums)
+  const people = usePeople(event.id).data
+  const pending = usePendingDeletes()
+  const uploads = useEventUploads(event.id)
 
   /* ---------- URL state ---------- */
-  const albumId = params.get('album') ?? undefined
-  const sort = (SORTS.includes(params.get('sort') as PhotoSort) ? params.get('sort') : 'capture') as PhotoSort
-  const filter = (FILTERS.includes(params.get('filter') as PhotoFilter) ? params.get('filter') : 'all') as PhotoFilter
+  const albumParam = params.get('album') ?? undefined
+  const album = albums.find((a) => a.id === albumParam && !pending.albums.has(a.id))
+  const albumId = album?.id
+  const sort = parseSort(params.get('sort'))
   const personId = params.get('person') ?? undefined
-  const modal = params.get('modal')
-  const shareTab = (SHARE_TABS.includes(params.get('tab') as ShareTab) ? params.get('tab') : 'link') as ShareTab
-  const setParam = useCallback((patch: Record<string, string | undefined>, replace = false) => {
-    setParams((p) => {
-      const n = new URLSearchParams(p)
-      for (const [k, v] of Object.entries(patch)) { if (v === undefined || v === '') n.delete(k); else n.set(k, v) }
-      return n
-    }, { replace })
-  }, [setParams])
-  const openModal = (m: string, extra: Record<string, string | undefined> = {}) => setParam({ modal: m, ...extra })
-  const closeModal = () => setParam({ modal: undefined, tab: undefined })
+  const person = people?.find((p) => p.id === personId)
+  const setAlbum = (id?: ID) => setParams({ album: id, person: undefined })
+  const setSort = (s: GridSort) => setParams({ sort: s === 'newest' ? undefined : s }, true)
 
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const anchor = useRef<number | null>(null)
-  const [selectingAll, setSelectingAll] = useState(false)
+  /* ---------- Photos ---------- */
+  const q = usePhotoPages(event.id, sort, albumId, personId)
+  const idsQ = useGridIds(event.id, sort, albumId, personId)
+  const photos = useMemo(() => q.photos.filter((p) => !pending.photos.has(p.id)), [q.photos, pending.photos])
+  const allIds = useMemo(() => (idsQ.data ?? []).filter((id) => !pending.photos.has(id)), [idsQ.data, pending.photos])
+  const total = idsQ.data ? allIds.length : Math.max(0, q.total - (q.photos.length - photos.length))
+  const known = useMemo(() => new Map<ID, Photo>(photos.map((p) => [p.id, p])), [photos])
 
-  /* ---------- Paging ---------- */
-  const [view, setView] = useState(readView)
-  useEffect(() => { try { localStorage.setItem(MODE_KEY, JSON.stringify(view)) } catch { /* ignore */ } }, [view])
-  const [page, setPage] = useState(0)
-  const [scrollLimit, setScrollLimit] = useState(SCROLL_STEP)
-  const baseQ = useMemo(() => ({ albumId, sort, filter: filter === 'all' ? undefined : filter, personId }), [albumId, sort, filter, personId])
-  const baseKey = JSON.stringify(baseQ)
-  useEffect(() => { setPage(0); setScrollLimit(SCROLL_STEP); setSelected(new Set()); anchor.current = null }, [baseKey])
-  const q = view.mode === 'pages' ? { ...baseQ, offset: page * view.perPage, limit: view.perPage } : { ...baseQ, offset: 0, limit: scrollLimit }
-  const photosQ = usePhotos(id, q)
-  const photos = useMemo(() => photosQ.data?.items ?? [], [photosQ.data])
-  const total = photosQ.data?.total ?? 0
-  const pages = Math.max(1, Math.ceil(total / view.perPage))
-  useEffect(() => { if (page > pages - 1) setPage(pages - 1) }, [page, pages])
-
-  // Capture-time range for the section title, from the albums' first/last capture.
-  const range = useMemo(() => {
-    const scope = albumId ? albums.filter((a) => a.id === albumId) : albums.filter((a) => a.kind === 'album')
-    const firsts = scope.map((a) => a.firstCapture).filter((x): x is string => !!x).sort()
-    const lasts = scope.map((a) => a.lastCapture).filter((x): x is string => !!x).sort()
-    return captureRange(firsts[0], lasts[lasts.length - 1])
-  }, [albums, albumId])
-
-  // Endless scroll: load the next batch when the sentinel comes into view.
+  // Automatic paging: load the next page when the sentinel nears the viewport.
   const sentinel = useRef<HTMLDivElement>(null)
-  const canLoadMore = view.mode === 'scroll' && photos.length < total
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = q
   useEffect(() => {
     const el = sentinel.current
-    if (!el || !canLoadMore) return
-    const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting) && !photosQ.isFetching) setScrollLimit((l) => l + SCROLL_STEP)
-    }, { rootMargin: '600px' })
+    if (!el || !hasNextPage) return
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting) && !isFetchingNextPage) void fetchNextPage() }, { rootMargin: '800px' })
     io.observe(el)
     return () => io.disconnect()
-  }, [canLoadMore, photosQ.isFetching, total])
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, photos.length])
 
   /* ---------- Selection ---------- */
-  const toggle = (index: number, rangeSel: boolean) => {
+  const [selected, setSelected] = useState<Set<ID>>(new Set())
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectingAll, setSelectingAll] = useState(false)
+  const anchor = useRef<number | null>(null)
+  const scope = `${albumId}|${sort}|${personId}`
+  useEffect(() => { setSelected(new Set()); setSelectMode(false); anchor.current = null }, [scope])
+  // Drop ids that were trashed.
+  useEffect(() => { setSelected((s) => { const n = new Set([...s].filter((id) => !pending.photos.has(id))); return n.size === s.size ? s : n }) }, [pending.photos])
+  const toggle = (index: number, range: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev)
-      if (rangeSel && anchor.current !== null) {
+      if (range && anchor.current !== null) {
         const [a, b] = [Math.min(anchor.current, index), Math.max(anchor.current, index)]
         photos.slice(a, b + 1).forEach((p) => next.add(p.id))
       } else {
@@ -111,35 +87,30 @@ export default function Workspace() {
     })
     anchor.current = index
   }
-  const clear = useCallback(() => { setSelected(new Set()); anchor.current = null }, [])
+  const clear = useCallback(() => { setSelected(new Set()); setSelectMode(false); anchor.current = null }, [])
   const selectAll = async () => {
-    if (!id) return
     setSelectingAll(true)
-    try { setSelected(new Set(await api.listPhotoIds(id, baseQ))) }
+    try { const r = await idsQ.refetch(); setSelected(new Set((r.data ?? []).filter((id) => !pending.photos.has(id)))) }
     catch (e) { toast.error('Couldn’t select every photo', errorMessage(e)) }
     finally { setSelectingAll(false) }
   }
-  // Drop ids that no longer exist (deleted / moved out) — keep only what's loaded or explicitly all-selected.
-  const [hiddenMap, setHiddenMap] = useState<Map<string, boolean>>(new Map())
-  useEffect(() => { setHiddenMap((m) => { const n = new Map(m); photos.forEach((p) => n.set(p.id, p.hidden)); return n }) }, [photos])
-  const selectedIds = useMemo(() => [...selected], [selected])
-  const allHidden = selectedIds.length > 0 && selectedIds.every((sid) => hiddenMap.get(sid) ?? filter === 'hidden')
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !modal && selected.size) clear() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !m.modal && (selected.size || selectMode)) clear() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [modal, selected.size, clear])
+  }, [m.modal, selected.size, selectMode, clear])
 
-  /* ---------- Files: drop anywhere / choose ---------- */
-  const [files, setFiles] = useState<File[]>([])
-  const [dragging, setDragging] = useState(false)
+  /* ---------- Files: drop anywhere on the tab, or choose ---------- */
+  const uploadTarget = album?.kind === 'album' ? album : undefined
   const fileInput = useRef<HTMLInputElement>(null)
   const takeFiles = useCallback((list: FileList | File[] | null) => {
-    const imgs = Array.from(list ?? []).filter(isImage)
-    if (!imgs.length) return
-    setFiles((f) => [...f, ...imgs])
-    setParam({ modal: 'upload' })
-  }, [setParam])
+    const all = Array.from(list ?? [])
+    const imgs = all.filter(isImage)
+    if (!imgs.length) { if (all.length) toast.error('Those aren’t photos', 'Choose JPG, PNG, HEIC or WebP files.'); return }
+    setPendingFiles(imgs)
+    m.open('upload', uploadTarget ? { album: uploadTarget.id } : {})
+  }, [m, toast, uploadTarget?.id])
+  const [dragging, setDragging] = useState(false)
   useEffect(() => {
     let depth = 0
     const hasFiles = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')
@@ -155,120 +126,116 @@ export default function Workspace() {
   }, [takeFiles])
 
   /* ---------- Render ---------- */
-  if (eventQ.isError) return <div className="p-6"><QueryError error={eventQ.error} retry={() => eventQ.refetch()} /></div>
-  if (!event) return <WorkspaceSkeleton />
-
-  const album = albums.find((a) => a.id === albumId)
-  const regularAlbums = albums.filter((a) => a.kind === 'album')
-  const uploadTarget = album?.kind === 'album' ? album : undefined
-  const person = people?.find((p) => p.id === personId)
-  const sectionTitle = album?.name ?? 'All photos'
+  const eventEmpty = !albumsQ.isLoading && regular.every((a) => a.photoCount === 0) && !albumId && !uploads.jobs.length && !personId && sort === 'newest'
+  const title = person ? `Photos of ${person.name ?? 'this guest'}` : album?.name ?? 'All photos'
+  const sortLabel = GRID_SORTS.find((s) => s.value === sort)!.label
   const open = (p: Photo) => {
     const qs = new URLSearchParams()
     if (albumId) qs.set('album', albumId)
-    if (sort !== 'capture') qs.set('sort', sort)
+    if (sort !== 'newest') qs.set('sort', sort)
+    if (personId) qs.set('person', personId)
     navigate(`/events/${event.id}/photos/${p.id}${qs.size ? `?${qs}` : ''}`)
   }
-  const selectAlbum = (aid?: ID) => setParam({ album: aid, person: undefined })
+  const choose = () => fileInput.current?.click()
 
   return (
-    <div className="relative flex min-h-full flex-col md:h-full">
+    <div className="flex flex-col gap-4 md:flex-row md:gap-[22px]">
       <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={(e) => { takeFiles(e.target.files); e.target.value = '' }} />
-      <WorkspaceHeader event={event} onImport={() => openModal('import')} onShare={() => openModal('share', { tab: 'link' })} />
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        {albumsQ.isLoading ? <Skeleton className="m-3 hidden h-64 w-[200px] md:block" /> : (
-          <AlbumRail event={event} albums={albums} selected={albumId} onSelect={selectAlbum} />
-        )}
-        <section className="min-w-0 flex-1 px-4 pb-24 pt-3 sm:px-5 md:overflow-y-auto md:scrollbar-thin" aria-label="Photos">
-          <Toolbar
-            eventId={event.id} sort={sort} onSort={(s) => setParam({ sort: s === 'capture' ? undefined : s }, true)}
-            filter={filter} onFilter={(f) => setParam({ filter: f === 'all' ? undefined : f }, true)}
-            personId={personId} onPerson={(pid) => setParam({ person: pid }, true)}
-            mode={view.mode} onMode={(m) => setView((v) => ({ ...v, mode: m }))}
-            onUpload={() => fileInput.current?.click()}
-          />
-          <div className="mb-2.5 mt-3 flex flex-wrap items-baseline justify-between gap-2">
-            <div className="min-w-0">
-              <b className="font-display text-[16px]">{sectionTitle}</b>{' '}
-              <span className="text-[12.5px] text-ink-3">
-                {fmt.count(total)} photo{total === 1 ? '' : 's'}{person ? ` with ${person.name ?? 'this guest'}` : ''}{filter !== 'all' ? ` · ${filter}` : ''}{range ? ` · ${range}` : ''}
-              </span>
-            </div>
-            <span className="hidden text-[12px] text-ink-3 sm:inline">Drop photos anywhere to add them</span>
-          </div>
+      {albumsQ.isLoading ? <Skeleton className="hidden h-64 w-[200px] md:block" /> : albumsQ.isError ? null : (
+        <AlbumRail event={event} albums={albums} selected={albumId} onSelect={setAlbum} />
+      )}
 
-          {photosQ.isError ? <QueryError error={photosQ.error} retry={() => photosQ.refetch()} />
-            : photosQ.isLoading ? <div className={GRID_COLS}>{Array.from({ length: 21 }, (_, i) => <Skeleton key={i} className="aspect-[3/2]" />)}</div>
-            : !photos.length ? (
-              filter !== 'all' || personId ? (
-                <EmptyState icon={<Images size={22} />} title="No photos match" body="Try another filter, or show every photo in this album."
-                  action={<Button onClick={() => setParam({ filter: undefined, person: undefined }, true)}>Show all photos</Button>} />
-              ) : (
-                <EmptyState icon={<ImagePlus size={22} />} title={regularAlbums.length ? `${sectionTitle} is empty` : 'Add your first photos'}
-                  body={regularAlbums.length ? 'Drop photos anywhere on this page, choose them from your computer, or import a Google Drive folder.' : 'Create an album in the left rail, then drop photos here.'}
-                  action={<div className="flex flex-wrap justify-center gap-2"><Button variant="primary" icon={<Upload size={14} />} onClick={() => fileInput.current?.click()}>Choose photos</Button><Button onClick={() => openModal('import')}>Import from Drive</Button></div>} />
-              )
-            ) : (
-              <PhotoGrid photos={photos} selected={selected} onToggle={toggle} onOpen={open} />
-            )}
-
-          {view.mode === 'scroll' && canLoadMore && (
-            <div ref={sentinel} className="flex justify-center py-5">
-              <Button loading={photosQ.isFetching} onClick={() => setScrollLimit((l) => l + SCROLL_STEP)}>
-                Load more · {fmt.count(total - photos.length)} left
-              </Button>
-            </div>
-          )}
-          {view.mode === 'pages' && total > 0 && (
-            <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <label className="flex items-center gap-2 text-[12.5px] text-ink-2">
-                Per page
-                <Select value={view.perPage} onChange={(e) => { setView((v) => ({ ...v, perPage: Number(e.target.value) })); setPage(0) }} className="h-8 w-[80px]">
-                  {[32, 64, 128].map((n) => <option key={n} value={n}>{n}</option>)}
-                </Select>
-              </label>
-              <div className="flex items-center gap-2">
-                <Button size="sm" icon={<ChevronLeft size={13} />} disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</Button>
-                <span className="font-mono text-[12px] text-ink-2">Page {page + 1} of {pages}</span>
-                <Button size="sm" iconRight={<ChevronRight size={13} />} disabled={page >= pages - 1} onClick={() => setPage((p) => p + 1)}>Next</Button>
+      <section className="min-w-0 flex-1 pb-28 md:pb-20" aria-label="Photos">
+        <UploadStrip eventId={event.id} />
+        {albumsQ.isError ? <QueryError error={albumsQ.error} retry={() => albumsQ.refetch()} />
+          : eventEmpty ? <EmptyEvent onChoose={choose} onImport={() => m.open('import')} />
+          : (
+            <>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                  <b className="truncate text-[16px] font-extrabold">{title}</b>
+                  <span className="text-[13px] text-ink-3 tnum">{photosLabel(total)}</span>
+                  {person && (
+                    <button type="button" onClick={() => setParams({ person: undefined }, true)} className="inline-flex items-center gap-1 self-center rounded-full border border-line-2 px-2 py-0.5 text-[12px] font-bold text-ink-2 hover:bg-sunk">
+                      <X size={12} />Show everyone
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Menu width={250} trigger={<Button size="sm" icon={<ArrowUpDown size={13} />} className="max-sm:h-10">{sortLabel}</Button>}
+                    items={GRID_SORTS.map((s) => ({
+                      label: s.label, description: s.description,
+                      icon: sort === s.value ? <Check size={14} /> : <span className="inline-block w-3.5" />,
+                      onSelect: () => setSort(s.value),
+                    }))} />
+                  <Button size="sm" className="max-sm:h-10" aria-pressed={selectMode || selected.size > 0}
+                    onClick={() => (selectMode || selected.size ? clear() : setSelectMode(true))}>
+                    {selectMode || selected.size ? 'Done' : 'Select'}
+                  </Button>
+                </div>
               </div>
-            </nav>
-          )}
-        </section>
-      </div>
 
-      {selected.size > 0 && (
-        <SelectionBar eventId={event.id} ids={selectedIds} total={total} allHidden={allHidden} albums={albums} currentAlbumId={albumId}
-          onSelectAll={selectAll} selectingAll={selectingAll} onClear={clear} />
+              {q.isError ? <QueryError error={q.error} retry={() => q.refetch()} />
+                : q.isLoading ? <div className={GRID_COLS}>{Array.from({ length: 18 }, (_, i) => <Skeleton key={i} className="aspect-square rounded-[8px] sm:aspect-[3/2]" />)}</div>
+                : !photos.length ? (
+                  sort !== 'newest' && sort !== 'oldest' && sort !== 'name' || personId ? (
+                    <EmptyState icon={<Images size={22} />} title={personId ? 'No photos of this person here' : sort === 'hidden' ? 'Nothing is hidden' : sort === 'favourites' ? 'No favourites yet' : 'No faces found yet'}
+                      body={personId ? 'Try All photos, or another album.' : sort === 'hidden' ? 'Every photo here is visible to guests.' : sort === 'favourites' ? 'Guests’ hearts show up here once they start picking.' : 'Faces are found a minute or two after photos upload.'}
+                      action={<Button onClick={() => setParams({ sort: undefined, person: undefined }, true)}>Show all, newest first</Button>} />
+                  ) : album?.kind === 'guest' ? (
+                    <EmptyState icon={<Images size={22} />} title="No guest photos yet" body="Photos guests add from the gallery appear here." />
+                  ) : (
+                    <EmptyState icon={<Upload size={22} />} title={`${title} is empty`} body="Drop photos anywhere on this page, or choose them from your computer."
+                      action={<Button icon={<Upload size={14} />} onClick={choose}>Choose photos</Button>} />
+                  )
+                ) : (
+                  <PhotoGrid photos={photos} selected={selected} selecting={selectMode} onToggle={(i, r) => { setSelectMode(true); toggle(i, r) }} onOpen={open} />
+                )}
+
+              {hasNextPage && photos.length > 0 && (
+                <div ref={sentinel} className="flex justify-center py-6">
+                  <Button variant="ghost" loading={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+                    {isFetchingNextPage ? 'Loading more photos' : `Show more · ${fmt.count(Math.max(0, total - photos.length))} left`}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+      </section>
+
+      {(selected.size > 0 || selectMode) && (
+        <PhotoSelectionBar event={event} ids={[...selected]} total={total} known={known} albums={regular} currentAlbumId={album?.kind === 'album' ? albumId : undefined}
+          onSelectAll={() => void selectAll()} selectingAll={selectingAll} onClear={clear} />
       )}
 
       {dragging && (
-        <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center bg-side/70 p-6 backdrop-blur-[2px]">
-          <div className="flex flex-col items-center gap-2 rounded-modal border-2 border-dashed border-side-gold px-12 py-10 text-center text-side-ink">
-            <Upload size={30} className="text-side-gold" />
-            <b className="font-display text-[22px]">Drop to add to {uploadTarget?.name ?? 'this event'}</b>
-            <span className="text-[13px] text-side-ink-2">{uploadTarget ? 'You’ll review quality and duplicates before anything uploads.' : 'You’ll choose the album next.'}</span>
+        <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center bg-paper/85 p-6 backdrop-blur-[2px]">
+          <div className="flex flex-col items-center gap-2 rounded-modal border-2 border-dashed border-accent bg-surface px-12 py-10 text-center shadow-float">
+            <span className="grid size-12 place-items-center rounded-full bg-accent-soft text-accent-text"><Upload size={22} /></span>
+            <b className="font-display text-[22px] font-semibold">Drop to add to {uploadTarget?.name ?? event.name}</b>
+            <span className="text-[13.5px] text-ink-2">You’ll check the options before anything uploads.</span>
           </div>
         </div>
       )}
-
-      <UploadModal open={modal === 'upload'} onOpenChange={(v) => { if (!v) { closeModal(); setFiles([]) } }} event={event} albums={albums}
-        albumId={uploadTarget?.id} files={files} onFiles={setFiles} />
-      <ImportModal open={modal === 'import'} onOpenChange={(v) => !v && closeModal()} event={event} albums={albums} albumId={uploadTarget?.id} />
-      <ShareModal open={modal === 'share'} onOpenChange={(v) => !v && closeModal()} event={event} albums={albums} tab={shareTab} onTab={(t) => setParam({ tab: t }, true)} />
     </div>
   )
 }
 
-function WorkspaceSkeleton() {
+/** ev-empty: one big drop zone with one button. Drive import and camera sync are offered here. */
+function EmptyEvent({ onChoose, onImport }: { onChoose: () => void; onImport: () => void }) {
   return (
-    <div className="flex flex-col gap-4 px-4 py-5 sm:px-7" aria-busy="true" aria-label="Loading event">
-      <Skeleton className="h-4 w-20" />
-      <Skeleton className="h-8 w-72" />
-      <Skeleton className="h-4 w-96 max-w-full" />
-      <div className="mt-2 flex gap-4">
-        <Skeleton className="hidden h-80 w-[200px] md:block" />
-        <div className={`${GRID_COLS} flex-1`}>{Array.from({ length: 21 }, (_, i) => <Skeleton key={i} className="aspect-[3/2]" />)}</div>
+    <div className={'grid min-h-[360px] place-items-center rounded-[14px] border-2 border-dashed border-line-2 bg-surface px-5 py-10 text-center sm:min-h-[520px]'}>
+      <div className="flex max-w-[420px] flex-col items-center gap-2.5">
+        <span className="grid size-[52px] place-items-center rounded-full bg-accent-soft text-accent-text"><Upload size={24} /></span>
+        <h2 className="text-[22px] font-extrabold leading-tight">Add your first photos</h2>
+        <p className="text-[14px] text-ink-2"><span className="hidden sm:inline">Drag a folder here, or choose photos. </span>You can leave this page while they upload.</p>
+        <Button variant="primary" size="lg" icon={<Upload size={16} />} onClick={onChoose} className="mt-1 max-sm:w-full">Choose photos</Button>
+        <p className="mt-1 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-[13px] text-ink-3">
+          or
+          <button type="button" onClick={onImport} className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><HardDriveDownload size={14} />Import from Google Drive</button>
+          ·
+          <Link to="/camera-sync" className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><Camera size={14} />Connect your camera</Link>
+        </p>
       </div>
     </div>
   )

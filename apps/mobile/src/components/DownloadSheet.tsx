@@ -7,11 +7,17 @@ import { recordDownloads } from '@/lib/guest'
 import { lastRegistration, useLocal } from '@/lib/local'
 import { PermissionError, savePhotos, type CaptureHandle } from '@/lib/save'
 import { useTheme } from '@/theme'
-import { Button, Field, Input, Meter, Txt } from './primitives'
+import { realEmail } from './gates'
+import { Button, Field, Input, Meter, RadioCards, Txt } from './primitives'
 import { Sheet } from './overlays'
+
+/** From this many photos, guests choose between a ZIP by email and saving one by one. */
+const ZIP_FROM = 10
+const emailOk = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())
 
 type Phase =
   | { k: 'checking' }
+  | { k: 'choose' }
   | { k: 'pin' }
   | { k: 'saving'; done: number; remaining?: number; limit?: number }
   | { k: 'done'; n: number; remaining?: number; limit?: number }
@@ -20,7 +26,7 @@ type Phase =
   | { k: 'zipSent'; email: string }
 
 /**
- * "Download N" flow.
+ * "Download N" flow. With 10 or more photos the guest first chooses: a ZIP by email (default) or save one by one.
  *
  * - Several photos use one of the guest's 5 "Download all" uses: verifyDownloadPin(shortId) first (VIP sessions
  *   with an embedded PIN pass without one), then with the typed PIN on 401 `pin_required`. The sheet shows the
@@ -39,7 +45,9 @@ export function DownloadSheet({ open, onClose, photos, event, host, albumId, per
   const [phase, setPhase] = useState<Phase>({ k: 'checking' })
   const [pin, setPin] = useState('')
   const [pinError, setPinError] = useState<string>()
-  const [email, setEmail] = useState(reg?.email ?? '')
+  const [email, setEmail] = useState(realEmail(reg?.email))
+  const [how, setHow] = useState<'zip' | 'save'>('zip')
+  const knownEmail = emailOk(realEmail(reg?.email))
   const [busy, setBusy] = useState(false)
   const cancelled = useRef(false)
   const started = useRef(false)
@@ -81,13 +89,13 @@ export function DownloadSheet({ open, onClose, photos, event, host, albumId, per
     if (!open || started.current) return
     started.current = true
     // Next tick, so the sheet renders before the first state change.
-    const t = setTimeout(() => { if (bulk) unlockAndSave(); else save() }, 0)
+    const t = setTimeout(() => { if (photos.length >= ZIP_FROM) setPhase({ k: 'choose' }); else if (bulk) unlockAndSave(); else save() }, 0)
     return () => { clearTimeout(t); started.current = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   const sendZip = async () => {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setPhase({ k: 'zip' }); return }
+    if (!emailOk(email)) { setPhase({ k: 'zip' }); return }
     setBusy(true)
     try {
       const own = event.settings.downloads === 'own'
@@ -114,6 +122,17 @@ export function DownloadSheet({ open, onClose, photos, event, host, albumId, per
     <Sheet open={open} onClose={close} title={bulk ? `Download ${photos.length} photos` : 'Download photo'}>
       <View style={{ paddingHorizontal: 16, gap: 14, paddingBottom: 8 }}>
         {phase.k === 'checking' ? <Txt v="small">Getting your photos ready…</Txt> : null}
+        {phase.k === 'choose' ? (
+          <>
+            <RadioCards value={how} onChange={setHow} options={[
+              { value: 'zip', title: 'Email me a ZIP', description: 'Best for many photos. Arrives in a few minutes.' },
+              { value: 'save', title: 'Save one by one', description: 'Keeps this page open while they save' },
+            ]} />
+            {how === 'zip' && !knownEmail ? <Field label="Email"><Input value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoComplete="email" placeholder="you@gmail.com" /></Field> : null}
+            <Button label={how === 'zip' ? (emailOk(email) ? `Send to ${email.trim()}` : 'Send the ZIP') : `Save ${photos.length} photos`} variant="primary" size="lg" loading={busy}
+              disabled={how === 'zip' && !emailOk(email)} onPress={() => (how === 'zip' ? sendZip() : unlockAndSave())} />
+          </>
+        ) : null}
         {phase.k === 'pin' ? (
           <>
             <Txt v="small">Enter the gallery PIN to save all photos. Each guest can use “Download all” 5 times.</Txt>

@@ -1,18 +1,30 @@
-import { useRef, type ClipboardEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, type ClipboardEvent, type KeyboardEvent } from 'react'
 import { cn } from '@frameline/ui'
 
 const LEN = 6
 
 /** Six separate digit boxes with auto-advance, backspace-to-previous and paste support. */
-export function CodeInput({ value, onChange, onComplete, disabled, invalid, autoFocus }: {
+export function CodeInput({ value, onChange, onComplete, disabled, invalid, autoFocus, shake = 0 }: {
   value: string
   onChange: (v: string) => void
   onComplete?: (v: string) => void
   disabled?: boolean
   invalid?: boolean
   autoFocus?: boolean
+  /** Bump to shake the boxes (wrong code). */
+  shake?: number
 }) {
   const refs = useRef<(HTMLInputElement | null)[]>([])
+  const group = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!shake || !group.current?.animate) return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    group.current.animate(
+      [{ transform: 'translateX(0)' }, { transform: 'translateX(-8px)' }, { transform: 'translateX(7px)' }, { transform: 'translateX(-5px)' }, { transform: 'translateX(3px)' }, { transform: 'translateX(0)' }],
+      { duration: 380, easing: 'ease-out' },
+    )
+    refs.current[0]?.focus()
+  }, [shake])
   const digits = Array.from({ length: LEN }, (_, i) => value[i] ?? '')
 
   const set = (next: string) => {
@@ -53,7 +65,7 @@ export function CodeInput({ value, onChange, onComplete, disabled, invalid, auto
   }
 
   return (
-    <div className="flex justify-between gap-2" role="group" aria-label="6-digit code">
+    <div ref={group} className="flex justify-between gap-2" role="group" aria-label="6-digit code">
       {digits.map((d, i) => (
         <input
           key={i}
@@ -71,7 +83,7 @@ export function CodeInput({ value, onChange, onComplete, disabled, invalid, auto
           onPaste={onPaste}
           onFocus={(e) => e.target.select()}
           className={cn(
-            'h-12 w-full min-w-0 rounded-control border bg-surface text-center font-mono text-[20px] font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent-soft disabled:opacity-50',
+            'h-14 w-full min-w-0 rounded-control border bg-surface text-center text-[22px] font-bold tnum text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent-soft disabled:opacity-50',
             invalid ? 'border-bad' : 'border-line-2',
           )}
         />

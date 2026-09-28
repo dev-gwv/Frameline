@@ -1,12 +1,12 @@
-import { useState } from 'react'
-import { Eye, EyeOff, Lock, Mail } from 'lucide-react'
-import { Button, Field, Input, Tip } from '@frameline/ui'
+import { useEffect, useState } from 'react'
+import { Eye, EyeOff, Info, Lock, Mail } from 'lucide-react'
+import { Button, Field, Input, LogoMark } from '@frameline/ui'
 import { useAuth, type VerifyResult } from '../../../lib/auth'
 import { CodeStep, type CodeSent } from './CodeStep'
 import { ForgotPassword } from './ForgotPassword'
-import { clock, describeAuthError, isEmail, useCountdown } from './authHelpers'
+import { clock, demoRateLimit, describeAuthError, isEmail, useCountdown } from './authHelpers'
 
-type View = 'start' | 'code' | 'forgot'
+export type SignInView = 'start' | 'code' | 'forgot'
 
 function GoogleMark() {
   // Google's brand mark keeps its own colours.
@@ -20,18 +20,24 @@ function GoogleMark() {
   )
 }
 
+export function Brand() {
+  return <div className="flex items-center gap-2.5"><LogoMark /><span className="text-[17px] font-extrabold">Frameline</span></div>
+}
+
 /**
- * One flow for sign-in and sign-up: Google, or email + 6-digit code (default),
- * or email + password. `onDone` decides where the person goes next.
+ * One flow for sign-in and sign-up: email + 6-digit code (default), Google, or a password.
+ * `onDone` decides where the person goes next; `onView` lets the page switch layouts.
  */
-export function SignInForm({ onDone, onGoogle, googleBusy, notice }: {
+export function SignInForm({ onDone, onGoogle, googleBusy, expired, onView }: {
   onDone: (result: VerifyResult) => void
   onGoogle: () => void
   googleBusy?: boolean
-  notice?: string
+  /** Signed out for safety (?expired=1). */
+  expired?: boolean
+  onView?: (v: SignInView) => void
 }) {
   const auth = useAuth()
-  const [view, setView] = useState<View>('start')
+  const [view, setView] = useState<SignInView>('start')
   const [email, setEmail] = useState('')
   const [emailError, setEmailError] = useState<string | null>(null)
   const [usePassword, setUsePassword] = useState(false)
@@ -41,6 +47,7 @@ export function SignInForm({ onDone, onGoogle, googleBusy, notice }: {
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState<CodeSent | null>(null)
   const wait = useCountdown()
+  useEffect(() => { onView?.(view) }, [view, onView])
 
   const fail = (err: unknown, field: 'email' | 'password') => {
     const f = describeAuthError(err)
@@ -48,29 +55,35 @@ export function SignInForm({ onDone, onGoogle, googleBusy, notice }: {
     if (field === 'email') setEmailError(f.message); else setPwError(f.message)
   }
 
+  const requestCode = async (address: string) => {
+    if (auth.mode === 'demo') demoRateLimit()
+    return auth.requestCode(address)
+  }
+
   const submit = async () => {
+    if (wait.left > 0) return
     if (!isEmail(email)) { setEmailError('Enter a valid email address, like studio@example.com.'); return }
     setEmailError(null)
     const address = email.trim().toLowerCase()
     if (usePassword) {
-      if (!password) { setPwError('Enter your password, or sign in with an email code instead.'); return }
+      if (!password) { setPwError('Enter your password, or get an email code instead.'); return }
       setPwError(null); setBusy(true)
       try { onDone(await auth.signInWithPassword(address, password)) } catch (err) { fail(err, 'password') } finally { setBusy(false) }
       return
     }
     setBusy(true)
-    try { setSent(await auth.requestCode(address)); setView('code') } catch (err) { fail(err, 'email') } finally { setBusy(false) }
+    try { setSent(await requestCode(address)); setView('code') } catch (err) { fail(err, 'email') } finally { setBusy(false) }
   }
 
   if (view === 'code' && sent) {
     const address = email.trim().toLowerCase()
     return (
       <CodeStep
-        email={address} title="Check your email" verifyLabel="Sign in" sent={sent}
+        email={address} verifyLabel="Continue" sent={sent}
         onVerify={async (code) => onDone(await auth.verifyCode(address, code))}
-        onResend={() => auth.requestCode(address)}
+        onResend={() => requestCode(address)}
         onChangeEmail={() => setView('start')}
-        extra={<button type="button" className="font-bold text-accent-text hover:underline" onClick={() => { setUsePassword(true); setView('start') }}>Use password instead</button>}
+        extra={<button type="button" className="font-bold text-ink-3 hover:text-ink" onClick={() => { setUsePassword(true); setView('start') }}>Use a password instead</button>}
       />
     )
   }
@@ -80,41 +93,47 @@ export function SignInForm({ onDone, onGoogle, googleBusy, notice }: {
 
   return (
     <form className="flex flex-col gap-3.5" onSubmit={(e) => { e.preventDefault(); void submit() }} noValidate>
+      <div className="mb-2"><Brand /></div>
+      {expired && (
+        <p role="status" className="flex items-start gap-2 rounded-[10px] bg-accent-soft px-3.5 py-3 text-[13px] text-ink">
+          <Info size={15} className="mt-0.5 shrink-0 text-accent-text" aria-hidden />
+          You were signed out for safety. Sign in again to pick up where you left off.
+        </p>
+      )}
       <div>
-        <h1 className="font-display text-[28px] font-semibold leading-tight">Welcome back</h1>
-        <p className="mt-0.5 text-[13px] text-ink-2">New here? The same steps create your studio.</p>
+        <h1 className="font-display text-[28px] font-semibold leading-tight sm:text-[30px]">Sign in to your studio</h1>
+        <p className="mt-1 text-[14px] text-ink-2">New here? The same steps create your account.</p>
       </div>
-      {notice && <p role="status" className="rounded-control bg-warn-soft px-3 py-2 text-[12.5px] font-semibold text-warn">{notice}</p>}
       <Button size="lg" className="mt-2 justify-center" icon={<GoogleMark />} loading={googleBusy} onClick={onGoogle}>
         Continue with Google
       </Button>
       <div className="flex items-center gap-3 text-[12px] text-ink-3">
-        <hr className="flex-1 border-0 border-t border-line" />or use email<hr className="flex-1 border-0 border-t border-line" />
+        <hr className="flex-1 border-0 border-t border-line" />or<hr className="flex-1 border-0 border-t border-line" />
       </div>
-      <Field label="Email address" htmlFor="si-email" error={usePassword ? emailError : emailError && <>{emailError}{wait.left > 0 && <> · <span className="font-mono tnum">{clock(wait.left)}</span></>}</>}>
-        <Input id="si-email" type="email" autoComplete="email" icon={<Mail size={14} />} placeholder="studio@example.com"
-          value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(null) }} />
+      <Field label="Email" htmlFor="si-email" error={emailError}>
+        <Input id="si-email" type="email" autoComplete="email" icon={<Mail size={15} />} placeholder="you@yourstudio.in" className="h-[46px]"
+          aria-invalid={!!emailError || undefined} value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(null) }} />
       </Field>
       {usePassword && (
         <Field label="Password" htmlFor="si-pw" error={pwError}>
-          <Input id="si-pw" type={show ? 'text' : 'password'} autoComplete="current-password" autoFocus icon={<Lock size={14} />}
+          <Input id="si-pw" type={show ? 'text' : 'password'} autoComplete="current-password" autoFocus icon={<Lock size={15} />} className="h-[46px]"
             value={password} onChange={(e) => { setPassword(e.target.value); setPwError(null) }}
-            suffix={<Tip label={show ? 'Hide password' : 'Show password'}><button type="button" aria-label={show ? 'Hide password' : 'Show password'} className="text-ink-3 hover:text-ink" onClick={() => setShow((v) => !v)}>{show ? <EyeOff size={14} /> : <Eye size={14} />}</button></Tip>} />
+            suffix={<button type="button" className="flex items-center gap-1 text-[12px] font-bold text-ink-3 hover:text-ink" onClick={() => setShow((v) => !v)}>{show ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}{show ? 'Hide' : 'Show'}</button>} />
         </Field>
       )}
       <Button type="submit" variant="primary" size="lg" className="justify-center" loading={busy} disabled={wait.left > 0}>
-        {wait.left > 0 ? `Try again in ${clock(wait.left)}` : usePassword ? 'Sign in' : 'Email me a 6-digit code'}
+        {wait.left > 0 ? `Try again in ${clock(wait.left)}` : usePassword ? 'Sign in' : 'Email me a sign-in code'}
       </Button>
-      <div className="flex items-center justify-between text-[12px]">
-        <button type="button" className="font-bold text-accent-text hover:underline" onClick={() => { setUsePassword((v) => !v); setPwError(null) }}>
-          {usePassword ? 'Email me a code instead' : 'Use password instead'}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
+        <button type="button" className="min-h-[36px] font-bold text-accent-text hover:underline" onClick={() => { setUsePassword((v) => !v); setPwError(null) }}>
+          {usePassword ? 'Email me a code instead' : 'Use a password instead'}
         </button>
-        <button type="button" className="text-ink-3 hover:text-ink" onClick={() => setView('forgot')}>Forgot password?</button>
+        <button type="button" className="min-h-[36px] text-ink-3 hover:text-ink" onClick={() => setView('forgot')}>Forgot password?</button>
       </div>
-      {auth.mode === 'demo' && usePassword && <p className="rounded-control bg-sunk px-3 py-1.5 font-mono text-[11.5px] text-ink-2">Sample data: any password with 6+ characters</p>}
-      <p className="text-[11.5px] text-ink-3">
+      {auth.mode === 'demo' && usePassword && <p className="rounded-control bg-sunk px-3 py-1.5 text-[12px] text-ink-2">Sample data: any password with 6 or more characters works.</p>}
+      <p className="mt-2 text-[12px] text-ink-3">
         By continuing you agree to the <a className="underline hover:text-ink" href="https://frameline.in/terms" target="_blank" rel="noreferrer">Terms of Use</a> and{' '}
-        <a className="underline hover:text-ink" href="https://frameline.in/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>. Bot check runs invisibly.
+        <a className="underline hover:text-ink" href="https://frameline.in/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.
       </p>
     </form>
   )

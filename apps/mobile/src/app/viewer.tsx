@@ -3,7 +3,7 @@ import { ActivityIndicator, FlatList, Pressable, Share, StyleSheet, Text, View, 
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar'
-import { fmt, palette, type EventSettings, type Photo } from '@frameline/shared'
+import { FEATURES, fmt, palette, type EventSettings, type Photo } from '@frameline/shared'
 import { Icon, IconButton, PhotoFill, Sheet, SettingRow, WatermarkOverlay, type IconName } from '@/components'
 import { EnquiryPrompt } from '@/components/guest'
 import { Zoomable } from '@/components/Zoomable'
@@ -48,7 +48,12 @@ export default function Viewer() {
   const photo = photos[index]
   const isFav = !!photo && favs.some((f) => f.photoId === photo.id)
 
-  const hide = useAction((p: Photo) => api.updatePhotos([p.id], { hidden: !p.hidden }), { success: (_, p) => (p.hidden ? 'Photo visible to guests' : 'Photo hidden from guests') })
+  const hide = useAction((p: Photo) => api.updatePhotos([p.id], { hidden: !p.hidden }), {
+    onSuccess: (_, p) => toast.undo(p.hidden ? 'Photo shown to guests' : 'Photo hidden from guests', () => { api.updatePhotos([p.id], { hidden: p.hidden }).catch(() => {}) }),
+  })
+  const rotate = useAction((p: Photo) => api.rotatePhotos([p.id], 90), {
+    onSuccess: (_, p) => toast.undo('Photo turned right', () => { api.rotatePhotos([p.id], -90).catch(() => {}) }),
+  })
   const cover = useAction((v: { p: Photo; scope: 'event' | 'album' }) => api.setCover(v.p.eventId, v.p.id, v.scope), { success: (_, v) => (v.scope === 'event' ? 'Set as event cover' : 'Set as album cover') })
 
   const onViewable = useCallback(({ viewableItems }: { viewableItems: ViewToken<Photo>[] }) => {
@@ -80,14 +85,15 @@ export default function Viewer() {
   }
 
   const renderItem = useCallback(({ item }: { item: Photo }) => {
-    const ratio = item.exif.height / item.exif.width
+    const quarter = item.rotation === 90 || item.rotation === 270
+    const ratio = quarter ? item.exif.width / item.exif.height : item.exif.height / item.exif.width
     const h = Math.min(height * 0.72, width * ratio)
     const w = h / ratio
     return (
       <View style={{ width, height: '100%', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         <Zoomable width={width} height={height * 0.8} zoomed={zoomed} onZoomChange={setZoomed} onTap={() => setChrome((v) => !v)}>
           <View style={{ width: w, height: h }} accessible accessibilityRole="image" accessibilityLabel={`${item.filename}, ${fmt.dateTime(item.capturedAt)}`}>
-            <PhotoFill photo={item} contentFit="contain" />
+            <PhotoFill photo={item} contentFit="contain" box={{ width: w, height: h }} />
             {studioMode ? null : <WatermarkOverlay wm={watermark} width={w} height={h} />}
           </View>
         </Zoomable>
@@ -104,7 +110,8 @@ export default function Viewer() {
 
   const studioActions: typeof guestActions = photo && studioMode ? [
     { icon: photo.hidden ? 'eye' : 'eye-off', label: photo.hidden ? 'Show' : 'Hide', on: () => hide.mutate(photo) },
-    { icon: 'image', label: event?.coverPhotoId === photo.id ? 'Cover ✓' : 'Set cover', active: event?.coverPhotoId === photo.id, loading: cover.isPending && cover.variables?.scope === 'event', on: () => cover.mutate({ p: photo, scope: 'event' }) },
+    { icon: 'rotate-cw', label: 'Rotate', loading: rotate.isPending, on: () => rotate.mutate(photo) },
+    { icon: 'image', label: event?.coverPhotoId === photo.id ? 'Is cover' : 'Set cover', active: event?.coverPhotoId === photo.id, loading: cover.isPending && cover.variables?.scope === 'event', on: () => cover.mutate({ p: photo, scope: 'event' }) },
     ...(params.albumId ? [{ icon: 'folder' as const, label: 'Album cover', loading: cover.isPending && cover.variables?.scope === 'album', on: () => cover.mutate({ p: photo, scope: 'album' }) }] : []),
     { icon: 'share', label: 'Share', loading: busy === 'share', on: share },
     { icon: 'download', label: 'Save', loading: busy === 'download', on: download },
@@ -136,7 +143,7 @@ export default function Viewer() {
         <>
           <View style={[styles.top, { paddingTop: insets.top + 4 }]}>
             <IconButton icon="arrow-left" label="Close photo" color={D.ink} onPress={() => router.back()} />
-            <Text style={styles.counter} accessibilityLabel={`Photo ${index + 1} of ${photos.length}`}>{photos.length ? `${index + 1} / ${photos.length}` : ''}</Text>
+            <Text style={styles.counter} accessibilityLabel={`Photo ${index + 1} of ${photos.length}`}>{photos.length ? `${index + 1} of ${photos.length}` : ''}</Text>
             <IconButton icon="info" label="Photo details" color={D.ink} onPress={() => setInfoOpen(true)} />
           </View>
           <View style={[styles.bottom, { paddingBottom: insets.bottom + 10 }]}>
@@ -151,7 +158,7 @@ export default function Viewer() {
                 </Pressable>
               ))}
             </View>
-            {!studioMode && event?.settings.allowEnquiries ? <View style={{ paddingHorizontal: 12 }}><EnquiryPrompt dark shortId={event.shortId} studioName={studioName} source={`${event.name} photo viewer`} /></View> : null}
+            {FEATURES.website && !studioMode && event?.settings.allowEnquiries ? <View style={{ paddingHorizontal: 12 }}><EnquiryPrompt dark shortId={event.shortId} studioName={studioName} source={`${event.name} photo viewer`} /></View> : null}
           </View>
         </>
       ) : null}
@@ -172,7 +179,7 @@ export default function Viewer() {
 
 const styles = StyleSheet.create({
   top: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 6, backgroundColor: 'rgba(12,10,8,0.55)' },
-  counter: { fontFamily: font.mono, fontSize: 13, color: D.ink2 },
+  counter: { fontFamily: font.bodySemi, fontSize: 13, color: D.ink2, fontVariant: ['tabular-nums'] },
   bottom: { position: 'absolute', left: 0, right: 0, bottom: 0, gap: 10, overflow: 'hidden' },
   actions: { flexDirection: 'row', paddingTop: 10, paddingHorizontal: 8 },
   action: { flex: 1, alignItems: 'center', gap: 4, minHeight: 52, justifyContent: 'center' },

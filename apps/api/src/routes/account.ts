@@ -1,6 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
-import { COUPONS, PERIOD_DAYS, PLANS, planPrice } from '@frameline/shared'
+import { COUPONS, GST_RATE, PERIOD_DAYS, PLANS, planPrice } from '@frameline/shared'
 import { getDb, schema } from '../db/client'
 import { defaultNotificationPrefs, purchaseOut, usageOut } from '../db/mappers'
 import { AppError, Conflict, NotFound } from '../lib/errors'
@@ -47,7 +47,7 @@ accountRoutes.openapi(createRoute({
       coalesce(sum(CASE WHEN a.kind != 'guest' AND p.quality = 'web' AND p.enhanced_from IS NULL THEN 1 ELSE 0 END), 0) AS web,
       coalesce(sum(CASE WHEN a.kind != 'guest' AND p.quality = 'original' THEN 1 ELSE 0 END), 0) AS originals,
       coalesce(sum(CASE WHEN a.kind = 'guest' THEN 1 ELSE 0 END), 0) AS guest
-    FROM events e LEFT JOIN photos p ON p.event_id = e.id LEFT JOIN albums a ON a.id = p.album_id
+    FROM events e LEFT JOIN photos p ON p.event_id = e.id AND p.deleted_at IS NULL LEFT JOIN albums a ON a.id = p.album_id
     WHERE e.studio_id = ${m.studioId} AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`)
   return c.json({
     limit: st.photosLimit, used: st.photosUsed, guestReserved: st.guestReserved,
@@ -86,15 +86,28 @@ accountRoutes.openapi(createRoute({
 })
 
 // ── Plan & wallet ──────────────────────────────────────────────────────────
+const Billing = z.enum(['yearly', 'quarterly'])
+const PayWith = z.enum(['wallet', 'card', 'upi'])
+
 accountRoutes.openapi(createRoute({
-  method: 'post', path: '/studio/plan', tags: ['Billing'], summary: 'Change plan (prorated) — owner', security,
-  description: 'Unused time on the current plan is credited against the new plan’s price. Payment capture is simulated until Razorpay keys are configured.',
+  method: 'post', path: '/studio/plan', tags: ['Billing'], summary: 'Change plan (prorated, with GST) — owner', security,
+  description: `Unused time on the current plan is taken off the new plan’s price (\`credit\`); GST ${GST_RATE * 100}% is added on top (\`gst\`, \`total\`). \`payWith: wallet\` takes \`total\` from the wallet in the same call (added money first, then sales; 402 \`insufficient_credits\` when short, and the plan doesn’t change). \`card\` / \`upi\` capture is simulated until Razorpay keys are configured. \`billing\` is the period (\`period\` is accepted as an older name).`,
   middleware: [requireStudio('owner', 'change the plan'), idempotent] as const,
-  request: { headers: IdempotencyHeader, body: body(z.object({ planId: z.enum(['starter', 'studio', 'pro', 'agency']), period: z.enum(['yearly', 'quarterly']) })) },
-  responses: { 200: json(z.object({ usage: Usage, charged: z.number(), credit: z.number(), purchase: Purchase.nullable() })), ...problems(401, 403, 409, 422) },
+  request: {
+    headers: IdempotencyHeader,
+    body: body(z.object({ planId: z.enum(['starter', 'studio', 'pro', 'agency']), billing: Billing.optional(), period: Billing.optional(), payWith: PayWith.default('card') })
+      .refine((b) => b.billing || b.period, { message: 'Choose yearly or quarterly billing', path: ['billing'] })),
+  },
+  responses: {
+    200: json(z.object({ usage: Usage, charged: z.number(), credit: z.number(), gst: z.number(), total: z.number(), payWith: PayWith, purchase: Purchase.nullable() })),
+    ...problems(401, 402, 403, 409, 422),
+  },
 }), async (c) => {
   const m = membershipOf(c)
-  const { planId, period } = c.req.valid('json')
+  const input = c.req.valid('json')
+  const planId = input.planId
+  const period = (input.billing ?? input.period)!
+  const payWith = input.payWith
   const db = getDb(c.env.DB)
   const st = await studioRow(db, m.studioId)
   if (st.planId === planId && st.planPeriod === period) throw new Conflict('You are already on this plan.', 'same_plan')
@@ -103,13 +116,22 @@ accountRoutes.openapi(createRoute({
   const remainingDays = Math.max(0, (Date.parse(st.validTill) - Date.now()) / DAY)
   const credit = Math.round(planPrice(current, st.planPeriod) * Math.min(1, remainingDays / PERIOD_DAYS[st.planPeriod]))
   const charged = Math.max(0, planPrice(next, period) - credit)
+  const gstPaise = Math.round(toMinor(charged) * GST_RATE)
+  const totalPaise = toMinor(charged) + gstPaise
+  const label = `${next.name} plan · ${period}`
+  // Take the money first: a short wallet (402) leaves the plan as it was.
+  if (payWith === 'wallet' && totalPaise > 0) await debitWallet(db, m.studioId, totalPaise, label)
   await db.update(schema.studios).set({ planId, planPeriod: period, photosLimit: next.photos, validTill: new Date(Date.now() + PERIOD_DAYS[period] * DAY).toISOString() }).where(eq(schema.studios.id, m.studioId)).run()
-  const purchase = await recordPurchase(db, m.studioId, {
-    description: `${next.name} plan · ${period}${credit ? ` (₹${credit} credit for unused time)` : ''}`, kind: 'plan', amountPaise: toMinor(charged), method: 'card',
-  })
-  audit(c, 'billing.plan_changed', { type: 'studio', id: m.studioId }, { from: st.planId, to: planId, period, charged })
+  // Nothing to pay (unused time covered it): no purchase and no invoice.
+  const purchase = totalPaise > 0 ? await recordPurchase(db, m.studioId, {
+    description: `${label}${credit ? ` (₹${credit} off for unused time)` : ''}`, kind: 'plan', amountPaise: totalPaise,
+    method: payWith === 'wallet' ? 'credits' : payWith,
+  }) : null
+  audit(c, 'billing.plan_changed', { type: 'studio', id: m.studioId }, { from: st.planId, to: planId, period, charged, payWith })
   emit(c, m.studioId, 'usage', 'misc')
-  return c.json({ usage: usageOut(await studioRow(db, m.studioId)), charged, credit, purchase: purchaseOut(purchase) }, 200)
+  return c.json({
+    usage: usageOut(await studioRow(db, m.studioId)), charged, credit, gst: toMajor(gstPaise), total: toMajor(totalPaise), payWith, purchase: purchase ? purchaseOut(purchase) : null,
+  }, 200)
 })
 
 accountRoutes.openapi(createRoute({
@@ -142,14 +164,14 @@ accountRoutes.openapi(createRoute({
     .where(and(eq(st.id, m.studioId), sql`NOT EXISTS (SELECT 1 FROM json_each(${st.couponsRedeemed}) WHERE value = ${code})`)).run()
   if (res.meta.changes === 0) throw new Conflict('This coupon was already used on your account.', 'coupon_used')
   await creditWallet(db, m.studioId, toMinor(credits), `Coupon ${code}`)
-  await recordPurchase(db, m.studioId, { description: `Coupon ${code} · ${credits} credits`, kind: 'coupon', amountPaise: 0, method: 'coupon' })
+  await recordPurchase(db, m.studioId, { description: `Coupon ${code} · ₹${credits} added to wallet`, kind: 'coupon', amountPaise: 0, method: 'coupon' })
   emit(c, m.studioId, 'usage', 'misc')
   return c.json({ credits, walletCredits: toMajor((await studioRow(db, m.studioId)).walletPaise) }, 200)
 })
 
 accountRoutes.openapi(createRoute({
-  method: 'post', path: '/studio/credits/spend', tags: ['Billing'], summary: 'Spend wallet credits', security,
-  description: 'Debits the wallet and adds a `credits-used` ledger line. 402 when the wallet is short.',
+  method: 'post', path: '/studio/credits/spend', tags: ['Billing'], summary: 'Pay from the wallet', security,
+  description: 'Debits the wallet: prepaid first, then store earnings, with one `credits-used` ledger line per pot (the response `entry` is the first). 402 when prepaid + earnings are short.',
   middleware: [requireStudio('editor', 'spend credits'), idempotent] as const,
   request: { headers: IdempotencyHeader, body: body(z.object({ amount: z.number().positive().max(1_000_000).multipleOf(0.01), description: z.string().trim().min(1).max(200) })) },
   responses: { 200: json(z.object({ walletCredits: z.number(), entry: LedgerEntry })), ...problems(401, 402, 403, 422) },

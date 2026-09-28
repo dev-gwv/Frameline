@@ -1,8 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Modal, Segmented, StepBadge } from '@frameline/ui'
-import { FTP_HOST } from './utils'
-
-type Brand = 'canon' | 'nikon' | 'sony' | 'fuji'
+import { FTP_HOST, type Brand } from './utils'
 
 const GUIDES: Record<Brand, { models: string; steps: string[] }> = {
   canon: {
@@ -43,13 +41,14 @@ const GUIDES: Record<Brand, { models: string; steps: string[] }> = {
   },
 }
 
-export function SetupGuide({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const [brand, setBrand] = useState<Brand>('canon')
+export function SetupGuide({ open, onOpenChange, brand: initial = 'canon' }: { open: boolean; onOpenChange: (v: boolean) => void; brand?: Brand }) {
+  const [brand, setBrand] = useState<Brand>(initial)
+  useEffect(() => { if (open) setBrand(initial) }, [open, initial])
   const g = GUIDES[brand]
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Camera setup guide" description="Four settings on the camera. You only do this once per event." width={560}
+    <Modal open={open} onOpenChange={onOpenChange} title="Setup guide" description="Four settings on the camera. You do this once per camera." width={560}
       footer={<Button variant="primary" onClick={() => onOpenChange(false)}>Got it</Button>}>
-      <div className="flex flex-col gap-4 px-5 py-4 sm:px-6">
+      <>
         <Segmented value={brand} onChange={setBrand} stretch options={[
           { value: 'canon', label: 'Canon' }, { value: 'nikon', label: 'Nikon' }, { value: 'sony', label: 'Sony' }, { value: 'fuji', label: 'Fujifilm' },
         ]} />
@@ -61,9 +60,9 @@ export function SetupGuide({ open, onOpenChange }: { open: boolean; onOpenChange
         </ol>
         <div className="rounded-control bg-sunk p-3 text-[12px] text-ink-2">
           <b className="text-ink">If nothing arrives:</b> check the camera is on the same Wi-Fi or phone hotspot, passive mode is on, and the
-          status here says “Receiving”. Photos appear about 10 seconds after each shot.
+          camera shows a green Live dot here. Photos appear about 10 seconds after each shot.
         </div>
-      </div>
+      </>
     </Modal>
   )
 }

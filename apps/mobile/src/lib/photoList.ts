@@ -24,7 +24,7 @@ export interface PhotoListTarget {
  * - favourites → local snapshots (there's no "list my favourites" endpoint)
  */
 export function usePhotoList(scope: PhotoScope, { eventId, shortId, albumId }: PhotoListTarget): { photos: Photo[]; all: Photo[]; isLoading: boolean; error: unknown } {
-  const studio = usePhotos(scope === 'studio' ? eventId : undefined, albumId ? { albumId } : {})
+  const studio = usePhotos(scope === 'studio' ? eventId : undefined, albumId ? { albumId, sort: 'newest' } : { sort: 'newest' })
   const album = usePublicPhotos(shortId, albumId ? { albumId } : {}, scope === 'album')
   const highlights = useHighlights(shortId, scope === 'highlights')
   const mine = useMyPhotos(scope === 'mine' ? shortId : undefined, eventId)

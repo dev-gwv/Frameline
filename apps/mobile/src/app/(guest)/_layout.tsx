@@ -8,7 +8,7 @@ export default function GuestLayout() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="event/[id]/index" options={{ headerShown: false }} />
       <Stack.Screen name="event/[id]/photos" options={{ title: '' }} />
-      <Stack.Screen name="event/[id]/selfie" options={{ title: 'Find my photos', presentation: 'modal' }} />
+      <Stack.Screen name="event/[id]/selfie" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
       <Stack.Screen name="studio/[code]" options={{ title: '' }} />
     </Stack>
   )

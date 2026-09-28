@@ -44,7 +44,7 @@ export const SEED_STUDIO_ID = 'st_northlight'
 export const SEED_USERS = { owner: 'u1', editor: 'u2', uploader: 'u3' } as const
 
 const TABLES_IN_DELETE_ORDER = [
-  'guest_galleries', 'download_uses', 'assets', 'guest_links', 'renewal_links', 'zip_requests', 'camera_uploads', 'usage_reports', 'purchases', 'studio_follows',
+  'event_daily_stats', 'notify_requests', 'guest_galleries', 'download_uses', 'assets', 'guest_links', 'renewal_links', 'zip_requests', 'camera_uploads', 'usage_reports', 'purchases', 'studio_follows',
   'ticket_messages', 'tickets', 'faces', 'photos', 'people', 'films', 'guests', 'access_requests', 'uploads', 'albums',
   'cameras', 'smart_qrs', 'broadcasts', 'enquiries', 'activity', 'orders', 'ledger_entries', 'prices', 'watermarks', 'websites',
   'team_invites', 'memberships', 'events', 'refresh_tokens', 'otp_codes', 'idempotency_keys', 'audit_log', 'studios', 'users',
@@ -71,7 +71,7 @@ export function buildSeedSql(opts: { photoCap?: number; reset?: boolean; seed?: 
     renewal_multiplier: s.usage.renewalMultiplier, created_at: created,
     cover_url: s.studio.coverUrl ?? null, studio_type: s.studio.studioType ?? null, referral_source: s.studio.referralSource ?? null,
     profile: { services: s.studio.services, testimonials: s.studio.testimonials, faq: s.studio.faq, socialLinks: s.studio.socialLinks, portfolioLinks: s.studio.portfolioLinks },
-    app: s.studio.app, followers: s.studio.followers, coupons_redeemed: [], store_settings: s.storeSettings,
+    app: s.studio.app, followers: s.studio.followers, coupons_redeemed: [], store_settings: s.storeSettings, whatsapp: s.studio.whatsapp ?? null,
   }]))
 
   const assigned: Record<string, string[]> = { uploader: ['ev_tessera'] }
@@ -108,8 +108,9 @@ export function buildSeedSql(opts: { photoCap?: number; reset?: boolean; seed?: 
   stmts.push(...inserts('photos', photos.map((p) => ({
     id: p.id, event_id: p.eventId, album_id: p.albumId, studio_id: sid, filename: p.filename, seq: p.index, captured_at: p.capturedAt,
     tone: p.tone, url: p.url ?? null, r2_key: null, status: p.status, hidden: p.hidden, favourites: p.favourites, downloads: p.downloads,
-    faces: p.faces, exif: p.exif, uploaded_by: p.uploadedBy, source: p.source, quality: 'web', created_at: p.capturedAt,
+    faces: p.faces, exif: p.exif, uploaded_by: p.uploadedBy, source: p.source, quality: p.quality, created_at: p.capturedAt,
     review_status: p.reviewStatus ?? null, enhanced_from: null,
+    views: p.views, rotation: p.rotation, faces_indexed_at: p.status === 'ready' ? p.capturedAt : null,
   }))))
   stmts.push(...inserts('faces', photos.flatMap((p) => p.faces.map((f, k) => ({
     id: `${p.id}_f${k}`, photo_id: p.id, event_id: p.eventId, person_id: f.personId, box: f.box, vector_id: null,
@@ -135,7 +136,7 @@ export function buildSeedSql(opts: { photoCap?: number; reset?: boolean; seed?: 
   stmts.push(...inserts('prices', s.prices.map((p, i) => ({ studio_id: sid, id: p.id, label: p.label, detail: p.detail, price_paise: paise(p.price), sort_order: i }))))
   stmts.push(...inserts('cameras', s.cameras.map((c, i) => ({
     id: c.id, studio_id: sid, label: c.label, event_id: c.eventId, album_id: c.albumId, mode: c.mode, ftp_user: c.ftpUser, status: c.status,
-    today: c.today, last_file: c.lastFile ?? null, created_at: new Date(Date.parse(created) + i * 1000).toISOString(),
+    today: c.today, last_file: c.lastFile ?? null, last_upload_at: c.lastUploadAt ?? null, created_at: new Date(Date.parse(created) + i * 1000).toISOString(),
   }))))
   stmts.push(...inserts('smart_qrs', s.qrs.map((q, i) => ({
     id: q.id, studio_id: sid, name: q.name, slug: q.slug, event_id: q.eventId, target: q.target, scans: q.scans, color: q.color,
@@ -165,5 +166,13 @@ export function buildSeedSql(opts: { photoCap?: number; reset?: boolean; seed?: 
   stmts.push(...inserts('camera_uploads', s.cameraUploads.map((u) => ({
     id: u.id, camera_id: u.cameraId, filename: u.filename, at: u.at, size_bytes: u.sizeBytes, status: u.status, photo_id: u.photoId ?? null, error: u.error ?? null,
   }))))
+  // Daily counters behind studio stats: each event's totals on its event date (photos in the capped set).
+  stmts.push(...inserts('event_daily_stats', s.events.map((e) => {
+    const ps = photos.filter((p) => p.eventId === e.id)
+    return {
+      event_id: e.id, day: e.date.slice(0, 10), studio_id: sid, visits: e.visits.web + e.visits.android + e.visits.ios,
+      downloads: ps.reduce((n, p) => n + p.downloads, 0), face_searches: e.faceMatches, photo_views: ps.reduce((n, p) => n + p.views, 0),
+    }
+  })))
   return stmts
 }

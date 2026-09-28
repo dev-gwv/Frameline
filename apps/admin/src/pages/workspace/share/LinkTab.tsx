@@ -1,12 +1,16 @@
-import { useState } from 'react'
-import { Copy, Link2, Lock, Mail, MessageCircle, RefreshCw, Smartphone } from 'lucide-react'
-import type { AccessMode, EventSettings, PhotoEvent, Studio } from '@frameline/shared'
-import { Button, ConfirmDialog, Input, Segmented, Textarea, Toggle, useToast } from '@frameline/ui'
-import { useApi } from '../../../lib/api'
-import { useAction } from '../../../lib/queries'
+import { useState, type ReactNode } from 'react'
+import { ChevronRight, Copy, Eye, Link2, Mail, MessageCircle, RefreshCw } from 'lucide-react'
+import type { AccessMode, PhotoEvent, Studio } from '@frameline/shared'
+import { Button, ConfirmDialog, Field, Select, useToast } from '@frameline/ui'
+import { errorMessage, useApi } from '../../../lib/api'
 import { copyText, displayUrl, galleryLink } from '../lib'
-import { GuestPreview } from './GuestPreview'
 import { fillTemplate, loadTemplate, mailtoUrl, variableValues, whatsappUrl } from './message'
+
+export const ACCESS_LABEL: Record<AccessMode, string> = {
+  link: 'Anyone with the link',
+  'link-pin': 'Anyone with the link and PIN',
+  registered: 'Only guests you approve',
+}
 
 export function useCopy() {
   const toast = useToast()
@@ -17,91 +21,68 @@ export function useCopy() {
   }
 }
 
-export function useSettings(event: PhotoEvent) {
+/** Link tab: link + Copy link (gold), who can open it (same setting as event Settings), PIN, WhatsApp / Email / Open as a guest. */
+export function useLinkTab(event: PhotoEvent, studio: Studio | undefined, onSpecial: () => void): { body: ReactNode; footer?: ReactNode } {
   const api = useApi()
-  return useAction((patch: Partial<EventSettings>) => api.updateEventSettings(event.id, patch), { success: 'Saved' })
-}
-
-export function LinkTab({ event, studio }: { event: PhotoEvent; studio?: Studio }) {
-  const api = useApi()
+  const toast = useToast()
   const copy = useCopy()
-  const settings = useSettings(event)
   const [confirmPin, setConfirmPin] = useState(false)
-  const [showEmail, setShowEmail] = useState(false)
   const s = event.settings
   const link = galleryLink(event, s.shortLinks)
-  const resetPin = useAction(() => api.resetPin(event.id), { success: (pin) => `New PIN is ${pin}. The old one no longer works.` })
-
   const message = fillTemplate(loadTemplate(), variableValues(event, studio))
-  const subject = `Your photos from ${event.name}`
 
-  return (
-    <div className="grid md:grid-cols-[1fr_300px]">
-      <div className="flex min-w-0 flex-col gap-4 px-5 py-4 sm:px-6">
-        <div>
-          <div className="mb-1.5 text-[12px] font-bold text-ink-2">Gallery link</div>
-          <div className="flex gap-2">
-            <Input readOnly value={displayUrl(link)} aria-label="Gallery link" icon={<Link2 size={14} />} className="min-w-0 flex-1 font-mono"
-              onFocus={(e) => e.target.select()}
-              suffix={<label className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-3">Short link <Toggle size="sm" label="Short links" checked={s.shortLinks} onCheckedChange={(v) => settings.mutate({ shortLinks: v })} /></label>} />
-            <Button variant="primary" icon={<Copy size={14} />} onClick={() => copy(link)}>Copy</Button>
+  const setAccess = async (access: AccessMode) => {
+    const before = s.access
+    try {
+      await api.updateEventSettings(event.id, { access })
+      toast.undo(`${ACCESS_LABEL[access]} can open it now`, () => { api.updateEventSettings(event.id, { access: before }).catch((e) => toast.error('Couldn’t undo', errorMessage(e))) })
+    } catch (e) { toast.error('Couldn’t change who can open it', errorMessage(e)) }
+  }
+  const newPin = async () => {
+    try { const pin = await api.resetPin(event.id); toast.success(`New PIN is ${pin}`, 'The old PIN no longer works.') }
+    catch (e) { toast.error('Couldn’t make a new PIN', errorMessage(e)); throw e }
+  }
+
+  const body = (
+    <>
+      <Field label="Gallery link">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="flex h-[38px] min-w-0 flex-1 items-center gap-2 rounded-control border border-line-2 bg-surface px-3 text-[13.5px] max-sm:h-11">
+            <Link2 size={15} className="shrink-0 text-ink-3" /><span className="truncate" title={link}>{displayUrl(link)}</span>
           </div>
+          <Button variant="primary" icon={<Copy size={15} />} onClick={() => void copy(link)} className="max-sm:h-11">Copy link</Button>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" icon={<MessageCircle size={12} />} onClick={() => window.open(whatsappUrl(message), '_blank', 'noopener')}>WhatsApp</Button>
-          <Button size="sm" icon={<Mail size={12} />} aria-expanded={showEmail} onClick={() => setShowEmail((v) => !v)}>Email</Button>
-          <Button size="sm" icon={<Smartphone size={12} />} onClick={() => copy(event.shortId, 'App code')}>App link · code {event.shortId.toLowerCase()}</Button>
-        </div>
-        {showEmail && (
-          <div className="rounded-card border border-line bg-sunk p-3">
-            <div className="text-[12px] text-ink-2">Subject: <b className="text-ink">{subject}</b></div>
-            <Textarea readOnly value={message} className="mt-2 min-h-32 text-[12.5px]" aria-label="Email text" />
-            <div className="mt-2 flex flex-wrap justify-end gap-2">
-              <Button size="sm" icon={<Copy size={12} />} onClick={() => copy(message, 'Email text')}>Copy text</Button>
-              <Button size="sm" variant="dark" icon={<Mail size={12} />} onClick={() => { window.location.href = mailtoUrl(subject, message) }}>Open in email app</Button>
-            </div>
+      </Field>
+      <div className="grid gap-3 sm:grid-cols-[1fr_170px]">
+        <Field label="Who can open it" htmlFor="share-access" hint="Same setting as in the event’s Settings tab.">
+          <Select id="share-access" value={s.access} onChange={(e) => void setAccess(e.target.value as AccessMode)}>
+            {(Object.keys(ACCESS_LABEL) as AccessMode[]).map((k) => <option key={k} value={k}>{ACCESS_LABEL[k]}</option>)}
+          </Select>
+        </Field>
+        <Field label="PIN">
+          <div className="flex h-[38px] items-center gap-1 rounded-control border border-line-2 bg-surface pl-3 pr-1">
+            <b className="flex-1 text-[15px] tracking-[.2em] tnum">{s.pin}</b>
+            <button type="button" aria-label="Copy PIN" onClick={() => void copy(s.pin, 'PIN')} className="grid size-8 place-items-center rounded-md text-ink-2 hover:bg-sunk hover:text-ink"><Copy size={14} /></button>
           </div>
-        )}
-        <div>
-          <div className="mb-1.5 text-[12px] font-bold text-ink-2">Who can open it</div>
-          <div className="max-w-full overflow-x-auto scrollbar-thin">
-            <Segmented<AccessMode> value={s.access} onChange={(v) => settings.mutate({ access: v, requireRegistration: v === 'registered' ? true : s.requireRegistration })} options={[
-              { value: 'link', label: 'Anyone with the link' },
-              { value: 'link-pin', label: 'Link + PIN', icon: <Lock size={12} /> },
-              { value: 'registered', label: 'Registered guests' },
-            ]} />
-          </div>
-        </div>
-        <div className="rounded-card bg-sunk p-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="eyebrow">PIN</div>
-              <b className="font-mono text-[24px] tracking-[.22em]">{s.pin}</b>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" icon={<Copy size={12} />} onClick={() => copy(s.pin, 'PIN')}>Copy</Button>
-              <Button size="sm" icon={<RefreshCw size={12} />} loading={resetPin.isPending} onClick={() => setConfirmPin(true)}>New PIN</Button>
-            </div>
-          </div>
-          <div className="mt-1.5 text-[12px] text-ink-2">
-            {s.access === 'link-pin' ? 'Guests type it to open the gallery. ' : 'Guests don’t need it to open the gallery. '}
-            The PIN also unlocks <b className="text-ink">Download all</b> on the web (5 times per guest) and shows every photo when “only their photos” is on.
-          </div>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <b className="text-[13px]">Guests see only their own photos</b>
-            <div className="text-[12px] text-ink-2">A selfie unlocks their matches</div>
-          </div>
-          <Toggle label="Guests see only their own photos" checked={s.facePrivacy} onCheckedChange={(v) => settings.mutate({ facePrivacy: v })} />
-        </div>
+          <button type="button" onClick={() => setConfirmPin(true)} className="mt-1 inline-flex min-h-[28px] items-center gap-1 text-[12.5px] font-bold text-accent-text hover:underline"><RefreshCw size={12} />New PIN</button>
+        </Field>
       </div>
-      <div className="border-t border-line bg-sunk p-5 md:border-l md:border-t-0">
-        <GuestPreview event={event} studio={studio} />
+      <div className="flex flex-wrap gap-2">
+        <Button icon={<MessageCircle size={15} />} onClick={() => window.open(whatsappUrl(message), '_blank', 'noopener')}>Send on WhatsApp</Button>
+        <Button icon={<Mail size={15} />} onClick={() => { window.location.href = mailtoUrl(`Your photos from ${event.name}`, message) }}>Email</Button>
+        <Button variant="ghost" icon={<Eye size={15} />} onClick={() => window.open(link, '_blank', 'noopener')}>Open as a guest</Button>
       </div>
+      <button type="button" onClick={onSpecial} className="-mx-1 flex items-center gap-3 border-t border-line px-1 pt-3 text-left">
+        <span className="min-w-0 flex-1">
+          <b className="block text-[14px]">Special links</b>
+          <span className="text-[12.5px] text-ink-2">For one person, one album, or family who should skip the PIN</span>
+        </span>
+        <ChevronRight size={17} className="shrink-0 text-ink-3" />
+      </button>
       <ConfirmDialog open={confirmPin} onOpenChange={setConfirmPin} title="Make a new PIN?" confirmLabel="Make new PIN"
-        body={<>The current PIN <b className="font-mono text-ink">{s.pin}</b> stops working straight away. Guests who already opened the gallery stay signed in; anyone new needs the new PIN.</>}
-        onConfirm={() => resetPin.mutate(undefined)} />
-    </div>
+        body={<>PIN <b className="text-ink tnum">{s.pin}</b> stops working straight away, so links and messages you already sent with it won’t open. Guests already inside stay signed in.</>}
+        onConfirm={newPin} />
+    </>
   )
+  return { body }
 }

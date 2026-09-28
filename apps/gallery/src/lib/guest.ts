@@ -50,6 +50,8 @@ export interface EventSession {
   downloadsLeft?: number
   purchased: ID[]
   uploads: number
+  /** "Notify me" on a gallery with no photos yet: the number sent to api.requestNotify (cache of the server's request). */
+  notify?: string
 }
 
 export interface RecentEvent { shortId: string; name: string; date: string; city: string; tone: Tone; at: string }
@@ -72,11 +74,19 @@ function read(key: string): Partial<GuestState> | null {
   try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as Partial<GuestState>) : null } catch { return null }
 }
 
+/** Before contract v5 phone-only sign-ups stored a placeholder email; forget it. */
+const PLACEHOLDER_EMAIL = /@mobile\.frameline\.in$/i
+const realEmail = (e: string | undefined) => (e && !PLACEHOLDER_EMAIL.test(e) ? e : '')
+
 function load(): GuestState {
   const cur = read(KEY)
   if (cur && cur.events) {
-    const events = Object.fromEntries(Object.entries(cur.events).map(([k, v]) => [k, { ...emptySession(), ...v }]))
-    return { ...empty(), ...cur, events }
+    const events = Object.fromEntries(Object.entries(cur.events).map(([k, v]) => {
+      const s = { ...emptySession(), ...v }
+      if (s.registration) s.registration = { ...s.registration, email: realEmail(s.registration.email) }
+      return [k, s]
+    }))
+    return { ...empty(), ...cur, events, ...(cur.profile ? { profile: { ...cur.profile, email: realEmail(cur.profile.email) } } : {}) }
   }
   // Keep recent events and follows from the pre-API version; per-event sessions start fresh.
   const old = read(LEGACY_KEY)

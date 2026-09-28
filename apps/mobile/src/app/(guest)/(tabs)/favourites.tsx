@@ -30,11 +30,12 @@ export default function Favourites() {
 
   const sync = registered.map((j) => <ServerFavourites key={j.eventId} shortId={j.shortId} />)
   if (!groups.length) {
-    return <Screen>{sync}<EmptyState icon="heart" title="No favourites yet" body="Tap the heart on any photo to keep it here. The studio sees your picks too." action="Go to my events" onAction={() => router.navigate('/events')} /></Screen>
+    return <Screen>{sync}<EmptyState icon="heart" title="No favourites yet" body="Tap the heart on any photo to keep it here. The photographer can see your favourites, so use them to say which ones you love." action="Go to my events" onAction={() => router.navigate('/events')} /></Screen>
   }
   return (
     <Screen>
       {sync}
+      <Txt v="small">The photographer can see your favourites. Use them to tell them which ones you love.</Txt>
       {groups.map(([eventId, g]) => <FavGroup key={eventId} eventId={eventId} shortId={g.shortId} photos={g.photos} />)}
       <Txt v="small" center color={c.ink3}>Register in a gallery to keep favourites across your devices.</Txt>
     </Screen>

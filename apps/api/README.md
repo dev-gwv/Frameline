@@ -63,7 +63,7 @@ Seeded users: `aarav@northlight.in` (owner), `meera@northlight.in` (editor), `ku
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | secrets | Google sign-in (501 `not_configured` without them). Redirect URI: `{API_PUBLIC_URL}/v1/auth/google/callback` |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | secrets | direct-to-R2 presigned part uploads. Without them uploads use the Worker proxy |
 | `PROCESSOR_URL`, `PROCESSOR_TOKEN` | secrets | real image/face processing (simulated without them) |
-| `RAZORPAY_*` | secrets | reserved for checkout/payouts (not used by v1 routes yet) |
+| `RAZORPAY_*` | secrets | guest checkout, payment webhooks and refunds (`POST /v1/orders/:id/refund`, simulated without keys) |
 | `CORS_ORIGINS` | var | comma-separated allowlist (admin 5173, gallery 5174, Expo web 8081/19006) |
 | `APP_URL`, `GALLERY_URL`, `API_PUBLIC_URL`, `PUBLIC_MEDIA_BASE` | vars | links in emails, OAuth redirects, presigned proxy URLs, CDN base for media |
 | `VECTORIZE_REMOTE` | var | set `1` in dev only when Vectorize runs as a remote binding |
@@ -176,36 +176,43 @@ applied. The Workers binding only supports 10 s or 60 s periods, so longer windo
 - **Auth:** `POST /v1/auth/otp/request|otp/verify|password/login|password|password/reset|refresh|logout`, `GET /v1/auth/google/start|callback`
 - **Account:** `GET|PATCH /v1/me`, `GET|PUT /v1/me/notifications`
 - **Studio:** `GET|PATCH /v1/studio` (profile incl. services, testimonials, FAQ, social links, app config), `GET /v1/studio/usage`,
-  `GET /v1/studio/usage/breakdown`, `POST|GET /v1/studio/usage/report`, `GET|PATCH /v1/watermark`, `GET|PATCH /v1/website`
+  `GET /v1/studio/usage/breakdown`, `POST|GET /v1/studio/usage/report`, `GET|PATCH /v1/watermark`, `GET|PATCH /v1/website`,
+  `GET /v1/studio/handle-check?handle=` (gallery address: `invalid` / `reserved` / `taken` / `yours`), `GET /v1/studio/stats?month=YYYY-MM` (editor+)
 - **Billing (owner):** `POST /v1/studio/credits`, `POST /v1/studio/credits/spend` (editor+), `POST /v1/studio/coupons`,
-  `POST /v1/studio/plan`, `PUT /v1/studio/renewal-multiplier`, `GET /v1/purchases`
+  `POST /v1/studio/plan` (`{ planId, billing, payWith: wallet|card|upi }`: GST and the wallet debit happen server-side),
+  `PUT /v1/studio/renewal-multiplier`, `GET /v1/purchases`
 - **Team (owner):** `GET /v1/team` (editor+), `POST /v1/team/invites`, `PATCH|DELETE /v1/team/:id`
 - **Events:** `GET|POST /v1/events`, `GET|PATCH|DELETE /v1/events/:id`, `PATCH /v1/events/:id/settings`,
   `POST /v1/events/:id/pin/reset`, `PUT /v1/events/:id/cover`, `POST /v1/events/:id/renew` (owner),
   `POST /v1/events/:id/renewal-link`, `POST /v1/events/:id/guest-links`, `POST /v1/events/:id/packs` (owner),
-  `GET /v1/trash/events`, `POST /v1/events/:id/restore` (`DELETE /v1/events/:id` moves to the trash)
+  `GET /v1/trash/events`, `POST /v1/events/:id/restore` (`DELETE /v1/events/:id` moves to the trash;
+  `DELETE /v1/events/:id?permanent=true` deletes a trashed event for good), `GET /v1/events/:id/stats`
 - **Albums:** `GET|POST /v1/events/:id/albums`, `PUT /v1/events/:id/albums/order`, `PATCH|DELETE /v1/albums/:id`
+  (DELETE trashes the album and its photos), `POST /v1/albums/:id/restore`
 - **Photos:** `GET /v1/events/:id/photos`, `GET /v1/events/:id/photo-ids`, `GET /v1/photos/:id`, `PATCH /v1/photos`,
-  `POST /v1/photos/bulk-delete`, `POST /v1/photos/copy`, `POST /v1/photos/review`, `POST /v1/photos/:id/enhance`,
+  `POST /v1/photos/bulk-delete` (to the trash), `POST /v1/photos/restore`, `POST /v1/photos/rotate`, `POST /v1/photos/copy`,
+  `POST /v1/photos/review` (`approved` / `rejected` / `pending`), `POST /v1/photos/:id/enhance`, `sort=newest` on lists and ids,
   `POST /v1/events/:id/faces/reindex`, `POST /v1/events/:id/faces/match`, `GET|POST /v1/events/:id/zips`
 - **Uploads:** `POST /v1/events/:id/uploads` (options: `source`, `uploadedBy`, `watermark`, `fast`),
   `PUT /v1/uploads/:uploadId/files/:photoId/parts/:n`, `POST /v1/events/:id/uploads/:uploadId/complete`, `GET /v1/media/*`
 - **People/films/guests:** `GET /v1/events/:id/people`, `GET|POST /v1/events/:id/films`, `PATCH|DELETE /v1/films/:id`,
-  `GET /v1/events/:id/guests`, `GET /v1/events/:id/access-requests`, `POST /v1/access-requests/:id/resolve`
+  `GET /v1/events/:id/guests`, `GET /v1/events/:id/access-requests`, `POST /v1/access-requests/:id/resolve`,
+  `POST /v1/access-requests/:id/reopen` (undo), `DELETE /v1/guests/:id` (remove access), `POST /v1/guests/:id/restore`
 - **Business:** `GET /v1/activity`, `GET /v1/orders`, `GET /v1/ledger`, `GET|PUT /v1/prices`, `GET|PATCH /v1/store/settings`,
-  `POST /v1/payouts`, `GET /v1/carts`, `POST /v1/carts/remind`
+  `POST /v1/store/payout/verify`, `POST /v1/payouts`, `PATCH /v1/orders/:id` (tracking number), `POST /v1/orders/:id/resend-link`,
+  `POST /v1/orders/:id/refund`, `GET /v1/wallet`, `GET /v1/needs-you`, `GET /v1/carts`, `POST /v1/carts/remind`
 - **Assets:** `POST /v1/assets?kind=&filename=` (raw body)
 - **Webhooks:** `POST /v1/webhooks/razorpay`
 - **Tools:** `GET|POST /v1/cameras`, `PATCH|DELETE /v1/cameras/:id`, `POST /v1/cameras/:id/password`,
-  `GET|DELETE /v1/cameras/:id/uploads`, `GET|POST /v1/qrs`, `PATCH|DELETE /v1/qrs/:id`, `GET|POST /v1/broadcasts`,
-  `POST /v1/broadcasts/:id/cancel`, `DELETE /v1/broadcasts/:id`, `GET|POST /v1/tickets`, `POST /v1/tickets/:id/messages`,
+  `GET|DELETE /v1/cameras/:id/uploads`, `GET|POST /v1/qrs`, `PATCH|DELETE /v1/qrs/:id`, `POST /v1/qrs/:id/restore`, `GET|POST /v1/broadcasts`,
+  `POST /v1/broadcasts/:id/cancel`, `DELETE /v1/broadcasts/:id`, `POST /v1/broadcasts/:id/restore`, `GET|POST /v1/tickets`, `POST /v1/tickets/:id/messages`,
   `GET /v1/enquiries`, `PATCH /v1/enquiries/:id`
 - **Realtime:** `GET /v1/realtime` (WebSocket)
 - **Public (guest):** `GET /v1/public/events/:shortId`, then under `/v1/public/events/:shortId/`: `POST pin`, `POST register`,
   `GET prices`, `GET watermark`, `GET albums`, `GET photos`, `POST faces/search`, `POST download-pin`, `POST zips`,
   `POST uploads` + `POST uploads/:uploadId/complete`, `GET me/favourites`, `GET me/orders`, `POST enquiries`, `POST orders`,
-  `POST access-requests`. Also `POST /v1/public/photos/:id/favourite`, `GET /v1/public/photos/:id/download`,
-  `POST /v1/public/downloads`, `POST /v1/public/orders/:id/confirm`, `GET /v1/public/studios/:code`,
+  `POST access-requests`, `POST notify` + `POST notify/cancel` ("Notify me"). Also `POST /v1/public/photos/:id/favourite`,
+  `GET /v1/public/photos/:id/download`, `POST /v1/public/downloads`, `POST /v1/public/views`, `POST /v1/public/orders/:id/confirm`, `GET /v1/public/studios/:code`,
   `POST|DELETE /v1/public/studios/:code/follow`, `POST /v1/public/studios/:code/enquiries`, `GET /v1/public/me/follows`,
   `GET /v1/public/me/galleries`, `GET /v1/public/links/:code`, `GET /v1/public/zips/:id`
 
@@ -263,7 +270,10 @@ applied. The Workers binding only supports 10 s or 60 s periods, so longer windo
 
 - `* * * * *`: due Smart QR schedules switch the QR's event and clear the schedule. Due scheduled broadcasts get
   `sentAt` (push/email delivery is TODO). Affected studios get a `misc` change event.
-- `0 3 * * *`: events in the trash for more than 30 days are purged: rows, cameras, QR codes, R2 files and face vectors.
+- `* * * * *` also sends waiting "Notify me" requests once their gallery has visible photos (the queue consumer does the
+  same the moment an event goes live). Scheduled broadcasts in the trash are not sent.
+- `0 3 * * *`: everything in the trash for more than 30 days (`TRASH_DAYS`) is purged: events (rows, cameras, QR codes,
+  R2 files and face vectors), albums and photos (rows, unshared R2 files, face vectors), QR codes and broadcasts.
 - To run them locally: `wrangler dev --test-scheduled`, then `curl "http://127.0.0.1:8787/__scheduled?cron=*+*+*+*+*"`.
 
 ## Assets
@@ -303,11 +313,31 @@ Everything is stored in paise and returned in rupees.
 - **Plan changes:** the unused part of the current period is credited against the new plan's price
   (`planPrice`, `PERIOD_DAYS` in `@frameline/shared`).
 
+## Contract v5 (migration `0004_contract_v5.sql`)
+
+- **Trash:** photos, albums, QR codes and broadcasts are soft-deleted (`deleted_at`) and excluded from every read (lists,
+  counts, galleries, face search, ZIPs, usage, Needs you). Restore endpoints undo it; the daily cron purges after 30 days.
+- **Stats:** `event_daily_stats` holds per-event daily counters (gallery visits, downloads, successful face searches,
+  photo views) for `GET /v1/studio/stats`; photos delivered come from photo `created_at`, sales from paid INR orders.
+  Face finding progress on `GET /v1/events/:id/stats` uses `photos.faces_indexed_at` (set by the processor, cleared by a
+  re-index).
+- **Guests:** `registerGuest` takes an email or a phone; returning guests match by email, else the last 10 phone digits.
+  Removed guests (`guests.removed_at`) get 403 `guest_removed`. `notify_requests` backs "Notify me".
+- **Hosts:** `EventHost.access` (`full` / `upload`) and `status` (`invited` → `accepted` when they sign up in the gallery
+  with that email/phone); new hosts get an invite (email, or a logged SMS/WhatsApp line).
+- **Selling:** `EventSettings.priceOverrides` apply to guest prices and orders; `forSaleWatermark` + store on puts the
+  studio's sale watermark in `GET …/watermark` (`sale`). Orders carry `trackingNumber` / `linkSentAt`.
+- **Face search:** `faces: 0` or a selfie under 64 px answers `faceFound: false, reason: no_face`.
+
 ## Simulated or TODO
 
 - **Payments:** card capture for plans, renewals and credits, and the Razorpay webhook, are not wired up. Payouts are
-  a ledger line only; the bank transfer through Razorpay X is TODO. Payout accounts are "verified" when the IFSC and
-  account number are well-formed; there is no real penny-drop check.
+  a ledger line only; the bank transfer through Razorpay X is TODO. The ₹1 account check is `simulatePayoutCheck` from
+  `@frameline/shared` (deterministic: holder vs KYC legal name → `verified` / `name_mismatch` with the bank's name;
+  accounts ending 0000 → `failed`) until a payout provider's fund-account validation is wired.
+- **Guest messages:** "Notify me", host invites without an email and download-link emails in dev are log lines
+  (`guest notify (simulated …)`); there's no SMS/WhatsApp provider yet.
+- **QR short links:** there is no public short-link redirect route yet; trashed QR codes are excluded from lists.
 - **ZIPs:** the queue marks a ZIP ready and emails a link to a download manifest (`/v1/public/zips/:id`). Building a
   real ZIP in the Container is TODO.
 - **Processing:** AI enhance, face re-index and watermark burn-in are sent to the processor as flags on the queue job.

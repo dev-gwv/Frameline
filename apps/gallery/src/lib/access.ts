@@ -9,8 +9,8 @@ import { authValid, type EventSession } from './guest'
 
 /** "Download all" uses per guest (counted by the API: api.verifyDownloadPin). */
 export const MAX_DOWNLOAD_ALL = DOWNLOAD_ALL_LIMIT
-/** Bigger batches are offered as an emailed ZIP instead of one-by-one downloads. */
-export const DIRECT_DOWNLOAD_LIMIT = 12
+/** Fewer than 10 photos download straight away; bigger batches offer an emailed ZIP (the default) or one by one. */
+export const DIRECT_DOWNLOAD_LIMIT = 9
 
 export const needsPin = (e: PublicEvent, s: EventSession) => e.settings.access === 'link-pin' && !(s.pin && authValid(s))
 

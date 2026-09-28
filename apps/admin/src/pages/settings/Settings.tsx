@@ -1,36 +1,38 @@
-import { Navigate, useNavigate, useParams } from 'react-router-dom'
-import { PageHeader, TabBar } from '@frameline/ui'
+import { Navigate, useParams } from 'react-router-dom'
+import { Page } from '@frameline/ui'
 import { BillingTab } from './BillingTab'
+import { InvoicesTab } from './InvoicesTab'
 import { NotificationsTab } from './NotificationsTab'
 import { ProfileTab } from './ProfileTab'
 import { SecurityTab } from './SecurityTab'
+import { SideList } from './SideList'
 import { TeamTab } from './TeamTab'
 
-type Tab = 'profile' | 'team' | 'notifications' | 'billing' | 'security'
-const TABS: { value: Tab; label: string }[] = [
-  { value: 'profile', label: 'Studio profile' },
-  { value: 'team', label: 'Team' },
-  { value: 'notifications', label: 'Notifications' },
-  { value: 'billing', label: 'Billing & GST' },
-  { value: 'security', label: 'Security' },
+type Tab = 'profile' | 'team' | 'notifications' | 'billing' | 'invoices' | 'security'
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'profile', label: 'Studio profile' },
+  { id: 'team', label: 'Team' },
+  { id: 'notifications', label: 'Notifications' },
+  { id: 'billing', label: 'Billing and GST' },
+  { id: 'invoices', label: 'Invoices' },
+  { id: 'security', label: 'Security' },
 ]
 
+/** /settings/:tab — account settings as a left-list page (same pattern as Selling settings). */
 export default function Settings() {
   const { tab: param } = useParams()
-  const navigate = useNavigate()
-  if (param && !TABS.some((t) => t.value === param)) return <Navigate to="/settings/team" replace />
-  const tab = (param ?? 'team') as Tab
+  if (param && !TABS.some((t) => t.id === param)) return <Navigate to="/settings/profile" replace />
+  const tab = (param ?? 'profile') as Tab
   return (
-    <div className="pb-10">
-      <PageHeader title="Settings" subtitle="Your studio, team, notifications, billing and sign-in." />
-      <div className="flex flex-col gap-4 px-4 sm:px-7">
-        <TabBar value={tab} onChange={(t) => navigate(`/settings/${t}`, { replace: true })} tabs={TABS} />
+    <Page title="Settings">
+      <SideList label="Settings" value={tab} items={TABS.map((t) => ({ id: t.id, label: t.label, to: `/settings/${t.id}` }))}>
         {tab === 'profile' && <ProfileTab />}
         {tab === 'team' && <TeamTab />}
         {tab === 'notifications' && <NotificationsTab />}
         {tab === 'billing' && <BillingTab />}
+        {tab === 'invoices' && <InvoicesTab />}
         {tab === 'security' && <SecurityTab />}
-      </div>
-    </div>
+      </SideList>
+    </Page>
   )
 }

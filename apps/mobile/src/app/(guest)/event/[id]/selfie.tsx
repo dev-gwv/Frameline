@@ -1,47 +1,50 @@
 import { useEffect, useState } from 'react'
 import { Animated, Easing, Linking, StyleSheet, View, useAnimatedValue } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as ImagePicker from 'expo-image-picker'
 import * as Haptics from 'expo-haptics'
 import { Image } from 'expo-image'
-import { LinearGradient } from 'expo-linear-gradient'
 import { useQueryClient } from '@tanstack/react-query'
-import { fmt } from '@frameline/shared'
-import { Button, Card, Icon, Meter, Screen, Txt } from '@/components'
+import { fmt, gold, palette } from '@frameline/shared'
+import { Button, Icon, IconButton, Screen, SoftCard, Txt } from '@/components'
 import { friendlyError } from '@/lib/errors'
 import { actions } from '@/lib/local'
 import { usePublicEvent } from '@/lib/queries'
 import { useApi } from '@/lib/api'
 import { toast } from '@/lib/toast'
-import { goldGradient, useTheme } from '@/theme'
+import { font, useTheme } from '@/theme'
 
-type Picked = { uri: string; name: string; size: number }
-type Phase = { k: 'intro'; denied?: boolean } | { k: 'matching'; pic: Picked } | { k: 'found'; n: number }
+type Picked = { uri: string; name: string; size: number; width?: number; height?: number }
+type Phase = { k: 'intro'; denied?: boolean; noFace?: boolean } | { k: 'confirm'; pic: Picked } | { k: 'matching'; pic: Picked }
 
-const picked = (a: ImagePicker.ImagePickerAsset): Picked => ({ uri: a.uri, name: a.fileName ?? a.uri.split('/').pop() ?? 'selfie.jpg', size: a.fileSize ?? a.width * a.height })
+const picked = (a: ImagePicker.ImagePickerAsset): Picked => ({ uri: a.uri, name: a.fileName ?? a.uri.split('/').pop() ?? 'selfie.jpg', size: a.fileSize ?? a.width * a.height, width: a.width, height: a.height })
+const D = palette.dark
 
+/**
+ * Selfie flow (g-home / g-mine): tips (when opened directly), "Use this selfie?", then "Finding your photos…".
+ * The match is saved and we go back: the event opens on My photos (with the result, or "We couldn't find you yet").
+ */
 export default function Selfie() {
   const { c } = useTheme()
-  const { id: shortId } = useLocalSearchParams<{ id: string }>()
-  const { data: event } = usePublicEvent(shortId)
-  const studio = event?.studio
+  const insets = useSafeAreaInsets()
+  const params = useLocalSearchParams<{ id: string; uri?: string; name?: string; size?: string; w?: string; h?: string }>()
+  const { data: event } = usePublicEvent(params.id)
   const qc = useQueryClient()
   const api = useApi()
-  const [phase, setPhase] = useState<Phase>({ k: 'intro' })
+  const [phase, setPhase] = useState<Phase>(params.uri ? { k: 'confirm', pic: { uri: params.uri, name: params.name ?? 'selfie.jpg', size: Number(params.size) || 1, width: Number(params.w) || undefined, height: Number(params.h) || undefined } } : { k: 'intro' })
 
   const take = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync()
     if (!perm.granted) { setPhase({ k: 'intro', denied: true }); return }
     try {
       const res = await ImagePicker.launchCameraAsync({ cameraType: ImagePicker.CameraType.front, mediaTypes: ['images'], quality: 0.6, allowsEditing: false })
-      if (!res.canceled && res.assets[0]) setPhase({ k: 'matching', pic: picked(res.assets[0]) })
-    } catch {
-      toast.error('The camera isn’t available', 'Choose a photo of yourself from your gallery instead')
-    }
+      if (!res.canceled && res.assets[0]) setPhase({ k: 'confirm', pic: picked(res.assets[0]) })
+    } catch { toast.error('The camera isn’t available', 'Choose a photo of yourself instead') }
   }
   const pick = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.6, selectionLimit: 1 })
-    if (!res.canceled && res.assets[0]) setPhase({ k: 'matching', pic: picked(res.assets[0]) })
+    if (!res.canceled && res.assets[0]) setPhase({ k: 'confirm', pic: picked(res.assets[0]) })
   }
 
   // searchFaces with a stable key for the selfie (`${event.id}:${name}:${size}`); the animation runs at least 1.8 s.
@@ -52,17 +55,23 @@ export default function Selfie() {
     ;(async () => {
       const key = `${event.id}:${pic.name}:${pic.size}`
       try {
-        const [match] = await Promise.all([api.searchFaces(event.shortId, { key }), new Promise((r) => setTimeout(r, 1800))])
+        const [match] = await Promise.all([api.searchFaces(event.shortId, { key, image: pic.width && pic.height ? { width: pic.width, height: pic.height } : undefined }), new Promise((r) => setTimeout(r, 1800))])
         if (!alive) return
+        if (match.faceFound === false) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {})
+          setPhase({ k: 'intro', noFace: true })
+          return
+        }
         actions.saveSelfie(event.id, { uri: pic.uri, key, personId: match.personId, photoIds: match.photoIds })
         qc.invalidateQueries({ queryKey: ['my-photos', event.shortId.toUpperCase()] })
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {})
-        setPhase({ k: 'found', n: match.photoIds.length })
+        Haptics.notificationAsync(match.photoIds.length ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning).catch(() => {})
+        if (router.canGoBack()) router.back()
+        else router.replace({ pathname: '/event/[id]', params: { id: event.shortId, tab: 'mine' } })
       } catch (e) {
         if (!alive) return
         const f = friendlyError(e)
         toast.error(f.title, f.detail)
-        setPhase({ k: 'intro' })
+        setPhase({ k: 'confirm', pic })
       }
     })()
     return () => { alive = false }
@@ -72,79 +81,77 @@ export default function Selfie() {
 
   if (phase.k === 'matching') return <Matching uri={phase.pic.uri} total={event.photoCount} />
 
-  if (phase.k === 'found') {
+  if (phase.k === 'confirm') {
     return (
-      <Screen contentStyle={{ alignItems: 'center', paddingTop: 60, gap: 14 }}>
-        <View style={[styles.badge, { backgroundColor: c.accentSoft }]}><Icon name="check" size={34} color={c.accentText} /></View>
-        <Txt v="h1" center>{phase.n ? `We found you in ${phase.n} photos` : 'We couldn’t find you yet'}</Txt>
-        <Txt v="small" center>{phase.n ? `From ${event.name}. Favourite the ones you love — ${studio?.name ?? 'the studio'} sees your picks.` : 'The studio may still be adding photos. Try again later, or with a clearer selfie.'}</Txt>
-        {phase.n
-          ? <Button label="See your photos" variant="primary" size="lg" full style={{ marginTop: 12 }} onPress={() => { router.back(); router.push({ pathname: '/event/[id]/photos', params: { id: event.shortId, scope: 'mine' } }) }} />
-          : <Button label="Try another selfie" variant="primary" size="lg" full style={{ marginTop: 12 }} onPress={() => setPhase({ k: 'intro' })} />}
-      </Screen>
+      <View style={{ flex: 1, backgroundColor: D.paper, alignItems: 'center', justifyContent: 'center', paddingBottom: insets.bottom + 24 }}>
+        <Txt style={{ color: D.ink, fontFamily: font.bodyHeavy, fontSize: 18, marginBottom: 20 }}>Use this selfie?</Txt>
+        <Image source={{ uri: phase.pic.uri }} style={{ width: 210, height: 270, borderRadius: 135, borderWidth: 3, borderColor: gold.stops[1] }} contentFit="cover" />
+        <View style={{ position: 'absolute', left: 16, right: 16, bottom: insets.bottom + 20, gap: 10 }}>
+          <Button label="Find my photos" variant="primary" size="lg" onPress={() => setPhase({ k: 'matching', pic: phase.pic })} />
+          <Button label="Retake" variant="dark" onPress={() => setPhase({ k: 'intro' })} />
+        </View>
+      </View>
     )
   }
 
   return (
-    <Screen contentStyle={{ gap: 18 }}>
-      <View style={{ alignItems: 'center', gap: 10, paddingTop: 12 }}>
-        <View style={[styles.frame, { borderColor: c.line2, backgroundColor: c.sunk }]}>
-          <Icon name="smile" size={64} color={c.ink3} />
-        </View>
-        <Txt v="h2" center>Find your photos with a selfie</Txt>
-        <Txt v="small" center style={{ maxWidth: 320 }}>We compare your face with {fmt.count(event.photoCount)} photos from {event.name} and show you only the ones you’re in.</Txt>
+    <Screen top contentStyle={{ gap: 16 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: -8 }}><IconButton icon="x" label="Close" tone="soft" onPress={() => router.back()} /></View>
+      <View style={{ alignItems: 'center', gap: 8 }}>
+        <View style={[styles.frame, { borderColor: c.line2, backgroundColor: c.sunk }]}><Icon name="face" size={60} color={c.ink3} /></View>
+        <Txt v="h3" center style={{ fontSize: 19 }}>Find your photos with a selfie</Txt>
+        <Txt v="small" center style={{ maxWidth: 320 }}>We look through {fmt.count(event.photoCount)} photos from {event.name} and show only the ones you’re in.</Txt>
       </View>
-      <Card style={{ gap: 10 }}>
-        {['Hold your phone at eye level, face the camera', 'Find good light; take off sunglasses', 'Just you in the frame'].map((t, i) => (
+      <View style={{ gap: 10 }}>
+        {['Face the camera in good light', 'Take off sunglasses', 'Only used to find you in this event'].map((t) => (
           <View key={t} style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-            <View style={[styles.step, { backgroundColor: c.accentSoft }]}><Txt v="mono" color={c.accentText} style={{ fontSize: 12 }}>{i + 1}</Txt></View>
-            <Txt style={{ flex: 1 }}>{t}</Txt>
+            <Icon name="check" size={16} color={c.ok} />
+            <Txt>{t}</Txt>
           </View>
         ))}
-      </Card>
+      </View>
+      {phase.noFace ? (
+        <SoftCard style={{ gap: 4 }}>
+          <Txt weight="bold">We couldn’t see a face — try another photo</Txt>
+          <Txt v="small">Face the camera in good light, close enough that your face fills the circle.</Txt>
+        </SoftCard>
+      ) : null}
       {phase.denied ? (
-        <Card style={{ gap: 10, backgroundColor: c.warnSoft, borderColor: 'transparent' }}>
+        <SoftCard style={{ gap: 8 }}>
           <Txt weight="bold">Camera access is off</Txt>
-          <Txt v="small">Allow the camera in Settings, or choose a clear photo of yourself from your gallery.</Txt>
+          <Txt v="small">Allow the camera in Settings, or choose a clear photo of yourself.</Txt>
           <Button label="Open Settings" size="sm" onPress={() => Linking.openSettings()} />
-        </Card>
+        </SoftCard>
       ) : null}
       <Button label="Take a selfie" icon="camera" variant="primary" size="lg" onPress={take} />
-      <Button label="Choose a photo from my gallery" icon="image" onPress={pick} />
-      <Txt v="small" center color={c.ink2}>Your selfie is only used to match you and is deleted after 30 days.</Txt>
+      <Button label="Choose a photo" icon="image" onPress={pick} />
     </Screen>
   )
 }
 
 function Matching({ uri, total }: { uri: string; total: number }) {
   const { c } = useTheme()
-  const spin = useAnimatedValue(0)
-  const [scanned, setScanned] = useState(0)
+  const pulse = useAnimatedValue(0)
   useEffect(() => {
-    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: 1400, easing: Easing.linear, useNativeDriver: true }))
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+    ]))
     loop.start()
-    const started = Date.now()
-    const t = setInterval(() => setScanned(Math.min(total, Math.round(((Date.now() - started) / 2500) * total))), 80)
-    return () => { loop.stop(); clearInterval(t) }
-  }, [spin, total])
-  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] })
+    return () => loop.stop()
+  }, [pulse])
+  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] })
   return (
-    <View style={{ flex: 1, backgroundColor: c.paper, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 20 }} accessibilityLiveRegion="polite">
-      <View style={{ width: 200, height: 200, alignItems: 'center', justifyContent: 'center' }}>
-        <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ rotate }] }]}>
-          <LinearGradient {...goldGradient} colors={[goldGradient.colors[0], 'transparent', goldGradient.colors[2]]} locations={[0, 0.5, 1]} style={{ flex: 1, borderRadius: 100 }} />
-        </Animated.View>
-        <Image source={{ uri }} style={{ width: 184, height: 184, borderRadius: 92, borderWidth: 4, borderColor: c.paper }} contentFit="cover" />
-      </View>
-      <Txt v="h2" center>Finding you…</Txt>
-      <Txt v="small" center>Looking through <Txt v="mono">{fmt.count(scanned)}</Txt> of <Txt v="mono">{fmt.count(total)}</Txt> photos</Txt>
-      <View style={{ alignSelf: 'stretch' }}><Meter value={scanned} max={total} /></View>
+    <View style={{ flex: 1, backgroundColor: c.paper, alignItems: 'center', justifyContent: 'center', padding: 30, gap: 6 }} accessibilityLiveRegion="polite">
+      <Animated.View style={{ transform: [{ scale }], marginBottom: 18, borderRadius: 70, padding: 6, backgroundColor: c.accentSoft, borderWidth: 1, borderColor: c.accent }}>
+        <Image source={{ uri }} style={{ width: 120, height: 120, borderRadius: 60 }} contentFit="cover" />
+      </Animated.View>
+      <Txt weight="heavy" style={{ fontSize: 17 }}>Finding your photos…</Txt>
+      <Txt v="small">Looking through {fmt.count(total)} photos</Txt>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  frame: { width: 150, height: 150, borderRadius: 75, borderWidth: 2, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
-  step: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  badge: { width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center' },
+  frame: { width: 130, height: 130, borderRadius: 65, borderWidth: 2, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
 })

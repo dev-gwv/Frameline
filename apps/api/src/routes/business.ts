@@ -1,24 +1,26 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm'
+import { NEEDS_YOU_EXPIRY_DAYS, buildNeedsYou, simulatePayoutCheck, type PayoutCheck as PayoutCheckT } from '@frameline/shared'
 import { getMailer } from '../services/mailer'
 import { getDb, schema } from '../db/client'
 import {
   activityOut, broadcastOut, cameraOut, cameraUploadOut, enquiryOut, ledgerOut, orderOut, priceOut, qrOut, storeSettingsOut, ticketOut,
 } from '../db/mappers'
-import { Conflict, NotFound, ValidationFailed } from '../lib/errors'
+import { Conflict, NotFound, ServiceUnavailable, ValidationFailed } from '../lib/errors'
 import { hashPassword, randomInt } from '../lib/crypto'
 import { toMajor, toMinor } from '../lib/money'
-import { addLedger, payoutBalance } from '../services/billing'
+import { addLedger, payoutBalance, walletOf } from '../services/billing'
 import { newId, nowIso } from '../lib/ids'
 import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, problems, security } from '../lib/openapi'
 import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
 import { membershipOf, requireStudio } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
 import {
-  AbandonedCart, ActivityItem, Broadcast, Camera, CameraMode, CameraUpload, Enquiry, LedgerEntry, Order, Price, SmartQR, StoreSettings, StoreSettingsPatch, Ticket, TicketPlatform,
+  AbandonedCart, ActivityItem, Broadcast, Camera, CameraMode, CameraUpload, Enquiry, LedgerEntry, NeedsYouItem, Order, PayoutCheck, Price, WalletBalance, SmartQR, StoreSettings, StoreSettingsPatch, StudioStats, Ticket, TicketPlatform,
 } from '../schemas/domain'
 import { audit } from '../services/audit'
 import { eventForMember } from '../services/events'
+import { AppError } from '../lib/errors'
 import { emit } from '../services/realtime'
 
 export const businessRoutes = createRouter()
@@ -117,7 +119,7 @@ businessRoutes.openapi(createRoute({
     ftpUser = `${base}_${i}`
   }
   const password = cameraPassword()
-  const cam = { id: newId('cam'), studioId: m.studioId, label: input.label, eventId: ev.id, albumId: album.id, mode: input.mode, ftpUser, status: 'offline' as const, today: 0, lastFile: null, createdAt: nowIso(), passwordHash: await hashPassword(password) }
+  const cam = { id: newId('cam'), studioId: m.studioId, label: input.label, eventId: ev.id, albumId: album.id, mode: input.mode, ftpUser, status: 'offline' as const, today: 0, lastFile: null, createdAt: nowIso(), passwordHash: await hashPassword(password), lastUploadAt: null }
   await db.insert(schema.cameras).values(cam).run()
   audit(c, 'camera.create', { type: 'camera', id: cam.id })
   emit(c, m.studioId, 'misc')
@@ -134,7 +136,7 @@ businessRoutes.openapi(createRoute({
   const m = membershipOf(c)
   const { limit, cursor } = c.req.valid('query')
   const t = schema.smartQrs
-  const rows = await getDb(c.env.DB).select().from(t).where(and(eq(t.studioId, m.studioId), afterCursor(t.createdAt, t.id, 'asc', cursor)))
+  const rows = await getDb(c.env.DB).select().from(t).where(and(eq(t.studioId, m.studioId), isNull(t.deletedAt), afterCursor(t.createdAt, t.id, 'asc', cursor)))
     .orderBy(asc(t.createdAt), asc(t.id)).limit(limit + 1)
   return c.json(toPage(rows, limit, (r) => [r.createdAt, r.id], qrOut), 200)
 })
@@ -158,7 +160,7 @@ businessRoutes.openapi(createRoute({
     if (!taken) break
     slug = `${base}-${i}`
   }
-  const qr = { id: newId('qr'), studioId: m.studioId, name, slug, eventId: ev.id, target: 'web' as const, scans: 0, color: '#1B1712', createdAt: nowIso(), scheduledEventId: null, scheduledAt: null, dotStyle: null, logoUrl: null }
+  const qr = { id: newId('qr'), studioId: m.studioId, name, slug, eventId: ev.id, target: 'web' as const, scans: 0, color: '#1B1712', createdAt: nowIso(), scheduledEventId: null, scheduledAt: null, dotStyle: null, logoUrl: null, deletedAt: null }
   await db.insert(schema.smartQrs).values(qr).run()
   emit(c, m.studioId, 'misc')
   return c.json(qrOut(qr), 201)
@@ -213,7 +215,7 @@ businessRoutes.openapi(createRoute({
   const m = membershipOf(c)
   const { limit, cursor } = c.req.valid('query')
   const t = schema.broadcasts
-  const rows = await getDb(c.env.DB).select().from(t).where(and(eq(t.studioId, m.studioId), afterCursor(t.createdAt, t.id, 'desc', cursor)))
+  const rows = await getDb(c.env.DB).select().from(t).where(and(eq(t.studioId, m.studioId), isNull(t.deletedAt), afterCursor(t.createdAt, t.id, 'desc', cursor)))
     .orderBy(desc(t.createdAt), desc(t.id)).limit(limit + 1)
   return c.json(toPage(rows, limit, (r) => [r.createdAt, r.id], broadcastOut), 200)
 })
@@ -240,7 +242,7 @@ businessRoutes.openapi(createRoute({
   const row = {
     id: newId('bc'), studioId: m.studioId, title: input.title, body: input.body, audience: input.audience,
     scheduledAt: input.scheduledAt ? new Date(input.scheduledAt).toISOString() : null, sentAt: input.scheduledAt ? null : now, openRate: null, createdAt: now,
-    imageUrl: input.imageUrl ?? null, cancelledAt: null,
+    imageUrl: input.imageUrl ?? null, cancelledAt: null, deletedAt: null,
   }
   await db.insert(schema.broadcasts).values(row).run()
   audit(c, 'broadcast.create', { type: 'broadcast', id: row.id }, { audience: row.audience, scheduled: !!row.scheduledAt })
@@ -422,20 +424,40 @@ businessRoutes.openapi(createRoute({
 
 // ── QR & broadcast lifecycle ────────────────────────────────────────────────
 businessRoutes.openapi(createRoute({
-  method: 'delete', path: '/qrs/{id}', tags: ['Tools'], summary: 'Delete a smart QR code', security,
+  method: 'delete', path: '/qrs/{id}', tags: ['Tools'], summary: 'Move a smart QR code to the trash', security,
+  description: 'Its short link stops working until POST /qrs/{id}/restore; after 30 days the daily job deletes it.',
   middleware: [requireStudio('editor', 'manage QR codes')] as const,
   request: { params: IdParam },
   responses: { 204: NoContent, ...problems(401, 403, 404) },
 }), async (c) => {
   const m = membershipOf(c)
-  const res = await getDb(c.env.DB).delete(schema.smartQrs).where(and(eq(schema.smartQrs.id, c.req.valid('param').id), eq(schema.smartQrs.studioId, m.studioId))).run()
+  const t = schema.smartQrs
+  const res = await getDb(c.env.DB).update(t).set({ deletedAt: nowIso() }).where(and(eq(t.id, c.req.valid('param').id), eq(t.studioId, m.studioId), isNull(t.deletedAt))).run()
   if (res.meta.changes === 0) throw new NotFound('QR code', c.req.valid('param').id)
   emit(c, m.studioId, 'misc')
   return c.body(null, 204)
 })
 
-async function broadcastFor(db: ReturnType<typeof getDb>, studioId: string, id: string) {
-  const [b] = await db.select().from(schema.broadcasts).where(and(eq(schema.broadcasts.id, id), eq(schema.broadcasts.studioId, studioId))).limit(1)
+businessRoutes.openapi(createRoute({
+  method: 'post', path: '/qrs/{id}/restore', tags: ['Tools'], summary: 'Restore a smart QR code from the trash', security,
+  middleware: [requireStudio('editor', 'manage QR codes'), idempotent] as const,
+  request: { params: IdParam, headers: IdempotencyHeader },
+  responses: { 200: json(SmartQR), ...problems(401, 403, 404, 409) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const t = schema.smartQrs
+  const [qr] = await db.select().from(t).where(and(eq(t.id, c.req.valid('param').id), eq(t.studioId, m.studioId))).limit(1)
+  if (!qr) throw new NotFound('QR code', c.req.valid('param').id)
+  if (!qr.deletedAt) throw new Conflict('This QR code isn’t in the trash.', 'not_deleted')
+  await db.update(t).set({ deletedAt: null }).where(eq(t.id, qr.id)).run()
+  emit(c, m.studioId, 'misc')
+  return c.json(qrOut({ ...qr, deletedAt: null }), 200)
+})
+
+async function broadcastFor(db: ReturnType<typeof getDb>, studioId: string, id: string, opts: { trashed?: boolean } = {}) {
+  const t = schema.broadcasts
+  const [b] = await db.select().from(t).where(and(eq(t.id, id), eq(t.studioId, studioId), opts.trashed ? isNotNull(t.deletedAt) : isNull(t.deletedAt))).limit(1)
   if (!b) throw new NotFound('Broadcast', id)
   return b
 }
@@ -458,7 +480,8 @@ businessRoutes.openapi(createRoute({
 })
 
 businessRoutes.openapi(createRoute({
-  method: 'delete', path: '/broadcasts/{id}', tags: ['Grow'], summary: 'Delete a broadcast from the list', security,
+  method: 'delete', path: '/broadcasts/{id}', tags: ['Grow'], summary: 'Move a broadcast to the trash', security,
+  description: 'A scheduled message isn’t sent while it’s in the trash. Restore with POST /broadcasts/{id}/restore; deleted for good after 30 days.',
   middleware: [requireStudio('editor', 'manage broadcasts')] as const,
   request: { params: IdParam },
   responses: { 204: NoContent, ...problems(401, 403, 404) },
@@ -466,9 +489,24 @@ businessRoutes.openapi(createRoute({
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
   const b = await broadcastFor(db, m.studioId, c.req.valid('param').id)
-  await db.delete(schema.broadcasts).where(eq(schema.broadcasts.id, b.id)).run()
+  await db.update(schema.broadcasts).set({ deletedAt: nowIso() }).where(eq(schema.broadcasts.id, b.id)).run()
   emit(c, m.studioId, 'misc')
   return c.body(null, 204)
+})
+
+businessRoutes.openapi(createRoute({
+  method: 'post', path: '/broadcasts/{id}/restore', tags: ['Grow'], summary: 'Restore a broadcast from the trash', security,
+  description: 'A scheduled message whose time passed while it was in the trash goes out on the next minute.',
+  middleware: [requireStudio('editor', 'manage broadcasts'), idempotent] as const,
+  request: { params: IdParam, headers: IdempotencyHeader },
+  responses: { 200: json(Broadcast), ...problems(401, 403, 404) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const b = await broadcastFor(db, m.studioId, c.req.valid('param').id, { trashed: true })
+  await db.update(schema.broadcasts).set({ deletedAt: null }).where(eq(schema.broadcasts.id, b.id)).run()
+  emit(c, m.studioId, 'misc')
+  return c.json(broadcastOut({ ...b, deletedAt: null }), 200)
 })
 
 // ── Enquiries, prices, store settings, payouts ─────────────────────────────
@@ -561,8 +599,8 @@ businessRoutes.openapi(createRoute({
     const { accountNumber, ...rest } = patch.payout
     Object.assign(next.payout, rest)
     if (accountNumber) next.payout.accountLast4 = accountNumber.slice(-4)
-    // TODO(payments): real penny-drop verification via the payout provider; simulated as "valid IFSC + account".
-    if (accountNumber || (rest.ifsc && rest.ifsc !== cur.payout.ifsc)) next.payout.verified = !!next.payout.accountLast4 && /^[A-Z]{4}0[A-Z0-9]{6}$/.test(next.payout.ifsc)
+    // A new account, IFSC or holder name re-runs the ₹1 check.
+    if (accountNumber || (rest.ifsc && rest.ifsc !== cur.payout.ifsc) || (rest.holder !== undefined && rest.holder !== cur.payout.holder)) applyPayoutCheck(next, payoutCheck(next))
   }
   if (patch.saleWatermark) Object.assign(next.saleWatermark, patch.saleWatermark)
   if (patch.international) Object.assign(next.international, patch.international)
@@ -574,6 +612,39 @@ businessRoutes.openapi(createRoute({
   audit(c, 'store.settings', { type: 'studio', id: m.studioId }, { sections: Object.keys(patch) })
   emit(c, m.studioId, 'misc')
   return c.json(next, 200)
+})
+
+/**
+ * The ₹1 penny-drop check. TODO(payments): ask the payout provider (e.g. Razorpay X fund-account validation);
+ * until then `simulatePayoutCheck` from @frameline/shared answers deterministically (same rule as the mock).
+ */
+function payoutCheck(s: ReturnType<typeof storeSettingsOut>): PayoutCheckT {
+  return simulatePayoutCheck({ holder: s.payout.holder, legalName: s.kyc.legalName, ifsc: s.payout.ifsc, accountLast4: s.payout.accountLast4 })
+}
+function applyPayoutCheck(s: ReturnType<typeof storeSettingsOut>, check: PayoutCheckT) {
+  s.payout.check = check
+  s.payout.verified = check.status === 'verified'
+  if (check.bankName && !s.payout.bank) s.payout.bank = check.bankName
+}
+
+businessRoutes.openapi(createRoute({
+  method: 'post', path: '/store/payout/verify', tags: ['Business'], summary: 'Check the payout bank account again (₹1 test) — owner', security,
+  description: 'Runs the account check and stores it in `StoreSettings.payout.check`: `verified` (payouts allowed), `name_mismatch` (the bank has it under `nameAtBank`), or `failed`. Simulated deterministically until a payout provider is configured.',
+  middleware: [requireStudio('owner', 'verify the payout account'), idempotent] as const,
+  request: { headers: IdempotencyHeader },
+  responses: { 200: json(PayoutCheck), ...problems(401, 403, 409) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const [st] = await db.select().from(schema.studios).where(eq(schema.studios.id, m.studioId)).limit(1)
+  const s = structuredClone(storeSettingsOut(st))
+  if (!s.payout.accountLast4) throw new Conflict('Add a bank account in Selling settings first.', 'no_payout_account')
+  const check = payoutCheck(s)
+  applyPayoutCheck(s, check)
+  await db.update(schema.studios).set({ storeSettings: s }).where(eq(schema.studios.id, m.studioId)).run()
+  audit(c, 'store.payout_verify', { type: 'studio', id: m.studioId }, { status: check.status })
+  emit(c, m.studioId, 'misc')
+  return c.json(check, 200)
 })
 
 businessRoutes.openapi(createRoute({
@@ -597,6 +668,101 @@ businessRoutes.openapi(createRoute({
   audit(c, 'store.payout', { type: 'studio', id: m.studioId }, { amountPaise: toMinor(amount) })
   emit(c, m.studioId, 'misc')
   return c.json(entry, 201)
+})
+
+// ── Orders: tracking, resend link ──────────────────────────────────────────
+async function orderFor(db: ReturnType<typeof getDb>, studioId: string, id: string) {
+  const [o] = await db.select().from(schema.orders).where(and(eq(schema.orders.id, id), eq(schema.orders.studioId, studioId))).limit(1)
+  if (!o) throw new NotFound('Order', id)
+  return o
+}
+
+businessRoutes.openapi(createRoute({
+  method: 'patch', path: '/orders/{id}', tags: ['Business'], summary: 'Set the courier tracking number on an order (owner)', security,
+  description: '`trackingNumber: ""` clears it. The buyer sees it with their order.',
+  middleware: [requireStudio('owner', 'manage orders')] as const,
+  request: { params: IdParam, body: body(z.object({ trackingNumber: z.string().trim().max(80) }).partial().strict()) },
+  responses: { 200: json(Order), ...problems(401, 403, 404, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const o = await orderFor(db, m.studioId, c.req.valid('param').id)
+  const { trackingNumber } = c.req.valid('json')
+  if (trackingNumber !== undefined) await db.update(schema.orders).set({ trackingNumber: trackingNumber || null }).where(eq(schema.orders.id, o.id)).run()
+  audit(c, 'store.order_updated', { type: 'order', id: o.id }, { trackingNumber })
+  emit(c, m.studioId, 'misc')
+  return c.json(orderOut(await orderFor(db, m.studioId, o.id)), 200)
+})
+
+businessRoutes.openapi(createRoute({
+  method: 'post', path: '/orders/{id}/resend-link', tags: ['Business'], summary: 'Email the buyer a fresh download link (owner)', security,
+  description: '409 `order_not_deliverable` unless the order is paid, printing or paid directly; 422 `no_buyer_email` when the order has no email. Sent with the mailer (logged in development).',
+  middleware: [requireStudio('owner', 'manage orders'), idempotent] as const,
+  request: { params: IdParam, headers: IdempotencyHeader },
+  responses: { 200: json(z.object({ sentTo: z.string(), order: Order })), ...problems(401, 403, 404, 409, 422, 503) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const o = await orderFor(db, m.studioId, c.req.valid('param').id)
+  if (!['paid', 'printing', 'paid-direct'].includes(o.status)) {
+    throw new Conflict(o.status === 'refunded' ? `Order #${o.number} was refunded, so its download link is off.` : `Order #${o.number} isn’t paid yet.`, 'order_not_deliverable', { orderStatus: o.status })
+  }
+  if (!o.buyerEmail) throw new AppError(422, 'no_buyer_email', 'No email on this order', `Order #${o.number} has no buyer email to send the link to.`)
+  const [ev] = await db.select({ shortId: schema.events.shortId }).from(schema.events).where(eq(schema.events.id, o.eventId)).limit(1)
+  const link = `${c.env.GALLERY_URL.replace(/\/$/, '')}/${(ev?.shortId ?? '').toLowerCase()}/orders?order=${o.id}`
+  await getMailer(c.env).send({
+    to: o.buyerEmail,
+    subject: `Your photos from ${o.eventName}`,
+    text: `Hi ${o.buyer},\n\nHere is your download link for order #${o.number} (${o.items}): ${link}\n\nIt keeps working for 12 months.`,
+  })
+  const at = nowIso()
+  await db.update(schema.orders).set({ linkSentAt: at }).where(eq(schema.orders.id, o.id)).run()
+  audit(c, 'store.link_resent', { type: 'order', id: o.id })
+  emit(c, m.studioId, 'misc')
+  return c.json({ sentTo: o.buyerEmail, order: orderOut({ ...o, linkSentAt: at }) }, 200)
+})
+
+// ── Studio stats (Reports) ──────────────────────────────────────────────────
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
+const monthStart = (month: string, offset = 0) => { const [y, mo] = month.split('-').map(Number); return new Date(Date.UTC(y, mo - 1 + offset, 1)) }
+const ymd = (d: Date) => d.toISOString().slice(0, 10)
+
+businessRoutes.openapi(createRoute({
+  method: 'get', path: '/studio/stats', tags: ['Business'], summary: 'Studio totals for Reports: a month, the month before, all time', security,
+  description: '`month` is YYYY-MM (default: this month, UTC). Visits, downloads, face searches and photo views come from daily counters; photos delivered from photos added in the month (guest uploads and trash excluded); sales and orders from paid INR orders (refunds and pending excluded).',
+  middleware: [requireStudio('editor', 'view reports')] as const,
+  request: { query: z.object({ month: z.string().regex(MONTH_RE, 'Use YYYY-MM, e.g. 2026-09').optional() }) },
+  responses: { 200: json(StudioStats), ...problems(401, 403, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const month = c.req.valid('query').month ?? new Date().toISOString().slice(0, 7)
+  const totals = async (from: Date, to: Date) => {
+    const [d] = await db.all<{ visits: number; downloads: number; face: number; views: number }>(sql`
+      SELECT coalesce(sum(visits), 0) AS visits, coalesce(sum(downloads), 0) AS downloads, coalesce(sum(face_searches), 0) AS face, coalesce(sum(photo_views), 0) AS views
+      FROM event_daily_stats WHERE studio_id = ${m.studioId} AND day >= ${ymd(from)} AND day < ${ymd(to)}`)
+    const [ph] = await db.all<{ n: number }>(sql`
+      SELECT count(*) AS n FROM photos p JOIN albums a ON a.id = p.album_id JOIN events e ON e.id = p.event_id
+      WHERE p.studio_id = ${m.studioId} AND p.deleted_at IS NULL AND a.kind = 'album' AND a.deleted_at IS NULL AND e.deleted_at IS NULL
+        AND p.created_at >= ${from.toISOString()} AND p.created_at < ${to.toISOString()}`)
+    const [o] = await db.all<{ n: number; paise: number }>(sql`
+      SELECT count(*) AS n, coalesce(sum(paid_paise), 0) AS paise FROM orders
+      WHERE studio_id = ${m.studioId} AND currency = 'INR' AND status IN ('paid', 'printing') AND at >= ${from.toISOString()} AND at < ${to.toISOString()}`)
+    return {
+      visits: Number(d?.visits ?? 0), downloads: Number(d?.downloads ?? 0), faceSearches: Number(d?.face ?? 0), photoViews: Number(d?.views ?? 0),
+      photosDelivered: Number(ph?.n ?? 0), sales: toMajor(Number(o?.paise ?? 0)), orders: Number(o?.n ?? 0),
+    }
+  }
+  const [all] = await db.all<{ visits: number; downloads: number; face: number; views: number }>(sql`
+    SELECT coalesce(sum(visits), 0) AS visits, coalesce(sum(downloads), 0) AS downloads, coalesce(sum(face_searches), 0) AS face, coalesce(sum(photo_views), 0) AS views
+    FROM event_daily_stats WHERE studio_id = ${m.studioId}`)
+  return c.json({
+    month,
+    thisMonth: await totals(monthStart(month), monthStart(month, 1)),
+    lastMonth: await totals(monthStart(month, -1), monthStart(month)),
+    allTime: { visits: Number(all?.visits ?? 0), downloads: Number(all?.downloads ?? 0), faceSearches: Number(all?.face ?? 0), photoViews: Number(all?.views ?? 0) },
+    asOf: nowIso(),
+  }, 200)
 })
 
 // ── Abandoned carts ────────────────────────────────────────────────────────
@@ -651,4 +817,100 @@ businessRoutes.openapi(createRoute({
   audit(c, 'store.carts_reminded', undefined, { reminded })
   emit(c, m.studioId, 'misc')
   return c.json({ reminded }, 200)
+})
+
+// ── Contract v4: wallet, needs-you, refunds ────────────────────────────────
+businessRoutes.openapi(createRoute({
+  method: 'get', path: '/wallet', tags: ['Business'], summary: 'Wallet: prepaid money + store earnings (owner)', security,
+  description: 'One call for every money number the apps show. `balance` is what UIs label "Wallet"; `withdrawable` caps `POST /payouts`; spending (packs, renewals, AI enhance, wallet payments) draws from `prepaid` first, then from positive `earnings`, with one ledger line per pot. Clients must not derive these from the ledger.',
+  middleware: [requireStudio('owner', 'view the wallet')] as const,
+  responses: { 200: json(WalletBalance), ...problems(401, 403) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const [prepaid, earnings] = await Promise.all([walletOf(c.env.DB, m.studioId), payoutBalance(db, m.studioId)])
+  return c.json({
+    balance: toMajor(prepaid + earnings), withdrawable: toMajor(Math.max(0, earnings)), prepaid: toMajor(prepaid), earnings: toMajor(earnings),
+    currency: 'INR' as const, asOf: nowIso(),
+  }, 200)
+})
+
+businessRoutes.openapi(createRoute({
+  method: 'get', path: '/needs-you', tags: ['Business'], summary: 'Things that need the studio’s action (Home “Needs you”)', security,
+  description: `Pending access requests, guest uploads awaiting review, events expiring within ${NEEDS_YOU_EXPIRY_DAYS} days (or in the grace period) and face search data about to lapse. A small computed list, so it isn’t paginated.`,
+  middleware: [requireStudio('editor', 'see what needs you')] as const,
+  responses: { 200: json(z.object({ items: z.array(NeedsYouItem) }).openapi('NeedsYouList')), ...problems(401, 403) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const e = schema.events
+  const events = await db.select({ id: e.id, name: e.name, status: e.status, date: e.date, expiresAt: e.expiresAt, photoCount: e.photoCount, settings: e.settings })
+    .from(e).where(and(eq(e.studioId, m.studioId), isNull(e.deletedAt)))
+  const ids = events.map((x) => x.id)
+  const ar = schema.accessRequests
+  const p = schema.photos
+  const accessRequests: { id: string; eventId: string; name: string; note: string; createdAt: string }[] = []
+  const pendingUploads: { eventId: string; count: number; latestAt: string }[] = []
+  // D1 allows 100 bound parameters per statement, so event ids go in chunks of 80.
+  for (let i = 0; i < ids.length; i += 80) {
+    const part = ids.slice(i, i + 80)
+    accessRequests.push(...await db.select({ id: ar.id, eventId: ar.eventId, name: ar.name, note: ar.note, createdAt: ar.createdAt }).from(ar)
+      .where(and(inArray(ar.eventId, part), eq(ar.status, 'pending'))))
+    const rows = await db.select({ eventId: p.eventId, count: sql<number>`count(*)`, latestAt: sql<string>`max(${p.createdAt})` }).from(p)
+      .where(and(eq(p.studioId, m.studioId), inArray(p.eventId, part), eq(p.reviewStatus, 'pending'), isNull(p.deletedAt))).groupBy(p.eventId)
+    pendingUploads.push(...rows.map((r) => ({ eventId: r.eventId, count: Number(r.count), latestAt: r.latestAt })))
+  }
+  return c.json({ items: buildNeedsYou({ events, accessRequests, pendingUploads }) }, 200)
+})
+
+/** Sends the refund to Razorpay when keys exist and the order was paid through it. Returns the refund id, or null when simulated. */
+async function providerRefund(env: { RAZORPAY_KEY_ID?: string; RAZORPAY_KEY_SECRET?: string }, order: typeof schema.orders.$inferSelect, reason: string): Promise<string | null> {
+  if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET || !order.providerRef) return null
+  const headers = { Authorization: `Basic ${btoa(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`)}`, 'Content-Type': 'application/json' }
+  const unavailable = () => new ServiceUnavailable('Refunds are unavailable right now. Try again in a minute.', 'payment_provider_error')
+  let paymentId = order.providerRef
+  if (!paymentId.startsWith('pay_')) {
+    // providerRef holds the Razorpay order id until the webhook/confirm stores the payment id.
+    const res = await fetch(`https://api.razorpay.com/v1/orders/${encodeURIComponent(paymentId)}/payments`, { headers })
+    if (!res.ok) throw unavailable()
+    const captured = ((await res.json()) as { items?: { id: string; status: string }[] }).items?.find((x) => x.status === 'captured')
+    if (!captured) throw new Conflict('This payment hasn’t been captured yet, so it can’t be refunded. Try again later.', 'payment_not_captured')
+    paymentId = captured.id
+  }
+  const res = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}/refund`, {
+    method: 'POST', headers, body: JSON.stringify({ amount: order.paidPaise, speed: 'normal', receipt: order.id, notes: { reason: reason.slice(0, 250) } }),
+  })
+  if (!res.ok) throw unavailable()
+  return ((await res.json()) as { id: string }).id
+}
+
+businessRoutes.openapi(createRoute({
+  method: 'post', path: '/orders/{id}/refund', tags: ['Business'], summary: 'Refund an order in full (owner)', security,
+  description: 'Only `paid` or `printing` orders can be refunded (409 `order_not_refundable` otherwise, e.g. already refunded, pending, or paid directly to the studio). Refunds the buyer through Razorpay when configured (simulated otherwise), takes the studio’s share back from earnings with a `refund` ledger line, and marks the order `refunded`. Send an `Idempotency-Key`: a retry returns the first result.',
+  middleware: [requireStudio('owner', 'refund orders'), idempotent] as const,
+  request: { params: IdParam, headers: IdempotencyHeader, body: body(z.object({ reason: z.string().trim().min(1).max(300).openapi({ description: 'Shown to the buyer.' }) })) },
+  responses: { 200: json(Order, 'Refunded'), ...problems(401, 403, 404, 409, 422, 503) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const { id } = c.req.valid('param')
+  const { reason } = c.req.valid('json')
+  const t = schema.orders
+  const [order] = await db.select().from(t).where(and(eq(t.id, id), eq(t.studioId, m.studioId))).limit(1)
+  if (!order) throw new NotFound('Order', id)
+  const notRefundable = (status: string) => new Conflict(
+    status === 'refunded' ? `Order #${order.number} was already refunded.` : `Order #${order.number} can’t be refunded because it isn’t paid through Frameline.`,
+    'order_not_refundable', { orderStatus: status },
+  )
+  if (order.status !== 'paid' && order.status !== 'printing') throw notRefundable(order.status)
+  const refundRef = await providerRefund(c.env, order, reason)
+  // Compare-and-set, so two concurrent refunds can't both book a ledger line.
+  const res = await db.update(t).set({ status: 'refunded', refundedAt: nowIso(), refundReason: reason })
+    .where(and(eq(t.id, order.id), inArray(t.status, ['paid', 'printing']))).run()
+  if (res.meta.changes === 0) throw notRefundable('refunded')
+  await addLedger(db, m.studioId, 'refund', `Order #${order.number} refunded · ${reason}`, -order.sharePaise, true)
+  audit(c, 'store.refund', { type: 'order', id: order.id }, { amountPaise: order.paidPaise, sharePaise: order.sharePaise, simulated: !refundRef, ...(refundRef ? { refundRef } : {}) })
+  emit(c, m.studioId, 'misc')
+  const [fresh] = await db.select().from(t).where(eq(t.id, order.id)).limit(1)
+  return c.json(orderOut(fresh), 200)
 })

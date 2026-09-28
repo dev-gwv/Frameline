@@ -1,5 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm'
+import { handleProblem } from '@frameline/shared'
 import { getDb, schema } from '../db/client'
 import { appConfig, studioOut, usageOut, watermarkOut, websiteOut } from '../db/mappers'
 import { creditWallet, recordPurchase } from '../services/billing'
@@ -10,7 +11,7 @@ import { IdempotencyHeader, body, createRouter, json, problems, security } from 
 import { membershipOf, requireAuth, requireStudio, userOf } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
 import {
-  MembershipView, Role, Studio, StudioPatch, TeamMember, Usage, User, WatermarkPatch, WatermarkSettings, Website, WebsitePatch,
+  HandleCheck, MembershipView, Role, Studio, StudioPatch, TeamMember, Usage, User, WatermarkPatch, WatermarkSettings, Website, WebsitePatch,
 } from '../schemas/domain'
 import { audit } from '../services/audit'
 import { getMailer } from '../services/mailer'
@@ -96,13 +97,30 @@ studioRoutes.openapi(createRoute({
 })
 
 studioRoutes.openapi(createRoute({
+  method: 'get', path: '/studio/handle-check', tags: ['Studio'], summary: 'Is this gallery address (handle) free?', security,
+  description: 'Checks the format (3–40 lowercase letters, numbers or dashes), reserved words and other studios. `reason`: invalid, reserved, taken, or yours (this studio already has it; available).',
+  middleware: [requireStudio('uploader')] as const,
+  request: { query: z.object({ handle: z.string().max(80) }) },
+  responses: { 200: json(HandleCheck), ...problems(401, 403, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const raw = c.req.valid('query').handle
+  const bad = handleProblem(raw)
+  if (bad) return c.json(bad, 200)
+  const handle = raw.trim().toLowerCase()
+  const [row] = await getDb(c.env.DB).select({ id: schema.studios.id }).from(schema.studios).where(eq(schema.studios.handle, handle)).limit(1)
+  if (!row) return c.json({ handle, available: true }, 200)
+  return c.json(row.id === m.studioId ? { handle, available: true, reason: 'yours' as const } : { handle, available: false, reason: 'taken' as const }, 200)
+})
+
+studioRoutes.openapi(createRoute({
   method: 'get', path: '/studio/usage', tags: ['Billing'], summary: 'Plan, photo usage and wallet', security,
   middleware: [requireStudio('uploader')] as const,
   responses: { 200: json(Usage), ...problems(401, 403) },
 }), async (c) => c.json(usageOut(await loadStudio(getDb(c.env.DB), membershipOf(c).studioId)), 200))
 
 studioRoutes.openapi(createRoute({
-  method: 'post', path: '/studio/credits', tags: ['Billing'], summary: 'Add wallet credits (owner)', security,
+  method: 'post', path: '/studio/credits', tags: ['Billing'], summary: 'Add money to the wallet (owner)', security,
   description: 'Records a top-up (in rupees) and returns the new wallet balance. Supports `Idempotency-Key`. In production this is called after a Razorpay payment is captured (see README).',
   middleware: [requireStudio('owner', 'manage billing'), idempotent] as const,
   request: { headers: IdempotencyHeader, body: body(z.object({ amount: z.number().positive().max(1_000_000).multipleOf(0.01) })) },
@@ -112,7 +130,7 @@ studioRoutes.openapi(createRoute({
   const { amount } = c.req.valid('json')
   const db = getDb(c.env.DB)
   await creditWallet(db, m.studioId, toMinor(amount), `Wallet top-up · ₹${amount}`)
-  await recordPurchase(db, m.studioId, { description: `Wallet credits · ₹${amount}`, kind: 'credits', amountPaise: toMinor(amount), method: 'card' })
+  await recordPurchase(db, m.studioId, { description: `Money added to wallet · ₹${amount}`, kind: 'credits', amountPaise: toMinor(amount), method: 'card' })
   const row = await loadStudio(db, m.studioId)
   audit(c, 'billing.credits_added', { type: 'studio', id: m.studioId }, { amountPaise: toMinor(amount) })
   emit(c, m.studioId, 'usage', 'misc')

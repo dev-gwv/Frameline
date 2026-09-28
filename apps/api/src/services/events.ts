@@ -15,8 +15,9 @@ export async function eventForMember(db: DB, m: Membership, idOrShort: string, o
   return row
 }
 
-export async function albumForMember(db: DB, m: Membership, albumId: string) {
-  const [row] = await db.select().from(schema.albums).where(and(eq(schema.albums.id, albumId), eq(schema.albums.studioId, m.studioId))).limit(1)
+/** Loads an album of the caller's studio (trashed albums 404 unless asked for). */
+export async function albumForMember(db: DB, m: Membership, albumId: string, opts: { includeDeleted?: boolean } = {}) {
+  const [row] = await db.select().from(schema.albums).where(and(eq(schema.albums.id, albumId), eq(schema.albums.studioId, m.studioId), opts.includeDeleted ? undefined : isNull(schema.albums.deletedAt))).limit(1)
   if (!row) throw new NotFound('Album', albumId)
   assertEventVisible(m, row.eventId)
   return row
@@ -27,12 +28,12 @@ export function recountStatements(db: DB, eventId: string) {
   const a = schema.albums
   return [
     db.update(a).set({
-      photoCount: sql`(SELECT count(*) FROM photos p WHERE p.album_id = ${a.id})`,
-      firstCapture: sql`(SELECT min(captured_at) FROM photos p WHERE p.album_id = ${a.id})`,
-      lastCapture: sql`(SELECT max(captured_at) FROM photos p WHERE p.album_id = ${a.id})`,
+      photoCount: sql`(SELECT count(*) FROM photos p WHERE p.album_id = ${a.id} AND p.deleted_at IS NULL)`,
+      firstCapture: sql`(SELECT min(captured_at) FROM photos p WHERE p.album_id = ${a.id} AND p.deleted_at IS NULL)`,
+      lastCapture: sql`(SELECT max(captured_at) FROM photos p WHERE p.album_id = ${a.id} AND p.deleted_at IS NULL)`,
     }).where(eq(a.eventId, eventId)),
     db.update(schema.events).set({
-      photoCount: sql`(SELECT coalesce(sum(photo_count), 0) FROM albums a2 WHERE a2.event_id = ${schema.events.id} AND a2.kind != 'store')`,
+      photoCount: sql`(SELECT coalesce(sum(photo_count), 0) FROM albums a2 WHERE a2.event_id = ${schema.events.id} AND a2.kind != 'store' AND a2.deleted_at IS NULL)`,
     }).where(eq(schema.events.id, eventId)),
   ] as const
 }

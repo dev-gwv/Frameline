@@ -2,7 +2,7 @@ import { memo, useEffect, type ReactNode } from 'react'
 import { Animated, Pressable, StyleSheet, Text, View, useAnimatedValue, type StyleProp, type ViewStyle } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Image } from 'expo-image'
-import type { Photo, PublicWatermark, Tone } from '@frameline/shared'
+import { watermarkAnchor, type Photo, type PublicWatermark, type Tone } from '@frameline/shared'
 import { font, useTheme } from '@/theme'
 import { Icon } from './Icon'
 
@@ -19,34 +19,48 @@ export function ToneView({ tone, style, children }: { tone: Tone; style?: StyleP
   return <LinearGradient colors={tone.stops} locations={[0, 0.55, 1]} start={start} end={end} style={style}>{children}</LinearGradient>
 }
 
-type TilePhoto = Pick<Photo, 'id' | 'tone' | 'url' | 'status'> & Partial<Pick<Photo, 'hidden'>>
+type TilePhoto = Pick<Photo, 'id' | 'tone' | 'url' | 'status'> & Partial<Pick<Photo, 'hidden' | 'rotation'>>
 
 /** Photo in a grid: real image via expo-image, tone gradient otherwise; shimmer while processing. */
-export const PhotoTile = memo(function PhotoTile({ photo, size, onPress, selected, favourite, radius = 4, label, onLongPress }: {
-  photo: TilePhoto; size: number; onPress?: () => void; onLongPress?: () => void; selected?: boolean; favourite?: boolean; radius?: number; label?: string
+export const PhotoTile = memo(function PhotoTile({ photo, size, onPress, selected, selecting, favourite, radius = 4, label, onLongPress }: {
+  photo: TilePhoto; size: number; onPress?: () => void; onLongPress?: () => void; selected?: boolean; selecting?: boolean; favourite?: boolean; radius?: number; label?: string
 }) {
   const { c } = useTheme()
   const processing = photo.status === 'processing'
   return (
-    <Pressable onPress={onPress} onLongPress={onLongPress} disabled={!onPress} accessibilityRole={onPress ? 'imagebutton' : 'image'} accessibilityLabel={label ?? 'Photo'}
+    <Pressable onPress={onPress} onLongPress={onLongPress} delayLongPress={320} disabled={!onPress && !onLongPress} accessibilityRole={onPress ? 'imagebutton' : 'image'} accessibilityLabel={label ?? 'Photo'}
+      accessibilityState={selecting ? { selected: !!selected } : undefined}
       style={({ pressed }) => [{ width: size, height: size, borderRadius: radius, overflow: 'hidden', opacity: pressed ? 0.85 : 1 }]}>
-      <PhotoFill photo={photo} />
+      <PhotoFill photo={photo} box={{ width: size, height: size }} />
       {processing ? <Shimmer /> : null}
       {processing ? <View style={styles.processingTag}><Text style={styles.processingText}>Processing</Text></View> : null}
       {photo.hidden ? <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: 'rgba(12,10,8,0.5)' }]}><Icon name="eye-off" size={18} color="#F3ECDF" /></View> : null}
       {favourite ? <View style={styles.fav}><Icon name="heart" size={12} color="#F2D38A" /></View> : null}
-      {selected ? <View style={[StyleSheet.absoluteFill, { borderWidth: 3, borderColor: c.marker, borderRadius: radius }]} /> : null}
+      {selected ? <View style={[StyleSheet.absoluteFill, { borderWidth: 3, borderColor: c.marker, borderRadius: radius, backgroundColor: 'rgba(255,255,255,0.12)' }]} /> : null}
+      {selecting ? (
+        <View style={[styles.check, selected ? { backgroundColor: c.accent, borderColor: c.accent } : { borderColor: '#fff', backgroundColor: 'rgba(12,10,8,0.25)' }]}>
+          {selected ? <Icon name="check" size={13} color={c.accentInk} /> : null}
+        </View>
+      ) : null}
     </Pressable>
   )
 })
 
-/** Fills its parent with the photo (image or tone). */
-export function PhotoFill({ photo, contentFit = 'cover' }: { photo: Pick<Photo, 'tone' | 'url'>; contentFit?: 'cover' | 'contain' }) {
+/**
+ * Fills its parent with the photo (image or tone), turned by `Photo.rotation` (0/90/180/270, clockwise). Pass the
+ * parent's `box` size so a quarter turn swaps width and height; without it the parent is treated as square.
+ */
+export function PhotoFill({ photo, contentFit = 'cover', box }: { photo: Pick<Photo, 'tone' | 'url'> & Partial<Pick<Photo, 'rotation'>>; contentFit?: 'cover' | 'contain'; box?: { width: number; height: number } }) {
+  const r = photo.rotation ?? 0
+  const quarter = r === 90 || r === 270
+  const inner = quarter && box
+    ? { position: 'absolute' as const, width: box.height, height: box.width, left: (box.width - box.height) / 2, top: (box.height - box.width) / 2, transform: [{ rotate: `${r}deg` }] }
+    : [StyleSheet.absoluteFill, r ? { transform: [{ rotate: `${r}deg` }] } : null]
   return (
-    <>
+    <View style={inner}>
       <ToneView tone={photo.tone} style={StyleSheet.absoluteFill} />
       {photo.url ? <Image source={{ uri: photo.url }} style={StyleSheet.absoluteFill} contentFit={contentFit} transition={180} recyclingKey={photo.url} /> : null}
-    </>
+    </View>
   )
 }
 
@@ -83,6 +97,7 @@ const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center' },
   processingTag: { position: 'absolute', left: 4, bottom: 4, backgroundColor: 'rgba(12,10,8,0.6)', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 },
   processingText: { color: '#F3ECDF', fontFamily: font.bodyBold, fontSize: 9 },
+  check: { position: 'absolute', left: 6, top: 6, width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   fav: { position: 'absolute', right: 4, top: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(12,10,8,0.5)', alignItems: 'center', justifyContent: 'center' },
 })
 
@@ -98,8 +113,9 @@ export function WatermarkOverlay({ wm, width, height }: { wm: PublicWatermark | 
   const short = Math.min(width, height)
   const edge = (short * (w.edgeOffset ?? 3)) / 100
   const fontSize = Math.max(9, short * WM_SIZE[w.size])
-  const pos = { [w.position[0] === 't' ? 'top' : 'bottom']: edge, [w.position[1] === 'l' ? 'left' : 'right']: edge }
-  const align = w.position[1] === 'l' ? 'flex-start' as const : 'flex-end' as const
+  const a = watermarkAnchor(w.position)
+  const pos = { [a.y]: edge, ...(a.x === 'center' ? { left: 0, right: 0 } : { [a.x]: edge }) }
+  const align = a.x === 'left' ? 'flex-start' as const : a.x === 'center' ? 'center' as const : 'flex-end' as const
   return (
     <View pointerEvents="none" style={[{ position: 'absolute', alignItems: align, opacity: Math.max(0, Math.min(1, w.opacity / 100)) }, pos]}>
       {w.mode === 'logo' && w.logoUrl

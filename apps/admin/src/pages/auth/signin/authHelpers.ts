@@ -36,7 +36,7 @@ export function describeAuthError(err: unknown): AuthFailure {
         if (remaining === 0) return { message: 'Too many wrong codes. Request a new code, or use your password.', locked: true }
         return {
           message: remaining !== undefined
-            ? `That code doesn’t match. Check the latest email and try again · ${remaining} ${remaining === 1 ? 'attempt' : 'attempts'} left.`
+            ? `That code doesn’t match. ${remaining} ${remaining === 1 ? 'try' : 'tries'} left.`
             : err.detail || 'That code doesn’t match. Check the latest email and try again.',
         }
       case 'otp_expired':
@@ -45,8 +45,7 @@ export function describeAuthError(err: unknown): AuthFailure {
         return { message: 'Too many wrong codes. For your safety this code no longer works. Request a new code, or use your password.', locked: true }
       case 'otp_cooldown':
       case 'rate_limited': {
-        const s = err.retryAfter
-        return { message: s ? `Too many tries. Wait ${s} second${s === 1 ? '' : 's'}, then try again.` : 'Too many tries. Wait a moment, then try again.', waitSeconds: s }
+        return { message: 'Too many tries. For your safety, wait a moment before trying again.', waitSeconds: err.retryAfter ?? 60 }
       }
       case 'invalid_credentials':
         return { message: 'Email or password is wrong. Try again, or sign in with an email code.' }
@@ -61,4 +60,21 @@ export function describeAuthError(err: unknown): AuthFailure {
 export function safeDestination(from: string | null | undefined) {
   if (!from || !from.startsWith('/') || from.startsWith('//') || from.startsWith('/login')) return '/'
   return from
+}
+
+/*
+ * Sample data has no server to rate-limit code requests, so mimic the API here: the 4th code
+ * requested within 5 minutes gets a 429 with a 42-second wait ("Try again in 0:42" on the button).
+ */
+const REQ_KEY = 'frameline.code-requests'
+export function demoRateLimit() {
+  const now = Date.now()
+  let st: { times: number[]; until?: number } = { times: [] }
+  try { st = JSON.parse(sessionStorage.getItem(REQ_KEY) ?? '{"times":[]}') } catch { /* ignore */ }
+  const save = () => { try { sessionStorage.setItem(REQ_KEY, JSON.stringify(st)) } catch { /* ignore */ } }
+  const limited = (retryAfter: number) => new ApiError({ status: 429, code: 'rate_limited', detail: 'Too many sign-in codes requested.', retryAfter })
+  if (st.until && now < st.until) throw limited(Math.ceil((st.until - now) / 1000))
+  st.times = (st.times ?? []).filter((t) => now - t < 5 * 60_000)
+  if (st.times.length >= 3) { st = { times: [], until: now + 42_000 }; save(); throw limited(42) }
+  st.times.push(now); st.until = undefined; save()
 }

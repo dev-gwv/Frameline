@@ -1,15 +1,21 @@
 import { useState } from 'react'
-import { Download, Eye, EyeOff, FolderInput, ImageIcon, Trash2, X } from 'lucide-react'
-import { fmt, type Album, type ID } from '@frameline/shared'
-import { ConfirmDialog, Menu, Tip } from '@frameline/ui'
-import { useApi } from '../../lib/api'
-import { useAction, useStudio } from '../../lib/queries'
+import { Download, Eye, EyeOff, FolderInput, ImageIcon, Mail, Plus, Trash2 } from 'lucide-react'
+import { fmt, type Album, type FramelineApi, type ID, type Photo, type PhotoEvent } from '@frameline/shared'
+import { Button, Field, Input, Menu, Modal, SelectionBar, Tip, useToast } from '@frameline/ui'
+import { errorMessage, useApi } from '../../lib/api'
+import { useStudio, useWatermark } from '../../lib/queries'
+import { downloadPhoto } from '../viewer/download'
+import { downloadBlob, liveUrl, photosLabel } from './lib'
+import { trashWithUndo } from './pending'
+
+const ZIP_OVER = 50
 
 interface Props {
-  eventId: ID
-  ids: string[]
+  event: PhotoEvent
+  ids: ID[]
   total: number
-  allHidden: boolean
+  /** Photos loaded in the grid (for undo and downloads). */
+  known: Map<ID, Photo>
   albums: Album[]
   currentAlbumId?: ID
   onSelectAll: () => void
@@ -17,57 +23,163 @@ interface Props {
   onClear: () => void
 }
 
-const barBtn = 'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] border border-side-line px-2.5 text-[12px] font-bold text-side-ink hover:bg-side-2 disabled:opacity-40'
+/** Where each photo is now, so Move can be undone. Photos that aren't loaded are looked up once. */
+async function albumOf(api: FramelineApi, eventId: ID, ids: ID[], known: Map<ID, Photo>, currentAlbumId?: ID) {
+  const map = new Map<ID, ID>()
+  const missing: ID[] = []
+  ids.forEach((id) => { const p = known.get(id); if (p) map.set(id, p.albumId); else if (currentAlbumId) map.set(id, currentAlbumId); else missing.push(id) })
+  if (missing.length) {
+    const all = await api.listPhotos(eventId, {})
+    const want = new Set(missing)
+    all.items.forEach((p) => { if (want.has(p.id)) map.set(p.id, p.albumId) })
+  }
+  return map
+}
 
-export function SelectionBar({ eventId, ids, total, allHidden, albums, currentAlbumId, onSelectAll, selectingAll, onClear }: Props) {
+/** Move a set of photos with an Undo toast. Shared by the selection bar and the viewer. */
+export function useMovePhotos(eventId: ID) {
   const api = useApi()
-  const studioEmail = useStudio().data?.email
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const toast = useToast()
+  return async (ids: ID[], to: Album, known: Map<ID, Photo>, currentAlbumId?: ID) => {
+    try {
+      const from = await albumOf(api, eventId, ids, known, currentAlbumId)
+      await api.updatePhotos(ids, { albumId: to.id })
+      toast.undo(`${photosLabel(ids.length)} moved to ${to.name}`, () => {
+        const groups = new Map<ID, ID[]>()
+        from.forEach((albumId, id) => { if (albumId !== to.id) groups.set(albumId, [...(groups.get(albumId) ?? []), id]) })
+        Promise.all([...groups].map(([albumId, list]) => api.updatePhotos(list, { albumId })))
+          .catch((e) => toast.error('Couldn’t undo the move', errorMessage(e)))
+      })
+      return true
+    } catch (e) {
+      toast.error('Couldn’t move the photos', errorMessage(e))
+      return false
+    }
+  }
+}
+
+/** The white bar shown while photos are selected: N selected · Select all · Move · Hide · Download · Trash · ×. */
+export function PhotoSelectionBar({ event, ids, total, known, albums, currentAlbumId, onSelectAll, selectingAll, onClear }: Props) {
+  const api = useApi()
+  const toast = useToast()
+  const studio = useStudio().data
+  const wm = useWatermark().data
+  const move = useMovePhotos(event.id)
+  const [newAlbum, setNewAlbum] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const n = ids.length
-  const plural = (k: number) => `${fmt.count(k)} photo${k === 1 ? '' : 's'}`
+  const targets = albums.filter((a) => a.id !== currentAlbumId)
+  const allHidden = ids.every((id) => known.get(id)?.hidden)
+  const zip = n > ZIP_OVER
 
-  const move = useAction((a: Album) => api.updatePhotos(ids, { albumId: a.id }), { success: (_d, a) => `Moved ${plural(n)} to ${a.name}`, onSuccess: onClear })
-  const hide = useAction((hidden: boolean) => api.updatePhotos(ids, { hidden }), { success: (_d, h) => (h ? `${plural(n)} hidden from guests` : `${plural(n)} visible to guests again`), onSuccess: onClear })
-  const cover = useAction(() => api.setCover(eventId, ids[0], 'event'), { success: 'Event cover updated', onSuccess: onClear })
-  const zip = useAction(() => api.requestZip(eventId, studioEmail ?? '', { photoIds: ids }), {
-    success: (z) => `Preparing a ZIP of ${plural(z.photoCount)}. We’ll email the link to ${z.email}.`,
-    error: 'Couldn’t request the ZIP',
-    onSuccess: onClear,
-  })
-  const remove = useAction(() => api.deletePhotos(ids), { success: `${plural(n)} deleted`, onSuccess: onClear })
+  const doMove = async (a: Album) => { if (await move(ids, a, known, currentAlbumId)) onClear() }
 
-  const targets = albums.filter((a) => a.kind === 'album' && a.id !== currentAlbumId)
+  const hide = async () => {
+    const hidden = !allHidden
+    const changed = ids.filter((id) => (known.get(id)?.hidden ?? !hidden) !== hidden)
+    try {
+      await api.updatePhotos(ids, { hidden })
+      onClear()
+      toast.undo(hidden ? `${photosLabel(n)} hidden from guests` : `${photosLabel(n)} visible to guests again`, () => {
+        api.updatePhotos(changed.length ? changed : ids, { hidden: !hidden }).catch((e) => toast.error('Couldn’t undo', errorMessage(e)))
+      })
+    } catch (e) { toast.error('Couldn’t change who sees these photos', errorMessage(e)) }
+  }
+
+  const trash = () => {
+    if (event.coverPhotoId && ids.includes(event.coverPhotoId)) {
+      toast.error('One of these is the event cover', 'Set another photo as the cover first (open it, then ⋯ → Set as event cover), then trash these.')
+      return
+    }
+    const list = [...ids]
+    const undo = trashWithUndo('photos', list, () => api.deletePhotos(list), () => api.restorePhotos(list),
+      (e, what) => toast.error(what === 'trash' ? 'Couldn’t trash the photos' : 'Couldn’t bring the photos back', errorMessage(e)))
+    onClear()
+    toast.undo(`${photosLabel(list.length)} moved to trash`, undo, 'They’re deleted for good after 30 days.')
+  }
+
+  const cover = async () => {
+    const before = event.coverPhotoId
+    try {
+      await api.setCover(event.id, ids[0], 'event')
+      onClear()
+      if (before) toast.undo('Event cover changed', () => { api.setCover(event.id, before, 'event').catch((e) => toast.error('Couldn’t undo', errorMessage(e))) })
+      else toast.success('Event cover set')
+    } catch (e) { toast.error('Couldn’t set the cover', errorMessage(e)) }
+  }
+
+  const download = async () => {
+    if (zip) {
+      if (!studio?.email) { toast.error('We need your email for the ZIP', 'Add it in Settings → Studio profile.'); return }
+      setDownloading(true)
+      try {
+        const z = await api.requestZip(event.id, studio.email, { photoIds: ids })
+        onClear()
+        toast.success(`We’ll email you a ZIP of ${photosLabel(z.photoCount)}`, `The link goes to ${z.email} in a few minutes.`)
+      } catch (e) { toast.error('Couldn’t prepare the ZIP', errorMessage(e)) } finally { setDownloading(false) }
+      return
+    }
+    setDownloading(true)
+    try {
+      let saved = 0
+      for (const id of ids) {
+        const p = known.get(id) ?? (await api.getPhoto(id))
+        await downloadPhoto(api, p, 'web', { url: liveUrl(p.url), watermark: event.settings.watermarkOff ? undefined : `© ${wm?.text || studio?.name || 'Studio'}`, save: downloadBlob })
+        saved++
+      }
+      toast.success(`Downloaded ${photosLabel(saved)}`, 'Web size, 2048 px')
+    } catch (e) { toast.error('Download stopped', errorMessage(e)) } finally { setDownloading(false) }
+  }
+
   return (
     <>
-      <div role="toolbar" aria-label="Selected photos"
-        className="fixed bottom-4 left-1/2 z-30 flex w-max max-w-[calc(100vw-24px)] -translate-x-1/2 items-center gap-1.5 overflow-x-auto rounded-card bg-side px-2.5 py-2 text-side-ink shadow-float scrollbar-thin md:bottom-5">
-        <b className="shrink-0 px-2 text-[13px] text-side-gold">{fmt.count(n)} selected</b>
+      <SelectionBar label={`${fmt.count(n)} selected`} onClear={onClear}>
         {n < total && (
-          <button type="button" className="shrink-0 pr-1.5 text-[11.5px] font-semibold text-side-ink-2 hover:text-side-ink" onClick={onSelectAll} disabled={selectingAll}>
-            {selectingAll ? 'Selecting…' : `Select all ${fmt.count(total)}`}
-          </button>
+          <Button size="sm" variant="ghost" onClick={onSelectAll} loading={selectingAll}>Select all {fmt.count(total)}</Button>
         )}
-        <Menu align="center" trigger={<button type="button" className={barBtn}><FolderInput size={12} />Move to…</button>}
-          items={targets.length ? targets.map((a) => ({ label: a.name, hint: fmt.count(a.photoCount), onSelect: () => move.mutate(a) })) : [{ label: 'Create another album first', disabled: true }]} />
-        <button type="button" className={barBtn} onClick={() => hide.mutate(!allHidden)}>
-          {allHidden ? <><Eye size={12} />Unhide</> : <><EyeOff size={12} />Hide</>}
-        </button>
-        <Tip label={n === 1 ? 'Use this photo on the gallery cover' : 'Select one photo to use as the cover'}>
-          <span className="inline-flex"><button type="button" className={barBtn} disabled={n !== 1} onClick={() => cover.mutate(undefined)}><ImageIcon size={12} />Set as cover</button></span>
+        <span className="mx-1 h-5 w-px shrink-0 bg-line" aria-hidden />
+        {n === 1 && <Button size="sm" icon={<ImageIcon size={13} />} onClick={() => void cover()}>Set as cover</Button>}
+        <Menu align="center" width={230}
+          trigger={<Button size="sm" icon={<FolderInput size={13} />}>Move</Button>}
+          items={[
+            ...(targets.length
+              ? targets.map((a) => ({ label: a.name, hint: fmt.count(a.photoCount), onSelect: () => void doMove(a) }))
+              : [{ label: 'No other album yet', description: 'Make one to move photos into', disabled: true }]),
+            'separator',
+            { label: 'New album…', icon: <Plus size={14} />, onSelect: () => setNewAlbum(true) },
+          ]} />
+        <Button size="sm" icon={allHidden ? <Eye size={13} /> : <EyeOff size={13} />} onClick={() => void hide()}>{allHidden ? 'Unhide' : 'Hide'}</Button>
+        <Tip label={zip ? `Over ${ZIP_OVER} photos: we’ll email you a ZIP` : 'Web size, 2048 px'}>
+          <Button size="sm" icon={zip ? <Mail size={13} /> : <Download size={13} />} loading={downloading} onClick={() => void download()}>
+            {zip ? 'Email me a ZIP' : 'Download'}
+          </Button>
         </Tip>
-        <Tip label={studioEmail ? `Email a ZIP to ${studioEmail}` : 'Email me a ZIP'}>
-          <span className="inline-flex"><button type="button" className={barBtn} disabled={zip.isPending || !studioEmail} onClick={() => zip.mutate(undefined)}>
-            <Download size={12} />{zip.isPending ? 'Requesting…' : 'Download ZIP'}
-          </button></span>
-        </Tip>
-        <button type="button" className={`${barBtn} text-bad`} onClick={() => setConfirmDelete(true)}><Trash2 size={12} />Delete</button>
-        <Tip label="Clear selection (Esc)">
-          <button type="button" aria-label="Clear selection" className="grid size-7 shrink-0 place-items-center rounded-[7px] text-side-ink-2 hover:bg-side-2 hover:text-side-ink" onClick={onClear}><X size={14} /></button>
-        </Tip>
-      </div>
-      <ConfirmDialog open={confirmDelete} onOpenChange={setConfirmDelete} danger title={`Delete ${plural(n)}?`}
-        body={<>They disappear from the gallery and guests’ favourites straight away. Your plan’s photo count goes down accordingly. This can’t be undone.</>}
-        confirmLabel={`Delete ${plural(n)}`} onConfirm={() => remove.mutate(undefined)} />
+        <Button size="sm" variant="danger" icon={<Trash2 size={13} />} onClick={trash}>Trash</Button>
+      </SelectionBar>
+      <NewAlbumModal open={newAlbum} onOpenChange={setNewAlbum} eventId={event.id} count={n}
+        onCreated={(a) => void doMove(a)} />
     </>
+  )
+}
+
+/** "New album…" from a Move menu: name it, then the photos move into it. */
+export function NewAlbumModal({ open, onOpenChange, eventId, count, onCreated }: { open: boolean; onOpenChange: (v: boolean) => void; eventId: ID; count: number; onCreated: (a: Album) => void }) {
+  const api = useApi()
+  const toast = useToast()
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const submit = async () => {
+    if (!name.trim()) return
+    setBusy(true)
+    try { const a = await api.createAlbum(eventId, name.trim()); onOpenChange(false); setName(''); onCreated(a) }
+    catch (e) { toast.error('Couldn’t create the album', errorMessage(e)) } finally { setBusy(false) }
+  }
+  return (
+    <Modal open={open} onOpenChange={onOpenChange} title="New album" width={420}
+      footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" loading={busy} disabled={!name.trim()} onClick={() => void submit()}>Move {photosLabel(count)}</Button></>}>
+      <Field label="Album name" htmlFor="new-album-name">
+        <Input id="new-album-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Reception" onKeyDown={(e) => e.key === 'Enter' && void submit()} />
+      </Field>
+    </Modal>
   )
 }

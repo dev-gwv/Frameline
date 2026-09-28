@@ -14,7 +14,16 @@ export default function StudioLayout() {
   return (
     <Stack screenOptions={stack}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="manage/[id]" options={{ title: '' }} />
+      <Stack.Screen name="manage/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="new-event" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
+      <Stack.Screen name="sell" options={{ title: 'Sell photos' }} />
+      <Stack.Screen name="tools/watermark" options={{ title: 'Watermark' }} />
+      <Stack.Screen name="tools/camera-sync" options={{ title: 'Camera sync' }} />
+      <Stack.Screen name="tools/qr" options={{ title: 'Smart QR' }} />
+      <Stack.Screen name="tools/messages" options={{ title: 'Messages to guests' }} />
+      <Stack.Screen name="tools/plan" options={{ title: 'Plan and billing' }} />
+      <Stack.Screen name="tools/team" options={{ title: 'Team' }} />
+      <Stack.Screen name="tools/help" options={{ title: 'Help' }} />
     </Stack>
   )
 }

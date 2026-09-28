@@ -1,25 +1,26 @@
 import type { CSSProperties } from 'react'
-import type { WatermarkSettings } from '@frameline/shared'
-import { fontStack, LOGO_SIZE, TEXT_SIZE } from './lib'
+import { fontStack, LOGO_SIZE, TEXT_SIZE, type WmDraft } from './lib'
 
 /**
  * The simple watermark drawn on top of a PhotoFrame. Sizes are in cqw (share of photo width);
  * `edgeOffset` is a share of the short side, so portrait and landscape get the same margin.
+ * Photo overlay colours (white + shadow) are photo tones, not UI colours.
  */
-export function WatermarkOverlay({ wm, ratio = 1.5 }: { wm: WatermarkSettings; ratio?: number }) {
+export function WatermarkOverlay({ wm, ratio = 1.5 }: { wm: WmDraft; ratio?: number }) {
   const top = wm.position[0] === 't'
-  const left = wm.position[1] === 'l'
+  const h = wm.position[1] as 'l' | 'c' | 'r'
   const edge = `${(wm.edgeOffset ?? 3) * Math.min(1, 1 / ratio)}cqw`
   const pos: CSSProperties = {
     position: 'absolute',
     [top ? 'top' : 'bottom']: edge,
-    [left ? 'left' : 'right']: edge,
+    ...(h === 'c' ? { left: '50%', transform: 'translateX(-50%)' } : { [h === 'l' ? 'left' : 'right']: edge }),
     opacity: wm.opacity / 100,
-    textAlign: left ? 'left' : 'right',
+    textAlign: h === 'l' ? 'left' : h === 'c' ? 'center' : 'right',
     color: '#fff',
     textShadow: '0 1px 4px rgba(0,0,0,.55)',
     pointerEvents: 'none',
     maxWidth: '70cqw',
+    whiteSpace: 'nowrap',
   }
   if (wm.mode === 'logo') {
     if (!wm.logoUrl) {

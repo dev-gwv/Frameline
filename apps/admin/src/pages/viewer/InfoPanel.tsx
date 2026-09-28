@@ -1,86 +1,85 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Download, Heart, ScanFace, Upload, Wand2 } from 'lucide-react'
-import { DEMO_NOW, fmt, toneCss, type Album, type Person, type Photo } from '@frameline/shared'
+import { Download, Eye, Heart, ScanFace, Sparkles, Upload } from 'lucide-react'
+import { DEMO_NOW, fmt, toneCss, type Album, type Person, type Photo, type PhotoEvent } from '@frameline/shared'
 import { cn } from '@frameline/ui'
 import { SOURCE_LABEL } from '../workspace/lib'
 
-type Tab = 'details' | 'faces' | 'activity'
+type Tab = 'details' | 'people' | 'activity'
 
-export function InfoPanel({ photo, album, position, total, people, personName, eventId }: {
-  photo: Photo; album?: Album; position: number; total: number; people: Person[]; personName: (id: string) => string; eventId: string
+/** The viewer's side panel: Details · People · Activity (closed by default; I toggles it). */
+export function InfoPanel({ photo, album, event, people, personName }: {
+  photo: Photo; album?: Album; event?: PhotoEvent; people: Person[]; personName: (id: string) => string
 }) {
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('details')
   const ids = [...new Set(photo.faces.map((f) => f.personId))]
   const inPhoto = ids.map((id) => people.find((p) => p.id === id)).filter(Boolean) as Person[]
-  const quality = photo.exif.width <= 2048 && photo.exif.height <= 2048 ? 'Web-ready 2K' : 'Standard'
+  const original = photo.quality === 'original'
+  const uploadedAs = `${original ? 'Original file' : 'Standard'}${event && !event.settings.watermarkOff && !original ? ', watermarked' : ''}`
   const rows: [string, string][] = [
-    ['Captured', fmt.fullDateTime(photo.capturedAt)],
-    ['Camera', photo.exif.camera ?? 'Unknown'],
-    ['Lens', photo.exif.lens ?? '—'],
-    ['Exposure', photo.exif.exposure ?? '—'],
+    ['Album', album?.name ?? 'Album'],
+    ['Taken', `${fmt.date(photo.capturedAt)}, ${fmt.time(photo.capturedAt)}`],
+    ['Camera', [photo.exif.camera, photo.exif.lens, photo.exif.exposure].filter(Boolean).join(' · ') || 'Not recorded'],
     ['Size', `${photo.exif.width} × ${photo.exif.height} · ${fmt.bytes(photo.exif.sizeBytes)}`],
-    ['Uploaded', `${quality} · by ${photo.uploadedBy} · via ${SOURCE_LABEL[photo.source]}`],
-    ['Album', `${album?.name ?? 'Album'} · ${position > 0 ? `#${position} of ${fmt.count(total)}` : `#${photo.index}`}`],
+    ['Uploaded as', uploadedAs],
+    ['Guests', `${fmt.count(photo.views)} views · ${fmt.count(photo.downloads)} downloads · ${fmt.count(photo.favourites)} ♥`],
   ]
-  const tabs: { v: Tab; label: string }[] = [{ v: 'details', label: 'Details' }, { v: 'faces', label: `Faces · ${inPhoto.length}` }, { v: 'activity', label: 'Activity' }]
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3.5 p-4 text-side-ink">
-      <div role="tablist" className="flex gap-4 border-b border-side-line">
-        {tabs.map((t) => (
-          <button key={t.v} role="tab" type="button" aria-selected={tab === t.v} onClick={() => setTab(t.v)}
-            className={cn('pb-2 text-[13px] font-bold', tab === t.v ? 'text-side-ink shadow-[inset_0_-2px_0_var(--accent)]' : 'text-side-ink-2 hover:text-side-ink')}>{t.label}</button>
+    <div className="flex h-full min-h-0 flex-col gap-4 p-[18px] text-side-ink">
+      <div role="tablist" aria-label="Photo information" className="flex gap-5 border-b border-side-line">
+        {([['details', 'Details'], ['people', `People${inPhoto.length ? ` ${inPhoto.length}` : ''}`], ['activity', 'Activity']] as [Tab, string][]).map(([v, label]) => (
+          <button key={v} role="tab" type="button" aria-selected={tab === v} onClick={() => setTab(v)}
+            className={cn('min-h-[36px] pb-2 text-[13.5px] font-bold', tab === v ? 'text-side-ink shadow-[inset_0_-2px_0_var(--accent)]' : 'text-side-ink-2 hover:text-side-ink')}>{label}</button>
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
         {tab === 'details' && (
-          <dl className="flex flex-col gap-3">
+          <dl className="flex flex-col gap-3.5">
             {rows.map(([k, v]) => (
               <div key={k}>
-                <dt className="font-mono text-[10px] uppercase tracking-[.09em] text-side-ink-2">{k}</dt>
-                <dd className="text-[13px] font-semibold">{v}</dd>
+                <dt className="text-[12px] text-side-ink-2">{k}</dt>
+                <dd className="text-[14px] font-semibold tnum">{v}</dd>
               </div>
             ))}
-            <div className="flex gap-4 text-[12px] text-side-ink-2">
-              <span className="inline-flex items-center gap-1"><Heart size={13} />{photo.favourites} favourites</span>
-              <span className="inline-flex items-center gap-1"><Download size={13} />{photo.downloads} downloads</span>
-            </div>
+            {inPhoto.length > 0 && (
+              <div>
+                <dt className="mb-1.5 text-[12px] text-side-ink-2">People in this photo</dt>
+                <dd className="flex flex-wrap gap-2">
+                  {inPhoto.map((p) => <span key={p.id} title={personName(p.id)} className="size-9 rounded-full" style={{ background: toneCss(p.tone) }} />)}
+                </dd>
+              </div>
+            )}
           </dl>
         )}
-        {tab === 'faces' && (
-          photo.status === 'processing' ? <p className="text-[12.5px] text-side-ink-2">Faces are found once processing finishes, usually within a minute.</p>
-            : !inPhoto.length ? <p className="text-[12.5px] text-side-ink-2"><ScanFace size={14} className="mr-1 inline" />No faces found in this photo.</p>
+        {tab === 'people' && (
+          photo.status === 'processing' ? <p className="text-[13px] text-side-ink-2">Faces are found a minute or two after the photo finishes uploading.</p>
+            : !inPhoto.length ? <p className="flex items-center gap-2 text-[13px] text-side-ink-2"><ScanFace size={15} />No faces found in this photo.</p>
             : (
-              <div>
-                <div className="mb-2 font-mono text-[10px] uppercase tracking-[.09em] text-side-ink-2">People in this photo</div>
-                <div className="flex flex-wrap gap-3">
-                  {inPhoto.map((p) => (
-                    <button key={p.id} type="button" onClick={() => navigate(`/events/${eventId}?person=${p.id}`)} className="w-[64px] text-center hover:opacity-80" aria-label={`Show all photos of ${personName(p.id)}`}>
-                      <span className="mx-auto block size-11 rounded-full border-[1.5px] border-accent" style={{ background: toneCss(p.tone) }} />
-                      <span className="mt-1 block truncate text-[11px] font-semibold">{personName(p.id)}</span>
-                      <span className="block font-mono text-[9.5px] text-side-ink-2">{p.photoCount} photos</span>
+              <ul className="flex flex-col gap-1">
+                {inPhoto.map((p) => (
+                  <li key={p.id}>
+                    <button type="button" onClick={() => navigate(`/events/${photo.eventId}?person=${p.id}`)} className="flex w-full items-center gap-3 rounded-control px-1.5 py-1.5 text-left hover:bg-side">
+                      <span className="size-10 shrink-0 rounded-full" style={{ background: toneCss(p.tone) }} />
+                      <span className="min-w-0 flex-1"><b className="block truncate text-[13.5px]">{personName(p.id)}</b><span className="text-[12px] text-side-ink-2">In {fmt.count(p.photoCount)} photos · see them all</span></span>
                     </button>
-                  ))}
-                </div>
-                <p className="mt-3 text-[11.5px] text-side-ink-2">Pick a person to see every photo they’re in. Name people on the Guests page.</p>
-              </div>
+                  </li>
+                ))}
+              </ul>
             )
         )}
         {tab === 'activity' && (
-          <ul className="flex flex-col gap-2.5 text-[13px]">
-            <li className="flex items-center gap-2"><Heart size={14} className="text-side-gold" /><b>{photo.favourites}</b> guests favourited this</li>
-            <li className="flex items-center gap-2"><Download size={14} className="text-side-gold" /><b>{photo.downloads}</b> downloads</li>
-            <li className="flex items-center gap-2"><Upload size={14} className="text-side-gold" />Added by {photo.uploadedBy} · {fmt.ago(photo.capturedAt, DEMO_NOW)}</li>
+          <ul className="flex flex-col gap-3 text-[13.5px]">
+            <li className="flex items-center gap-2.5"><Upload size={15} className="text-side-gold" />Added by {photo.uploadedBy} via {SOURCE_LABEL[photo.source].toLowerCase()} · {fmt.ago(photo.capturedAt, DEMO_NOW)}</li>
+            <li className="flex items-center gap-2.5"><Eye size={15} className="text-side-gold" />{fmt.count(photo.views)} guest {photo.views === 1 ? 'view' : 'views'}</li>
+            <li className="flex items-center gap-2.5"><Download size={15} className="text-side-gold" />{fmt.count(photo.downloads)} downloads</li>
+            <li className="flex items-center gap-2.5"><Heart size={15} className="text-side-gold" />{fmt.count(photo.favourites)} guests added it to favourites</li>
+            {photo.enhancedFrom && <li className="flex items-center gap-2.5"><Sparkles size={15} className="text-side-gold" />Improved with AI</li>}
+            {photo.hidden && <li className="flex items-center gap-2.5 text-side-ink-2">Hidden from guests</li>}
           </ul>
         )}
       </div>
-      <button type="button" onClick={() => navigate(`/enhance/${photo.id}`)}
-        className="inline-flex h-9 items-center justify-center gap-2 rounded-control border border-side-line bg-side-2 text-[13px] font-bold text-side-gold hover:brightness-110">
-        <Wand2 size={14} />AI enhance this photo
-      </button>
-      <div className="font-mono text-[9.5px] text-side-ink-2">photo {photo.id} · album {photo.albumId}</div>
     </div>
   )
 }

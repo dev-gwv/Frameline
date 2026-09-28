@@ -32,7 +32,7 @@ export function EnquirySheet({ open, onOpenChange, studio, source, shortId, sess
     setErrors(errs); setSendError(null)
     if (Object.keys(errs).length) return
     setStage('sending')
-    const input = { name: form.name.trim(), phone: form.phone.trim(), email: session?.registration?.email ?? profile?.email ?? '', message: form.message.trim(), source }
+    const input = { name: form.name.trim(), phone: form.phone.trim(), email: session?.registration?.email || profile?.email || '', message: form.message.trim(), source }
     try {
       await api.createEnquiry(shortId ? { shortId } : { studio: studio.followCode }, input)
       guest.setProfile({ name: input.name, phone: input.phone })

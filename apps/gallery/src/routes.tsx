@@ -1,12 +1,12 @@
 import { lazy, Suspense, type ComponentType } from 'react'
 import { createBrowserRouter, Outlet, ScrollRestoration, useRouteError, isRouteErrorResponse, Link } from 'react-router-dom'
-import { Button } from '@frameline/ui'
+import { AlertTriangle } from 'lucide-react'
 import { Landing } from './pages/Landing'
 import { EventLayout } from './pages/EventLayout'
 import { EventHome } from './pages/EventHome'
 import { PersonalLink } from './pages/PersonalLink'
 import { NotFound } from './pages/NotFound'
-import { StatePage } from './components/common'
+import { linkBtn, PrimaryButton, StatePage } from './components/common'
 
 /** Secondary screens load on demand so the first open from WhatsApp stays small. */
 function page<T extends Record<string, unknown>>(load: () => Promise<T>, name: keyof T) {
@@ -31,11 +31,9 @@ function RouteError() {
   const err = useRouteError()
   if (isRouteErrorResponse(err) && err.status === 404) return <NotFound />
   return (
-    <StatePage title="Something went wrong" body="The page hit an error. Reload to try again — your favourites and downloads are safe.">
-      <div className="flex gap-2">
-        <Button size="lg" onClick={() => location.reload()}>Reload</Button>
-        <Link to="/"><Button variant="primary" size="lg">Home</Button></Link>
-      </div>
+    <StatePage icon={<AlertTriangle size={24} />} tone="warn" title="Something went wrong" body="This page hit an error. Reload to try again. Your favourites and downloads are safe.">
+      <PrimaryButton onClick={() => location.reload()}>Reload</PrimaryButton>
+      <Link to="/" className={linkBtn()}>Go to Frameline home</Link>
     </StatePage>
   )
 }

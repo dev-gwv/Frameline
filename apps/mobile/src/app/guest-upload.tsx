@@ -3,7 +3,7 @@ import { View, useWindowDimensions } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import * as ImagePicker from 'expo-image-picker'
 import { Image } from 'expo-image'
-import { Button, Card, EmptyState, Icon, LoadingList, Screen, Txt } from '@/components'
+import { Button, EmptyState, Icon, LoadingList, Screen, Txt } from '@/components'
 import { ApiError } from '@frameline/shared'
 import { useApi } from '@/lib/api'
 import { friendlyError } from '@/lib/errors'
@@ -34,7 +34,7 @@ export default function GuestUpload() {
   const album = event.albums.find((a) => a.kind === 'guest')
   const s = event.settings
   const remaining = serverRemaining ?? Math.max(0, s.guestUploadLimit - sentBefore)
-  if (!s.guestUploads || !album) return <Screen><EmptyState icon="upload-cloud" title="Guest uploads are off" body="The host isn’t collecting guest photos for this event." /></Screen>
+  if (!s.guestUploads || !album) return <Screen><EmptyState icon="upload-cloud" title="Guest uploads are off" body="The host isn’t collecting guest photos for this event." action="Back to the event" actionVariant="secondary" onAction={() => router.back()} /></Screen>
 
   const pick = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: Math.min(remaining, 50), quality: 0.9, orderedSelection: true })
@@ -65,12 +65,14 @@ export default function GuestUpload() {
   }
 
   if (sent) {
+    const review = s.reviewGuestUploads
     return (
       <Screen contentStyle={{ alignItems: 'center', paddingTop: 48, gap: 12 }}>
-        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: c.okSoft, alignItems: 'center', justifyContent: 'center' }}><Icon name="check" size={30} color={c.ok} /></View>
-        <Txt v="h2" center>{sent} photos sent</Txt>
-        <Txt v="small" center style={{ maxWidth: 300 }}>{s.reviewGuestUploads ? 'Sent for review. They’ll appear in Guest uploads once the host approves them.' : 'They’re now in the Guest uploads album.'}</Txt>
+        <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: c.okSoft, alignItems: 'center', justifyContent: 'center' }}><Icon name="check" size={30} color={c.ok} /></View>
+        <Txt weight="heavy" center style={{ fontSize: 20 }}>{review ? 'Sent for review' : 'Added to the gallery'}</Txt>
+        <Txt v="small" center style={{ maxWidth: 300 }}>{review ? `${sent} photos sent. They appear in Guest uploads once ${event.studio.name} approves them.` : `${sent} photos are now in the Guest uploads album.`}</Txt>
         <Button label="Done" variant="primary" size="lg" full style={{ marginTop: 12 }} onPress={() => router.back()} />
+        {remaining - sent > 0 ? <Button label="Send more" full onPress={() => { setSent(0); pick() }} /> : null}
       </Screen>
     )
   }
@@ -78,21 +80,22 @@ export default function GuestUpload() {
   const size = Math.floor((width - 32 - 12) / 4)
   return (
     <Screen>
-      <Txt v="small">Share the photos you took at {event.name}. Up to {remaining} more from this phone{s.watermarkGuestUploads ? '; the studio adds a watermark' : ''}.</Txt>
+      <Txt v="small">{s.reviewGuestUploads ? 'The host checks them before everyone can see them.' : 'Everyone at the event can see them straight away.'} Up to {s.guestUploadLimit} each{sentBefore ? `, ${remaining} left for you` : ''}.</Txt>
       {assets.length ? (
-        <Card style={{ gap: 12 }}>
-          <Txt weight="bold">{assets.length} selected</Txt>
+        <>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
             {assets.slice(0, 16).map((a) => <Image key={a.uri} source={{ uri: a.uri }} style={{ width: size, height: size, borderRadius: 6 }} contentFit="cover" />)}
           </View>
-          {assets.length > 16 ? <Txt v="small">+{assets.length - 16} more</Txt> : null}
+          {assets.length > 16 ? <Txt v="small">and {assets.length - 16} more</Txt> : null}
+          <Button label={`Send ${assets.length} photo${assets.length === 1 ? '' : 's'}`} variant="primary" size="lg" loading={busy} onPress={send} />
           <Button label="Choose different photos" variant="ghost" onPress={pick} />
-        </Card>
+        </>
+      ) : remaining > 0 ? (
+        <EmptyState icon="image" title="Pick your photos" body="Choose from your gallery. Your originals stay on your phone." action="Choose photos" onAction={pick} />
       ) : (
-        <EmptyState icon="image" title="Pick your photos" body="Choose from your gallery. Originals stay on your phone." action="Choose photos" onAction={pick} />
+        <EmptyState icon="check-circle" title="You’ve added all you can" body={`Each guest can add ${s.guestUploadLimit} photos to this event.`} action="Done" actionVariant="secondary" onAction={() => router.back()} />
       )}
-      {assets.length ? <Button label={`Send ${assets.length} photos`} variant="primary" size="lg" loading={busy} onPress={send} /> : null}
-      <Txt v="small" center color={c.ink3}>{s.reviewGuestUploads ? 'The host reviews guest photos before others can see them.' : 'Guest photos appear straight away.'}</Txt>
+      {s.watermarkGuestUploads ? <Txt v="small" center color={c.ink3}>The studio adds its watermark to guest photos.</Txt> : null}
     </Screen>
   )
 }

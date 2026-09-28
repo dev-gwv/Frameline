@@ -94,6 +94,7 @@ export const studios = sqliteTable('studios', {
   couponsRedeemed: json<string[]>('coupons_redeemed').notNull().default(sql`'[]'`),
   storeSettings: json<StoreSettings>('store_settings'),
   billing: json<StudioBilling>('billing'),
+  whatsapp: text('whatsapp'),
 }, (t) => [uniqueIndex('studios_handle_uq').on(t.handle), uniqueIndex('studios_follow_uq').on(t.followCode)])
 
 export const memberships = sqliteTable('memberships', {
@@ -158,7 +159,8 @@ export const albums = sqliteTable('albums', {
   firstCapture: ts('first_capture'),
   lastCapture: ts('last_capture'),
   createdAt: ts('created_at').notNull(),
-}, (t) => [index('albums_event_idx').on(t.eventId, t.order)])
+  deletedAt: ts('deleted_at'),
+}, (t) => [index('albums_event_idx').on(t.eventId, t.order), index('albums_deleted_idx').on(t.deletedAt)])
 
 export const photos = sqliteTable('photos', {
   id: text('id').primaryKey(),
@@ -182,9 +184,15 @@ export const photos = sqliteTable('photos', {
   source: text('source', { enum: ['web', 'camera', 'drive', 'guest', 'desktop'] }).notNull().default('web'),
   quality: text('quality', { enum: ['web', 'original'] }).notNull().default('web'),
   createdAt: ts('created_at').notNull(),
-  reviewStatus: text('review_status', { enum: ['pending', 'approved'] }),
+  reviewStatus: text('review_status', { enum: ['pending', 'approved', 'rejected'] }),
   enhancedFrom: text('enhanced_from'),
+  views: integer('views').notNull().default(0),
+  rotation: integer('rotation').notNull().default(0),
+  /** When face detection last finished for this photo (null = not scanned yet). */
+  facesIndexedAt: ts('faces_indexed_at'),
+  deletedAt: ts('deleted_at'),
 }, (t) => [
+  index('photos_deleted_idx').on(t.deletedAt),
   index('photos_r2key_idx').on(t.r2Key),
   index('photos_event_capture_idx').on(t.eventId, t.capturedAt, t.id),
   index('photos_album_capture_idx').on(t.albumId, t.capturedAt, t.id),
@@ -263,6 +271,7 @@ export const guests = sqliteTable('guests', {
   favourites: json<string[]>('favourites').notNull().default(sql`'[]'`),
   lastActive: ts('last_active').notNull(),
   registeredAt: ts('registered_at').notNull(),
+  removedAt: ts('removed_at'),
 }, (t) => [index('guests_event_idx').on(t.eventId, t.lastActive)])
 
 export const accessRequests = sqliteTable('access_requests', {
@@ -275,6 +284,8 @@ export const accessRequests = sqliteTable('access_requests', {
   createdAt: ts('created_at').notNull(),
   resolvedAt: ts('resolved_at'),
   resolvedBy: text('resolved_by'),
+  /** Guest row created by approving (removed again by reopen). */
+  guestId: text('guest_id'),
 }, (t) => [index('access_event_idx').on(t.eventId, t.status)])
 
 // ── Business ────────────────────────────────────────────────────────────────
@@ -307,6 +318,10 @@ export const orders = sqliteTable('orders', {
   shipping: json<ShippingAddress>('shipping'),
   remindedAt: ts('reminded_at'),
   reminderCount: integer('reminder_count').notNull().default(0),
+  refundedAt: ts('refunded_at'),
+  refundReason: text('refund_reason'),
+  trackingNumber: text('tracking_number'),
+  linkSentAt: ts('link_sent_at'),
   at: ts('at').notNull(),
 }, (t) => [index('orders_studio_idx').on(t.studioId, t.at), uniqueIndex('orders_number_uq').on(t.studioId, t.number)])
 
@@ -343,6 +358,7 @@ export const cameras = sqliteTable('cameras', {
   lastFile: text('last_file'),
   createdAt: ts('created_at').notNull(),
   passwordHash: text('password_hash'),
+  lastUploadAt: ts('last_upload_at'),
 }, (t) => [index('cameras_studio_idx').on(t.studioId), uniqueIndex('cameras_ftp_uq').on(t.ftpUser)])
 
 export const smartQrs = sqliteTable('smart_qrs', {
@@ -359,6 +375,7 @@ export const smartQrs = sqliteTable('smart_qrs', {
   scheduledAt: ts('scheduled_at'),
   dotStyle: text('dot_style', { enum: ['square', 'rounded', 'dots'] }),
   logoUrl: text('logo_url'),
+  deletedAt: ts('deleted_at'),
 }, (t) => [uniqueIndex('qrs_slug_uq').on(t.studioId, t.slug)])
 
 export const broadcasts = sqliteTable('broadcasts', {
@@ -373,6 +390,7 @@ export const broadcasts = sqliteTable('broadcasts', {
   createdAt: ts('created_at').notNull(),
   imageUrl: text('image_url'),
   cancelledAt: ts('cancelled_at'),
+  deletedAt: ts('deleted_at'),
 }, (t) => [index('broadcasts_studio_idx').on(t.studioId, t.createdAt)])
 
 export const tickets = sqliteTable('tickets', {
@@ -549,3 +567,26 @@ export const guestGalleries = sqliteTable('guest_galleries', {
   eventId: text('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
   lastOpenedAt: ts('last_opened_at').notNull(),
 }, (t) => [primaryKey({ columns: [t.guestKey, t.eventId] }), index('guest_galleries_key_idx').on(t.guestKey, t.lastOpenedAt)])
+
+// ── Added in 0004 (contract v5) ─────────────────────────────────────────────
+/** Per-event daily counters behind studio stats (visits, downloads, face searches, photo views). */
+export const eventDailyStats = sqliteTable('event_daily_stats', {
+  eventId: text('event_id').notNull(),
+  day: text('day').notNull(),
+  studioId: text('studio_id').notNull(),
+  visits: integer('visits').notNull().default(0),
+  downloads: integer('downloads').notNull().default(0),
+  faceSearches: integer('face_searches').notNull().default(0),
+  photoViews: integer('photo_views').notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.eventId, t.day] }), index('daily_stats_studio_idx').on(t.studioId, t.day)])
+
+/** "Notify me" requests on galleries without photos yet. */
+export const notifyRequests = sqliteTable('notify_requests', {
+  id: text('id').primaryKey(),
+  eventId: text('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  studioId: text('studio_id').notNull(),
+  phone: text('phone').notNull(),
+  createdAt: ts('created_at').notNull(),
+  notifiedAt: ts('notified_at'),
+  cancelledAt: ts('cancelled_at'),
+}, (t) => [uniqueIndex('notify_event_phone_uq').on(t.eventId, t.phone), index('notify_pending_idx').on(t.notifiedAt, t.cancelledAt)])

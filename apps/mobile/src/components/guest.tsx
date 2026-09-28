@@ -47,10 +47,7 @@ export function JoinForm({ autoFocus, onDone, compact }: { autoFocus?: boolean; 
           <Input mono value={value} onChangeText={(t) => { setValue(t.includes('/') ? t : t.toUpperCase()); setError(undefined) }} placeholder="6402F9F" autoCapitalize="characters" autoCorrect={false}
             autoFocus={autoFocus} returnKeyType="go" onSubmitEditing={() => submit()} invalid={!!error} accessibilityLabel="Event or studio code" />
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Scan a QR code" onPress={() => { onDone?.(); router.push('/scan') }}
-          style={({ pressed }) => [styles.scanBtn, { backgroundColor: c.side, opacity: pressed ? 0.8 : 1 }]}>
-          <Icon name="scan" size={22} color="#F2D38A" />
-        </Pressable>
+        <Button label="Scan QR" icon="scan" onPress={() => { onDone?.(); router.push('/scan') }} />
       </View>
       {error ? <Txt v="small" color={c.bad}>{error}</Txt> : null}
       <Button label="Open gallery" variant="primary" size={compact ? 'md' : 'lg'} loading={busy} disabled={!value.trim()} onPress={() => submit()} />
@@ -108,15 +105,15 @@ export function EventCard({ shortId, eventId, onPress }: { shortId: string; even
       <ToneView tone={e.coverTones[0]} style={{ height: 150, justifyContent: 'flex-end', padding: 14 }}>
         {e.coverUrl ? <Image source={{ uri: e.coverUrl }} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}
         <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(12,10,8,0.18)' }]} />
-        <Txt style={{ fontFamily: font.display, color: '#fff', fontSize: 10, letterSpacing: 2.4, position: 'absolute', top: 12, left: 0, right: 0, textAlign: 'center' }}>{e.studio.name.toUpperCase()}</Txt>
-        <Txt style={{ fontFamily: font.display, color: '#fff', fontSize: 24, lineHeight: 27 }} numberOfLines={2}>{e.name}</Txt>
+        <Txt style={{ fontFamily: font.bodyBold, color: 'rgba(255,255,255,0.9)', fontSize: 12, position: 'absolute', top: 12, left: 14 }}>{e.studio.name}</Txt>
+        <Txt style={{ fontFamily: font.bodyHeavy, color: '#fff', fontSize: 20, lineHeight: 24 }} numberOfLines={2}>{e.name}</Txt>
       </ToneView>
       <View style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10 }}>
         <View style={{ flex: 1 }}>
           <Txt v="small">{EVENT_TYPE_LABELS[e.type]} · {fmt.dateRange(e.date, e.endDate)} · {e.city}</Txt>
-          <Txt v="mono" color={c.ink3} style={{ fontSize: 12, marginTop: 2 }}>{fmt.count(e.photoCount)} photos · {e.shortId}</Txt>
+          <Txt v="small" color={c.ink3} style={{ marginTop: 2, fontVariant: ['tabular-nums'] }}>{fmt.count(e.photoCount)} photos · code {e.shortId}</Txt>
         </View>
-        {selfie ? <View style={[styles.pill, { backgroundColor: c.accentSoft }]}><Icon name="smile" size={13} color={c.accentText} /><Txt v="label" color={c.accentText} style={{ fontSize: 12 }}>Your photos</Txt></View> : null}
+        {selfie ? <View style={[styles.pill, { backgroundColor: c.accentSoft }]}><Icon name="smile" size={13} color={c.accentText} /><Txt v="label" color={c.accentText} style={{ fontSize: 12 }}>Found you</Txt></View> : null}
         <Icon name="chevron-right" size={18} color={c.ink3} />
       </View>
     </Pressable>
@@ -152,7 +149,6 @@ export function InfoCard({ icon, title, body, action, onAction }: { icon: Parame
 }
 
 const styles = StyleSheet.create({
-  scanBtn: { width: 50, height: 50, borderRadius: radius.control + 2, alignItems: 'center', justifyContent: 'center' },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
   enquiry: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: radius.card, borderWidth: 1, minHeight: 52 },
   icon: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },

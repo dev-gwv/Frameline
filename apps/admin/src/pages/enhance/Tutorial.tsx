@@ -1,33 +1,28 @@
 import { useState } from 'react'
-import { ChevronDown, HelpCircle } from 'lucide-react'
-import { Card, cn, StepBadge } from '@frameline/ui'
+import { Lightbulb, X } from 'lucide-react'
+import { fmt } from '@frameline/shared'
+import { Card } from '@frameline/ui'
 import { COST } from './presets'
 
-const STEPS = [
-  ['Pick a photo', 'Open any photo and choose the wand, or pick one below.'],
-  ['Choose a look', 'Tap a preset or describe the edit in your own words. Drag the divider to compare.'],
-  ['Save', `Each save costs ${COST} credits from your wallet. Keep the original or replace it.`],
-] as const
+const KEY = 'frameline.enhance.tutorial.dismissed'
+const readDismissed = () => { try { return localStorage.getItem(KEY) === '1' } catch { return false } }
 
-export function Tutorial({ defaultOpen = false }: { defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen)
+/** Small "how it works" card; dismissing it is remembered on this device. */
+export function Tutorial({ className }: { className?: string }) {
+  const [hidden, setHidden] = useState(readDismissed)
+  if (hidden) return null
+  const dismiss = () => { setHidden(true); try { localStorage.setItem(KEY, '1') } catch { /* private mode: hide for this visit */ } }
   return (
-    <Card>
-      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 text-left text-[13px] font-bold">
-        <HelpCircle size={15} className="text-accent-text" /> How AI enhance works
-        <ChevronDown size={15} className={cn('ml-auto text-ink-3 transition-transform', open && 'rotate-180')} />
-      </button>
-      {open && (
-        <ol className="mt-3 flex flex-col gap-2.5">
-          {STEPS.map(([t, d], i) => (
-            <li key={t} className="flex gap-2.5">
-              <StepBadge n={i + 1} />
-              <div><div className="text-[13px] font-bold">{t}</div><div className="text-[12px] text-ink-2">{d}</div></div>
-            </li>
-          ))}
-          <li className="text-[11.5px] text-ink-3">Edits run on a copy. Your original file is never changed unless you choose Replace.</li>
-        </ol>
-      )}
+    <Card className={className}>
+      <div className="flex items-start gap-3">
+        <span className="grid size-8 shrink-0 place-items-center rounded-control bg-accent-soft text-accent-text"><Lightbulb size={16} /></span>
+        <div className="min-w-0 flex-1 text-[13px] text-ink-2">
+          <b className="block text-[13.5px] text-ink">How AI enhance works</b>
+          Pick a change or describe it, drag the divider to compare, then save. Each save costs {fmt.rupees(COST)} from your wallet.
+          Your original stays as it is unless you choose “Replace the original”.
+        </div>
+        <button type="button" onClick={dismiss} aria-label="Hide these tips" className="-mr-1 -mt-1 grid size-9 shrink-0 place-items-center rounded-control text-ink-3 hover:bg-sunk hover:text-ink"><X size={16} /></button>
+      </div>
     </Card>
   )
 }

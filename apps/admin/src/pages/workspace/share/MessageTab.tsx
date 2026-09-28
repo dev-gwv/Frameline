@@ -1,75 +1,60 @@
-import { useRef, useState } from 'react'
-import { Copy, Mail, MessageCircle, Plus, RotateCcw } from 'lucide-react'
-import { fmt, type PhotoEvent, type Studio } from '@frameline/shared'
-import { Button, Textarea, Toggle, useToast } from '@frameline/ui'
-import { useCopy, useSettings } from './LinkTab'
-import { DEFAULT_TEMPLATE, MAX_TEMPLATE, VARIABLES, fillTemplate, loadTemplate, mailtoUrl, saveTemplate, variableValues, whatsappUrl, type Variable } from './message'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Copy, MessageCircle } from 'lucide-react'
+import type { PhotoEvent, Studio } from '@frameline/shared'
+import { Button, Textarea } from '@frameline/ui'
+import { useCopy } from './LinkTab'
+import { DEFAULT_TEMPLATE, MAX_TEMPLATE, fillTemplate, loadTemplate, saveTemplate, variableValues, whatsappUrl, type Variable } from './message'
 
-export function MessageTab({ event, studio }: { event: PhotoEvent; studio?: Studio }) {
-  const toast = useToast()
+/**
+ * Turns an edited, filled-in message back into a template: this event's name, link, PIN… become {placeholders},
+ * so the edit is reused for the next events with their own details (and a new PIN fills in by itself).
+ */
+function toTemplate(text: string, values: Record<Variable, string>) {
+  const pairs = (Object.entries(values) as [Variable, string][])
+    .filter(([k, v]) => v && (k !== 'PIN' || v.length >= 4))
+    .sort((a, b) => b[1].length - a[1].length)
+  let out = text
+  for (const [k, v] of pairs) out = out.split(v).join(`{${k}}`)
+  return out
+}
+
+/** Message tab: the ready message, editable; edits are saved for the next events. Copy, or send on WhatsApp (gold). */
+export function useMessageTab(event: PhotoEvent, studio?: Studio): { body: ReactNode; footer: ReactNode } {
   const copy = useCopy()
-  const settings = useSettings(event)
-  const [text, setText] = useState(loadTemplate)
-  const [saved, setSaved] = useState(loadTemplate)
-  const ref = useRef<HTMLTextAreaElement>(null)
-  const filled = fillTemplate(text, variableValues(event, studio))
-  const now = new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(new Date())
+  const values = useMemo(() => variableValues(event, studio), [event, studio])
+  const [template, setTemplate] = useState(loadTemplate)
+  const [text, setText] = useState(() => fillTemplate(template, values))
+  const [saved, setSaved] = useState(false)
+  const editing = useRef(false)
+  // Refill when the event's details change (e.g. a new PIN), unless mid-edit.
+  useEffect(() => { if (!editing.current) setText(fillTemplate(template, values)) }, [template, values])
 
-  const insert = (v: Variable) => {
-    const token = `{${v}}`
-    const el = ref.current
-    const start = el?.selectionStart ?? text.length
-    const end = el?.selectionEnd ?? text.length
-    const next = (text.slice(0, start) + token + text.slice(end)).slice(0, MAX_TEMPLATE)
-    setText(next)
-    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(start + token.length, start + token.length) })
+  const onChange = (v: string) => {
+    editing.current = true
+    setText(v)
+    setSaved(false)
   }
-  const save = () => {
-    if (saveTemplate(text)) { setSaved(text); toast.success('Saved for all events', 'New shares use this message.') }
-    else toast.error('Couldn’t save the template', 'Your browser blocked storage. Check private-browsing settings.')
+  const commit = () => {
+    editing.current = false
+    const t = toTemplate(text, values)
+    if (t !== template) { setTemplate(t); setSaved(saveTemplate(t)) }
   }
+  const reset = () => { setTemplate(DEFAULT_TEMPLATE); saveTemplate(DEFAULT_TEMPLATE); editing.current = false; setText(fillTemplate(DEFAULT_TEMPLATE, values)); setSaved(false) }
 
-  return (
-    <div className="grid gap-5 px-5 py-4 sm:px-6 md:grid-cols-2">
-      <div className="flex min-w-0 flex-col gap-2.5">
-        <div className="flex items-center justify-between">
-          <b className="text-[13px]">Template</b>
-          <span className="font-mono text-[11px] text-ink-3">{fmt.count(text.length)} / {fmt.count(MAX_TEMPLATE)}</span>
-        </div>
-        <Textarea ref={ref} value={text} maxLength={MAX_TEMPLATE} onChange={(e) => setText(e.target.value)} aria-label="Message template" className="min-h-[190px] text-[13px]" />
-        <div>
-          <div className="eyebrow mb-1.5">Insert</div>
-          <div className="flex flex-wrap gap-1.5">
-            {VARIABLES.map((v) => (
-              <button key={v} type="button" onClick={() => insert(v)}
-                className="inline-flex items-center gap-1 rounded-full border border-dashed border-line-2 bg-sunk px-2 py-0.5 text-[11px] font-bold text-ink-2 hover:border-accent hover:text-accent-text">
-                <Plus size={10} />{v}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-2">
-          <Button variant="ghost" size="sm" icon={<RotateCcw size={12} />} onClick={() => setText(DEFAULT_TEMPLATE)} disabled={text === DEFAULT_TEMPLATE}>Reset to default</Button>
-          <Button variant="primary" onClick={save} disabled={text === saved || !text.trim()}>Save for all events</Button>
-        </div>
+  const body = (
+    <>
+      <Textarea value={text} maxLength={MAX_TEMPLATE} onChange={(e) => onChange(e.target.value)} onBlur={commit} aria-label="Message to guests" className="min-h-[190px] text-[14px] leading-relaxed" />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[12.5px] text-ink-3">{saved ? 'Saved. Your next events use this message.' : 'Edits here are saved for your next events.'}</span>
+        <button type="button" onClick={reset} disabled={template === DEFAULT_TEMPLATE} className="min-h-[28px] text-[13px] font-bold text-accent-text hover:underline disabled:text-ink-3 disabled:no-underline">Reset to default</button>
       </div>
-      <div className="flex min-w-0 flex-col gap-2.5">
-        <div className="flex items-center justify-between">
-          <b className="text-[13px]">Preview</b>
-          <label className="flex items-center gap-2 text-[12px]">Short links <Toggle size="sm" label="Short links" checked={event.settings.shortLinks} onCheckedChange={(v) => settings.mutate({ shortLinks: v })} /></label>
-        </div>
-        <div className="flex-1 rounded-card bg-sunk p-3.5">
-          <div className="ml-auto max-w-[92%] whitespace-pre-wrap break-words rounded-[10px] rounded-tr-sm bg-ok-soft px-3 py-2.5 text-[12.5px] leading-relaxed text-ink shadow-card">
-            {filled}
-            <div className="mt-1 text-right font-mono text-[9.5px] text-ink-3">{now} ✓✓</div>
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          <Button className="justify-center" icon={<MessageCircle size={14} />} onClick={() => window.open(whatsappUrl(filled), '_blank', 'noopener')}>WhatsApp</Button>
-          <Button className="justify-center" icon={<Mail size={14} />} onClick={() => { window.location.href = mailtoUrl(`Your photos from ${event.name}`, filled) }}>Email</Button>
-          <Button className="justify-center" icon={<Copy size={14} />} onClick={() => copy(filled, 'Message')}>Copy</Button>
-        </div>
-      </div>
-    </div>
+    </>
   )
+  const footer = (
+    <>
+      <Button icon={<Copy size={15} />} onClick={() => { commit(); void copy(text, 'Message') }}>Copy message</Button>
+      <Button variant="primary" icon={<MessageCircle size={15} />} onClick={() => { commit(); window.open(whatsappUrl(text), '_blank', 'noopener') }}>Send on WhatsApp</Button>
+    </>
+  )
+  return { body, footer }
 }

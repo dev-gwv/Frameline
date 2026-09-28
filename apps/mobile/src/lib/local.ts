@@ -37,12 +37,14 @@ export interface LocalState {
   enquiries: SentEnquiry[]
   orders: PlacedOrder[]
   guestUploads: Record<ID, number>
+  /** "Notify me" requests sent from this phone (event id → mobile number), so the screen can offer Stop. */
+  notify: Record<ID, string>
 }
 
 const KEY = 'frameline.local.v1'
 const initial: LocalState = {
   mode: null, studioSession: null, joined: [], following: [], favourites: [], registrations: {}, unlocked: [], seeAll: [], selfie: {},
-  enquiries: [], orders: [], guestUploads: {},
+  enquiries: [], orders: [], guestUploads: {}, notify: {},
 }
 
 function load(): LocalState {
@@ -128,6 +130,7 @@ export const actions = {
   clearSelfie: (eventId: ID) => local.set((s) => { const next = { ...s.selfie }; delete next[eventId]; return { selfie: next } }),
   addEnquiry: (e: Omit<SentEnquiry, 'at'>) => local.set((s) => ({ enquiries: [{ ...e, at: new Date().toISOString() }, ...s.enquiries] })),
   addOrder: (o: PlacedOrder) => local.set((s) => ({ orders: [o, ...s.orders] })),
+  setNotify: (eventId: ID, phone: string | null) => local.set((s) => { const next = { ...s.notify }; if (phone) next[eventId] = phone; else delete next[eventId]; return { notify: next } }),
   countGuestUpload: (eventId: ID, n: number) => local.set((s) => ({ guestUploads: { ...s.guestUploads, [eventId]: (s.guestUploads[eventId] ?? 0) + n } })),
 }
 

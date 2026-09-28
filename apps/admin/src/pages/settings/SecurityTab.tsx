@@ -6,6 +6,7 @@ import { Button, Card, cn, ConfirmDialog, Field, Input, Skeleton, Tip, useToast 
 import { errorMessage, useHttpApi } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { useLocalState } from '../wallet/lib'
+import { SectionTitle } from './SideList'
 
 const ME_KEY = ['studio', 'me']
 
@@ -79,11 +80,13 @@ export function SecurityTab() {
   )
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+    <div>
+    <SectionTitle title="Security" description="Your password and the devices you’re signed in on." />
+    <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
       <Card className="flex flex-col gap-3">
         {loading ? <Skeleton className="h-72" /> : <>
           <div>
-            <h3 className="font-display text-[15px] font-semibold">{hasPassword ? 'Change password' : 'Set a password'}</h3>
+            <h3 className="font-sans text-[15px] font-extrabold">{hasPassword ? 'Change password' : 'Set a password'}</h3>
             <p className="text-[12px] text-ink-3">{hasPassword ? 'You sign in with Google, an email code, or your email and password.' : 'You sign in with Google or an email code now. Add a password to sign in with your email too.'}</p>
           </div>
           <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); submit() }}>
@@ -112,7 +115,7 @@ export function SecurityTab() {
 
       <div className="flex flex-col gap-4">
         <Card className="flex flex-col gap-2">
-          <div className="flex items-center gap-2"><MonitorSmartphone size={16} className="text-ink-2" /><h3 className="font-display text-[15px] font-semibold">Signed in somewhere else?</h3></div>
+          <div className="flex items-center gap-2"><MonitorSmartphone size={16} className="text-ink-2" /><h3 className="font-sans text-[15px] font-extrabold">Signed in somewhere else?</h3></div>
           <p className="text-[12.5px] text-ink-2">If you lost a phone or used a shared computer, sign out everywhere. Every device, including this one, has to sign in again.</p>
           <Button className="self-start" loading={signingOut} onClick={() => setConfirmAll(true)}>Sign out of all devices</Button>
           {mode === 'demo' && <p className="text-[11.5px] text-ink-3">With sample data there is only this browser to sign out.</p>}
@@ -123,9 +126,10 @@ export function SecurityTab() {
         </Card>
       </div>
 
-      <ConfirmDialog open={confirmAll} onOpenChange={setConfirmAll} danger title="Sign out of all devices?" confirmLabel="Sign out everywhere"
+      <ConfirmDialog open={confirmAll} onOpenChange={setConfirmAll} title="Sign out of all devices?" confirmLabel="Sign out everywhere"
         body="Everyone signed in to this account on phones, computers and the desktop uploader is signed out, including you here. You can sign straight back in."
         onConfirm={() => out(true)} />
+    </div>
     </div>
   )
 }

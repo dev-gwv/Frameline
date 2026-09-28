@@ -4,7 +4,7 @@ const inr2 = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumF
 /** 12480 → "12,480" (Indian grouping). */
 export const count = (n: number) => inr.format(n)
 /** 48200 → "₹48,200"; 31840 with decimals → "₹31,840.00" */
-export const rupees = (n: number, decimals = false) => `₹${(decimals ? inr2 : inr).format(n)}`
+export const rupees = (n: number, decimals = false) => `₹${(decimals || Math.round(n * 100) % 100 !== 0 ? inr2 : inr).format(n)}`
 export const money = (n: number, currency: 'INR' | 'USD', decimals = false) => (currency === 'USD' ? `$${n.toLocaleString('en-US')}` : rupees(n, decimals))
 export const signedRupees = (n: number) => `${n >= 0 ? '+' : '−'} ${rupees(Math.abs(n), true)}`
 

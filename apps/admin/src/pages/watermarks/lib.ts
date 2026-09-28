@@ -28,11 +28,23 @@ export const TEXT_SIZE: Record<WatermarkSettings['size'], number> = { subtle: 3.
 /** Logo width as a share of photo width (cqw), per size choice. */
 export const LOGO_SIZE: Record<WatermarkSettings['size'], number> = { subtle: 12, normal: 18, bold: 27 }
 
-export const POSITIONS: { value: WatermarkSettings['position']; label: string; arrow: string }[] = [
-  { value: 'tl', label: 'Top left', arrow: '↖' },
-  { value: 'tr', label: 'Top right', arrow: '↗' },
-  { value: 'bl', label: 'Bottom left', arrow: '↙' },
-  { value: 'br', label: 'Bottom right', arrow: '↘' },
+/** The form edits WatermarkSettings directly (six positions: top/bottom × left/centre/right). */
+export type WmPosition = WatermarkSettings['position']
+export type WmDraft = WatermarkSettings
+
+export const POSITIONS: { value: WmPosition; label: string }[] = [
+  { value: 'tl', label: 'Top left' },
+  { value: 'tc', label: 'Top' },
+  { value: 'tr', label: 'Top right' },
+  { value: 'bl', label: 'Bottom left' },
+  { value: 'bc', label: 'Bottom' },
+  { value: 'br', label: 'Bottom right' },
+]
+
+export const SIZES: { value: WatermarkSettings['size']; label: string }[] = [
+  { value: 'subtle', label: 'Small' },
+  { value: 'normal', label: 'Medium' },
+  { value: 'bold', label: 'Large' },
 ]
 
 /**

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import {
-  ApiError, createHttpApi, createMockApi, memoryTokenStore, storageGuestTokenStore, type ChangeTopic, type FramelineApi,
+  ApiError, createHttpApi, createMockApi, localStoragePersistence, memoryTokenStore, storageGuestTokenStore, type ChangeTopic, type FramelineApi,
 } from '@frameline/shared'
 import { guest } from './guest'
 
@@ -25,10 +25,8 @@ export function createApi(): FramelineApi {
       baseUrl: API_URL, tokens: memoryTokenStore(), guestTokens: storageGuestTokenStore(GUEST_TOKENS_KEY), guestDeviceId: deviceId,
     })
   }
-  return createMockApi({
-    load: () => { try { return localStorage.getItem(STORAGE_KEY) } catch { return null } },
-    save: (d) => { try { localStorage.setItem(STORAGE_KEY, d) } catch { /* quota or private mode */ } },
-  })
+  // Persisted to localStorage and kept in sync across tabs (the storage event).
+  return createMockApi(localStoragePersistence(STORAGE_KEY))
 }
 
 const DEVICE_KEY = 'frameline.device'
@@ -49,6 +47,8 @@ const SHORT_ID_ARG: Partial<Record<keyof FramelineApi, (args: unknown[]) => unkn
   registerGuest: (a) => a[0],
   listPublicPhotos: (a) => a[0],
   searchFaces: (a) => a[0],
+  recordPhotoViews: (a) => a[1],
+  requestNotify: (a) => a[0],
   createOrder: (a) => a[0],
   setFavourite: (a) => a[2],
   recordDownload: (a) => a[1],

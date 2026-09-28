@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm'
-import type { LedgerEntry } from '@frameline/shared'
+import { WALLET_POT_LABEL, type LedgerEntry } from '@frameline/shared'
 import { getDb, schema, type DB } from '../db/client'
 import { ledgerOut } from '../db/mappers'
 import { AppError } from '../lib/errors'
@@ -8,14 +8,17 @@ import { toMajor } from '../lib/money'
 
 /**
  * Money model:
- * - `studios.wallet_paise` is the prepaid wallet ("credits") used for packs, renewals and AI enhance.
+ * - `studios.wallet_paise` is the prepaid part of the wallet (Add money, coupons).
  * - `ledger_entries` is the studio's statement. `balance_paise` is the payout balance (store earnings):
- *   sales add to it and payouts/refunds take from it. Wallet movements (credits-added/credits-used) are listed
- *   with their amount but leave the payout balance unchanged.
+ *   sales add to it and payouts/refunds take from it. Prepaid movements (credits-added/credits-used from prepaid)
+ *   are listed with their amount but leave the payout balance unchanged.
+ * - The UI shows one "Wallet" = prepaid + earnings. Spending (packs, renewals, AI enhance, plan checkout via
+ *   wallet) draws from prepaid first, then from positive earnings; each part gets its own ledger line naming the pot.
+ *   Withdrawable stays = earnings (never below 0).
  */
 export class InsufficientCredits extends AppError {
   constructor(required: number, available: number) {
-    super(402, 'insufficient_credits', 'Not enough credits', `You need ${toMajor(required)} credits but have ${toMajor(available)}. Add credits and try again.`, {
+    super(402, 'insufficient_credits', 'Not enough in your wallet', `You need ₹${toMajor(required)} but your wallet has ₹${toMajor(available)}. Add money to your wallet and try again.`, {
       extensions: { required: toMajor(required), available: toMajor(available) },
     })
   }
@@ -38,16 +41,38 @@ export async function addLedger(db: DB, studioId: string, type: LedgerEntry['typ
   return ledgerOut(row)
 }
 
-/** Atomically takes credits from the wallet (402 when there aren't enough) and records it. */
-export async function debitWallet(db: DB, studioId: string, amountPaise: number, description: string): Promise<LedgerEntry> {
+/**
+ * Takes `amountPaise` from the wallet: prepaid first (atomic conditional update), then positive store earnings
+ * (a `credits-used` line that moves the payout balance). 402 when prepaid + earnings aren't enough.
+ * Returns the ledger lines written (one per pot used), prepaid first.
+ */
+export async function spendFromWallet(db: DB, studioId: string, amountPaise: number, description: string, attempt = 0): Promise<LedgerEntry[]> {
   const st = schema.studios
-  const res = await db.update(st).set({ walletPaise: sql`${st.walletPaise} - ${amountPaise}` })
-    .where(and(eq(st.id, studioId), gte(st.walletPaise, amountPaise))).run()
-  if (res.meta.changes === 0) {
-    const [row] = await db.select({ w: st.walletPaise }).from(st).where(eq(st.id, studioId)).limit(1)
-    throw new InsufficientCredits(amountPaise, row?.w ?? 0)
+  const [row] = await db.select({ w: st.walletPaise }).from(st).where(eq(st.id, studioId)).limit(1)
+  const prepaid = Math.max(0, row?.w ?? 0)
+  const earnings = Math.max(0, await payoutBalance(db, studioId))
+  if (prepaid + earnings < amountPaise) throw new InsufficientCredits(amountPaise, prepaid + earnings)
+  const fromPrepaid = Math.min(prepaid, amountPaise)
+  const fromEarnings = amountPaise - fromPrepaid
+  const lines: LedgerEntry[] = []
+  if (fromPrepaid > 0) {
+    const res = await db.update(st).set({ walletPaise: sql`${st.walletPaise} - ${fromPrepaid}` })
+      .where(and(eq(st.id, studioId), gte(st.walletPaise, fromPrepaid))).run()
+    // Another request spent it first: start over with fresh numbers.
+    if (res.meta.changes === 0) {
+      if (attempt >= 3) throw new InsufficientCredits(amountPaise, 0)
+      return spendFromWallet(db, studioId, amountPaise, description, attempt + 1)
+    }
+    lines.push(await addLedger(db, studioId, 'credits-used', `${description} · ${WALLET_POT_LABEL.prepaid}`, -fromPrepaid, false))
   }
-  return addLedger(db, studioId, 'credits-used', description, -amountPaise, false)
+  if (fromEarnings > 0) lines.push(await addLedger(db, studioId, 'credits-used', `${description} · ${WALLET_POT_LABEL.earnings}`, -fromEarnings, true))
+  return lines
+}
+
+/** Spends from the wallet (see spendFromWallet) and returns the first ledger line written. */
+export async function debitWallet(db: DB, studioId: string, amountPaise: number, description: string): Promise<LedgerEntry> {
+  const lines = await spendFromWallet(db, studioId, amountPaise, description)
+  return lines[0]
 }
 
 export async function creditWallet(db: DB, studioId: string, amountPaise: number, description: string): Promise<LedgerEntry> {

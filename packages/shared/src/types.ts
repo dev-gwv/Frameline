@@ -32,6 +32,8 @@ export interface Studio {
   about?: string
   /** Cover photo for the website / studio app header. */
   coverUrl?: string
+  /** WhatsApp number guests message (defaults to `phone` when empty). */
+  whatsapp?: string
   /** What the studio mostly shoots (from onboarding), e.g. "wedding". */
   studioType?: string
   /** How they heard about Frameline (from onboarding). */
@@ -96,9 +98,25 @@ export interface EventSettings {
   storeEnabled: boolean
   disabled: boolean
   shortLinks: boolean
+  /** Per-event price changes: price id → rupees. Missing ids use the studio's price list (listPrices). */
+  priceOverrides: Record<string, number>
+  /** Show the "For sale" watermark (StoreSettings.saleWatermark) on this event's previews while it sells. */
+  forSaleWatermark: boolean
 }
 
-export interface EventHost { id: ID; name: string; email: string; phone?: string; role: 'client' | 'host' }
+export type HostAccess = 'full' | 'upload'
+/**
+ * A person who helps run one event. `access`: 'full' = sees everything and changes settings, 'upload' = only uploads
+ * (second shooter). `status`: 'invited' until they open the gallery with that email/phone, then 'accepted'.
+ * The API always returns `access` and `status`; they're optional in patches (defaults 'full' / 'invited').
+ */
+export interface EventHost {
+  id: ID; name: string; email: string; phone?: string; role: 'client' | 'host'
+  access?: HostAccess
+  status?: 'invited' | 'accepted'
+  /** When the invite was sent (ISO). */
+  invitedAt?: string
+}
 
 export interface PhotoEvent {
   id: ID
@@ -137,6 +155,8 @@ export interface Album {
   lastCapture?: string
   /** Photo chosen as the album cover (setCover scope 'album'). */
   coverPhotoId?: ID
+  /** Set while the album is in the trash (deleteAlbum); restoreAlbum brings it back, purged after TRASH_DAYS. */
+  deletedAt?: string
 }
 
 export interface Film { id: ID; eventId: ID; name: string; url: string }
@@ -168,14 +188,26 @@ export interface Photo {
   exif: Exif
   uploadedBy: string
   source: 'web' | 'camera' | 'drive' | 'guest' | 'desktop'
-  /** Guest uploads awaiting review are 'pending' and hidden from the gallery until 'approved'. */
-  reviewStatus?: 'pending' | 'approved'
+  /** Guest uploads awaiting review are 'pending' and hidden from the gallery until 'approved'; 'rejected' ones never show. */
+  reviewStatus?: ReviewStatus
   /** Set on AI-enhanced copies. */
   enhancedFrom?: ID
+  /** How the file was uploaded: 'original' counts 2 against the plan. */
+  quality: UploadQuality
+  /** Times guests opened this photo in the gallery (recordPhotoViews). */
+  views: number
+  /** Clockwise display rotation in degrees (rotatePhotos); renditions and downloads are turned the same way. */
+  rotation: PhotoRotation
+  /** Set while the photo is in the trash (deletePhotos); restorePhotos brings it back, purged after TRASH_DAYS. */
+  deletedAt?: string
 }
+
+export type ReviewStatus = 'pending' | 'approved' | 'rejected'
+export type PhotoRotation = 0 | 90 | 180 | 270
 
 export interface Person { id: ID; eventId: ID; name?: string; photoCount: number; tone: Tone }
 
+/** A signed-up guest. `email` is '' when they signed up with a phone number only. */
 export interface Guest {
   id: ID
   eventId: ID
@@ -217,6 +249,14 @@ export interface Order {
   shipping?: ShippingAddress
   /** Present while payment is pending with a provider (real API with Razorpay keys). */
   checkout?: { provider: 'razorpay'; orderId: string; keyId: string; amount: number; currency: 'INR' }
+  /** Set by refundOrder (seeded refunds may not have these). */
+  refundedAt?: string
+  /** Why the order was refunded; the buyer sees this. */
+  refundReason?: string
+  /** Courier tracking number for print orders (updateOrder); the buyer sees it on their order. */
+  trackingNumber?: string
+  /** Last time the download link was (re)sent to the buyer (resendDownloadLink). */
+  linkSentAt?: string
 }
 
 export type PaymentMethod = 'upi' | 'card' | 'netbanking' | 'international'
@@ -235,7 +275,50 @@ export interface LedgerEntry {
   description: string
   type: 'sale' | 'payout' | 'refund' | 'renewal-markup' | 'credits-used' | 'credits-added'
   amount: number
+  /** Store earnings after this line (payout balance). Don't derive the wallet from it: use getWallet(). */
   balance: number
+}
+
+/**
+ * The studio's money, from getWallet(). UI copy calls all of it "wallet" (never "credits" or "balance").
+ * - `balance`: the one number to show as "Wallet" (= prepaid + earnings).
+ * - `withdrawable`: what Withdraw may send to the bank (store earnings, never below 0).
+ * - `prepaid`: money added with Add money or a coupon. Spending (packs, renewals, AI enhance, paying a plan from the
+ *   wallet) takes this part first, then positive `earnings`; each part gets its own ledger line naming the pot.
+ *   A 402 `insufficient_credits` problem reports `available` = prepaid + positive earnings.
+ * - `earnings`: store earnings after fees, refunds and payouts. Can go below 0 after a refund (recovered from later sales).
+ * All amounts are rupees (major units), like every money field in the contract.
+ */
+export interface WalletBalance {
+  balance: number
+  withdrawable: number
+  prepaid: number
+  earnings: number
+  currency: 'INR'
+  /** Server time the numbers were computed (ISO). */
+  asOf: string
+}
+
+/** Actionable items for Home "Needs you". Only things a person must act on; no activity. */
+export type NeedsYouKind = 'access-request' | 'guest-uploads' | 'event-expiring' | 'face-data-expiring'
+export interface NeedsYouItem {
+  /** Stable id: `${kind}:${refId}`. */
+  id: string
+  kind: NeedsYouKind
+  eventId: ID
+  eventName: string
+  /** Plain sentence, e.g. "Rohan Mehta wants to see the photos". */
+  title: string
+  /** Second line, e.g. "“I’m the couple’s cousin” · Riya & Kabir Wedding". */
+  detail: string
+  /** access-request: the request to pass to resolveAccessRequest. */
+  accessRequestId?: ID
+  /** guest-uploads: photos awaiting review. */
+  count?: number
+  /** event-expiring / face-data-expiring: whole days left (0 = today, below 0 = already expired). */
+  daysLeft?: number
+  /** When it happened (requests, uploads) or the deadline (expiry), ISO. */
+  at: string
 }
 
 export interface Camera {
@@ -250,6 +333,8 @@ export interface Camera {
   lastFile?: string
   /** FTP password: only returned by createCamera and resetCameraPassword. */
   password?: string
+  /** When this camera last sent a file (ISO); absent until the first upload. */
+  lastUploadAt?: string
 }
 
 export interface CameraUpload { id: ID; cameraId: ID; filename: string; at: string; sizeBytes: number; status: 'uploaded' | 'failed' | 'skipped'; photoId?: ID; error?: string }
@@ -261,6 +346,8 @@ export interface SmartQR {
   scheduledAt?: string
   dotStyle?: 'square' | 'rounded' | 'dots'
   logoUrl?: string
+  /** Set while in the trash (deleteQR): the printed code stops resolving until restoreQR. */
+  deletedAt?: string
 }
 
 export interface Broadcast {
@@ -268,6 +355,8 @@ export interface Broadcast {
   imageUrl?: string
   /** Set when a scheduled broadcast was cancelled. */
   cancelledAt?: string
+  /** Set while in the trash (deleteBroadcast); restoreBroadcast brings it back. A scheduled one isn't sent while trashed. */
+  deletedAt?: string
 }
 
 export interface Ticket {
@@ -291,7 +380,8 @@ export interface WatermarkSettings {
   mode: 'text' | 'logo'
   text: string
   subtitle: string
-  position: 'tl' | 'tr' | 'bl' | 'br'
+  /** Corner or edge: top/bottom × left/centre/right. */
+  position: WatermarkPosition
   size: 'subtle' | 'normal' | 'bold'
   opacity: number
   font: string
@@ -300,6 +390,8 @@ export interface WatermarkSettings {
   /** Distance from the edge, in % of the short side (default 3). */
   edgeOffset: number
 }
+
+export type WatermarkPosition = 'tl' | 'tc' | 'tr' | 'bl' | 'bc' | 'br'
 
 export interface Enquiry {
   id: ID; name: string; phone: string; email: string; message: string; source: string; at: string; note?: string
@@ -348,18 +440,40 @@ export interface StoreSettings {
     address: { street: string; city: string; state: string; postal: string }
     documents: KycDocument[]
   }
-  payout: { holder: string; accountLast4: string; ifsc: string; bank: string; branch: string; verified: boolean }
-  saleWatermark: { template: 'forsale' | 'centre'; text: string; orientation: 'diagonal' | 'vertical' | 'horizontal'; size: number; opacity: number; color: string }
+  payout: {
+    holder: string; accountLast4: string; ifsc: string; bank: string; branch: string; verified: boolean
+    /** Result of the latest ₹1 account check (verifyPayoutAccount, or automatically after bank details change). */
+    check?: PayoutCheck
+  }
+  saleWatermark: { template: SaleWatermarkTemplate; text: string; orientation: 'diagonal' | 'vertical' | 'horizontal'; size: number; opacity: number; color: string }
   international: {
     enabled: boolean; plan?: 'starter' | 'growth' | 'pro'; paymentLink?: string; upiQrUrl?: string; upiQrName?: string; email?: string; whatsapp?: string
   }
   terms: string
 }
 
+/** The "For sale" watermark styles the Sell settings offer. */
+export type SaleWatermarkTemplate = 'forsale' | 'centre' | 'logo' | 'corner' | 'frame'
+
+/**
+ * The ₹1 bank-account check. 'checking' while it runs; 'verified' when the bank's name matches the account holder
+ * (payouts allowed); 'name_mismatch' when the bank has it under `nameAtBank`; 'failed' when the account can't be reached.
+ */
+export interface PayoutCheck {
+  status: 'checking' | 'verified' | 'name_mismatch' | 'failed'
+  /** Name the bank has on the account (known after the check). */
+  nameAtBank?: string
+  /** Bank the IFSC belongs to. */
+  bankName?: string
+  checkedAt: string
+  /** Plain sentence for the UI, e.g. "The bank has this account under RAHUL PATEL." */
+  message?: string
+}
+
 /** Patch for updateStoreSettings: sections are merged; `payout.accountNumber` is write-only (kept as last 4 digits). */
 export interface StoreSettingsPatch {
   kyc?: Partial<Omit<StoreSettings['kyc'], 'address'>> & { address?: Partial<StoreSettings['kyc']['address']> }
-  payout?: Partial<Omit<StoreSettings['payout'], 'verified' | 'accountLast4'>> & { accountNumber?: string }
+  payout?: Partial<Omit<StoreSettings['payout'], 'verified' | 'accountLast4' | 'check'>> & { accountNumber?: string }
   saleWatermark?: Partial<StoreSettings['saleWatermark']>
   international?: Partial<StoreSettings['international']>
   terms?: string
@@ -388,6 +502,8 @@ export interface UsageBreakdown {
 export interface PublicStudio {
   id: ID; name: string; handle: string; logoUrl?: string; brandColor: string; phone: string; email: string
   website?: string; instagram?: string; city: string; followCode: string
+  /** Number for "Message on WhatsApp" links: the studio's WhatsApp number, else its phone. */
+  whatsapp: string
 }
 
 export type PublicBlockReason = 'disabled' | 'archived' | 'expired' | 'empty'
@@ -429,7 +545,12 @@ export interface OrderItemInput {
 }
 
 /** The watermark guests' downloads must carry (enabled = false when the event has watermarkOff). */
-export interface PublicWatermark { enabled: boolean; settings: WatermarkSettings }
+export interface PublicWatermark {
+  enabled: boolean
+  settings: WatermarkSettings
+  /** The "For sale" watermark for previews: present when the event sells (storeEnabled) with forSaleWatermark on. */
+  sale?: StoreSettings['saleWatermark']
+}
 
 /** "Download all" uses left for this guest (5 per guest per gallery). */
 export interface DownloadAllowance { remaining: number; limit: number }
@@ -439,3 +560,58 @@ export interface PublicEventSummary {
   id: ID; shortId: string; name: string; type: EventType; date: string; city: string; coverTones: [Tone, Tone, Tone]
   photoCount: number; studioName: string; lastOpenedAt: string
 }
+
+// ── Contract v5: stats, handle check, notify ───────────────────────────────
+/** One event's numbers (getEventStats). Counts are all-time; `faces` is face finding progress ("N of M ready"). */
+export interface EventStats {
+  eventId: ID
+  /** Gallery opens (web + Android + iOS). */
+  visits: number
+  /** Sum of per-photo guest views. */
+  photoViews: number
+  downloads: number
+  favourites: number
+  /** Signed-up guests (removed guests excluded). */
+  guests: number
+  /** Selfie searches that found photos. */
+  faceSearches: number
+  /** Photos in the event's regular albums (trash excluded). */
+  photos: number
+  /** Photos still being processed after upload. */
+  processing: number
+  /** Face finding: `ready` of `total` photos are searchable; `pending` are still being scanned. */
+  faces: { ready: number; total: number; pending: number }
+  asOf: string
+}
+
+export interface StatsTotals {
+  visits: number
+  downloads: number
+  faceSearches: number
+  photoViews: number
+  /** Photos added to events (trash and guest uploads excluded). */
+  photosDelivered: number
+  /** Photo sales in rupees (INR orders that were paid and not refunded). */
+  sales: number
+  orders: number
+}
+
+/** Studio totals for Reports (getStudioStats): a month, the month before it, and all time. */
+export interface StudioStats {
+  /** 'YYYY-MM' of `thisMonth` (server time unless asked for). */
+  month: string
+  thisMonth: StatsTotals
+  lastMonth: StatsTotals
+  allTime: Pick<StatsTotals, 'visits' | 'downloads' | 'faceSearches' | 'photoViews'>
+  asOf: string
+}
+
+/** Gallery address check (checkHandle). `reason` explains an unavailable handle; 'yours' = the studio already has it. */
+export interface HandleCheck {
+  handle: string
+  available: boolean
+  reason?: 'invalid' | 'reserved' | 'taken' | 'yours'
+}
+
+/** "Notify me" on a gallery without photos yet (requestNotify). */
+export interface NotifyRequest { eventId: ID; phone: string; createdAt: string }

@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Link2Off, WifiOff } from 'lucide-react'
-import { Button } from '@frameline/ui'
 import { decodeGuestLink, type GuestLinkPayload, type GuestSession } from '@frameline/shared'
 import { useApi } from '../lib/api'
 import { authFrom, guest } from '../lib/guest'
 import { isNetwork } from '../lib/errors'
-import { StatePage } from '../components/common'
+import { CodeForm, StatePage, WideButton } from '../components/common'
 
 type LinkError = 'bad' | 'missing' | 'offline'
 
@@ -69,26 +68,26 @@ export function PersonalLink() {
 
   if (error === 'offline') {
     return (
-      <StatePage icon={<WifiOff size={26} />} title="You seem to be offline" body="We couldn't open your link. Check your internet connection and try again.">
-        <Button variant="primary" size="lg" onClick={() => location.reload()}>Try again</Button>
+      <StatePage icon={<WifiOff size={24} />} tone="neutral" title="You seem to be offline" body="We couldn’t open your link. Check your internet connection and try again.">
+        <WideButton onClick={() => location.reload()}>Try again</WideButton>
       </StatePage>
     )
   }
   if (error) {
     return (
-      <StatePage icon={<Link2Off size={26} />} title={error === 'bad' ? 'This link is broken' : 'This gallery is no longer here'}
+      <StatePage icon={<Link2Off size={24} />} tone="neutral" title={error === 'bad' ? 'This link is broken' : 'We couldn’t find this gallery'}
         body={error === 'bad'
-          ? 'Part of the link may be missing — try copying the whole link from the message again, or enter the event code instead.'
-          : 'The event in this link was removed or the link is out of date. Ask the host for a new link.'}>
-        <Link to="/"><Button variant="primary" size="lg">Enter an event code</Button></Link>
+          ? 'Part of the link may be missing. Copy the whole link from the message again, or type the event code.'
+          : 'The gallery in this link was removed or the link is out of date. Type the event code, or ask the host for a new link.'}>
+        <CodeForm />
       </StatePage>
     )
   }
   return (
-    <main className="grid min-h-dvh place-items-center" aria-busy aria-live="polite">
+    <main className="grid min-h-dvh place-items-center bg-paper" aria-busy aria-live="polite">
       <div className="flex flex-col items-center gap-3 text-ink-2">
-        <span className="size-7 animate-spin rounded-full border-[3px] border-accent border-r-transparent" aria-hidden />
-        <span className="text-[13px]">Opening your photos…</span>
+        <span className="size-8 animate-spin rounded-full border-[3px] border-accent border-r-transparent" aria-hidden />
+        <span className="text-[14px] font-semibold">Opening your photos…</span>
       </div>
     </main>
   )

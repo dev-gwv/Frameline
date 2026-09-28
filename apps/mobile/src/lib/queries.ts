@@ -1,5 +1,5 @@
 import { useMutation, useQuery, type UseMutationOptions } from '@tanstack/react-query'
-import type { FramelineApi, ID, ListPhotosQuery, Photo, PublicPhotosQuery } from '@frameline/shared'
+import { ApiError, type FramelineApi, type ID, type ListPhotosQuery, type Photo, type PublicPhotosQuery } from '@frameline/shared'
 import { useApi } from './api'
 import { friendlyError } from './errors'
 import { useLocal, type SelfieMatch } from './local'
@@ -24,6 +24,41 @@ export const usePhotos = (eventId: ID | undefined, q: ListPhotosQuery = {}) => {
 export const useActivity = () => { const api = useApi(); return useQuery({ queryKey: ['activity'], queryFn: () => api.listActivity() }) }
 export const useOrders = () => { const api = useApi(); return useQuery({ queryKey: ['orders'], queryFn: () => api.listOrders() }) }
 export const useCameras = () => { const api = useApi(); return useQuery({ queryKey: ['cameras'], queryFn: () => api.listCameras() }) }
+export const useWatermark = () => { const api = useApi(); return useQuery({ queryKey: ['watermark'], queryFn: () => api.getWatermark() }) }
+export const useQRs = () => { const api = useApi(); return useQuery({ queryKey: ['qrs'], queryFn: () => api.listQRs() }) }
+export const useBroadcasts = () => { const api = useApi(); return useQuery({ queryKey: ['broadcasts'], queryFn: () => api.listBroadcasts() }) }
+export const useTeam = () => { const api = useApi(); return useQuery({ queryKey: ['team'], queryFn: () => api.listTeam() }) }
+/** Event numbers (visits, downloads, guests, face finding progress…) from getEventStats. */
+export const useEventStats = (eventId?: ID) => { const api = useApi(); return useQuery({ queryKey: ['event', eventId, 'stats'], queryFn: () => api.getEventStats(eventId!), enabled: !!eventId }) }
+export const useGuests = (eventId?: ID) => { const api = useApi(); return useQuery({ queryKey: ['guests', eventId], queryFn: () => api.listGuests(eventId!), enabled: !!eventId }) }
+export const useAccessRequests = (eventId?: ID) => { const api = useApi(); return useQuery({ queryKey: ['access-requests', eventId], queryFn: () => api.listAccessRequests(eventId!), enabled: !!eventId }) }
+
+/** The studio's money (owner only). Show `balance` as "Wallet"; never say "credits". Other roles get 403: treated as none. */
+export const useWallet = () => {
+  const api = useApi()
+  return useQuery({ queryKey: ['wallet'], queryFn: async () => { try { return await api.getWallet() } catch (e) { if (e instanceof ApiError && e.status === 403) return null; throw e } } })
+}
+
+/** Home "Needs you": only things someone must act on. Uploaders get 403: treated as empty. */
+export const useNeedsYou = () => {
+  const api = useApi()
+  return useQuery({ queryKey: ['needs-you'], queryFn: async () => { try { return await api.listNeedsYou() } catch (e) { if (e instanceof ApiError && e.status === 403) return []; throw e } } })
+}
+
+/** Guest photos waiting for review in one event (the Guest uploads album, reviewStatus pending). */
+export const usePendingGuestPhotos = (eventId?: ID) => {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['photos', eventId, 'pending-review'],
+    enabled: !!eventId,
+    queryFn: async () => {
+      const albums = await api.listAlbums(eventId!)
+      const guest = albums.find((a) => a.kind === 'guest')
+      if (!guest) return []
+      return (await api.listPhotos(eventId!, { albumId: guest.id })).items.filter((p) => p.reviewStatus === 'pending')
+    },
+  })
+}
 
 // ── Guest ───────────────────────────────────────────────────────────────────
 const upper = (s?: string) => (s ? s.toUpperCase() : undefined)

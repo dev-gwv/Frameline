@@ -10,7 +10,7 @@ import { useLocal } from '@/lib/local'
 import { usePhotoList, type PhotoScope } from '@/lib/photoList'
 import { usePublicEvent } from '@/lib/queries'
 import { CaptureHost, type CaptureHandle } from '@/lib/save'
-import { font, useTheme } from '@/theme'
+import { useTheme } from '@/theme'
 
 /** Guest photo grid. `id` is the gallery short id. */
 export default function EventPhotos() {
@@ -40,18 +40,18 @@ export default function EventPhotos() {
   const s = event.settings
   const studio = event.studio
   const canDownload = s.downloads === 'all' || (s.downloads === 'own' && scope === 'mine')
-  const title = scope === 'mine' ? `We found you in ${all.length} photos` : scope === 'highlights' ? 'Highlights' : albumId ? event.albums.find((a) => a.id === albumId)?.name ?? 'Album' : 'All photos'
+  const title = scope === 'mine' ? `You’re in ${fmt.count(all.length)} photos` : scope === 'highlights' ? 'Highlights' : albumId ? event.albums.find((a) => a.id === albumId)?.name ?? 'Album' : 'All photos'
   const barH = 68 + insets.bottom
 
   const header = (
     <View style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12, gap: 10 }}>
-      <Txt style={{ fontFamily: font.display, letterSpacing: 3, fontSize: 11, color: studio.brandColor ?? c.accentText }}>{(studio.name.split(' ')[0] ?? '').toUpperCase()}</Txt>
-      <Txt v="h2">{title}</Txt>
+      <Txt v="small">{event.name} · {studio.name}</Txt>
+      <Txt v="h3" style={{ fontSize: 18 }}>{title}</Txt>
       {scope !== 'highlights' ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }} style={{ marginHorizontal: -16 }}>
           <View style={{ width: 10 }} />
           <Chip label="All" count={scope === 'mine' ? all.length : fmt.count(event.photoCount)} selected={!albumId} onPress={() => setAlbumId(undefined)} />
-          {chipAlbums.map(({ a, n }) => <Chip key={a.id} label={a.name} count={n} selected={albumId === a.id} onPress={() => setAlbumId(a.id)} />)}
+          {chipAlbums.map(({ a, n }) => <Chip key={a.id} label={a.kind === 'guest' ? 'Guest uploads' : a.name} count={fmt.count(n)} selected={albumId === a.id} onPress={() => setAlbumId(a.id)} />)}
           <View style={{ width: 10 }} />
         </ScrollView>
       ) : null}
@@ -67,7 +67,9 @@ export default function EventPhotos() {
           header={header}
           favourites={favSet}
           bottomInset={barH + 12}
-          empty={<EmptyState icon="image" title="No photos here yet" body={scope === 'mine' ? 'You’re not in any photos in this album. Try All.' : 'The studio is still adding photos. Check back soon.'} />}
+          empty={scope === 'mine' && !all.length
+            ? <EmptyState icon="face" title="We couldn’t find you yet" body="Photos are still being added. Try again later, or retake the selfie in good light." action="Retake" actionVariant="secondary" onAction={() => router.push({ pathname: '/event/[id]/selfie', params: { id: event.shortId } })} />
+            : <EmptyState icon="image" title="No photos here yet" body={scope === 'mine' ? 'You’re not in any photos in this album. Try All.' : 'The studio is still adding photos. Check back soon.'} />}
           onPress={(p) => router.push({ pathname: '/viewer', params: { shortId: event.shortId, eventId: event.id, scope, albumId: albumId ?? '', start: p.id } })}
         />
       )}
@@ -78,7 +80,7 @@ export default function EventPhotos() {
         {s.storeEnabled ? <Button label="Buy" icon="shopping-bag" style={{ flex: 1 }} disabled={!photos.length} onPress={() => router.push({ pathname: '/buy', params: { shortId: event.shortId, eventId: event.id, scope, albumId: albumId ?? '' } })} /> : null}
         {canDownload
           ? <Button label={`Download ${photos.length}`} icon="download" variant="primary" style={{ flex: 1.4 }} disabled={!photos.length} onPress={() => setDownloadOpen(true)} />
-          : <View style={{ flex: 1.4, justifyContent: 'center' }}><Txt v="small" center>{s.downloads === 'none' ? 'Downloads are off for this gallery' : 'Find yourself to download your photos'}</Txt></View>}
+          : <View style={{ flex: 1.4, justifyContent: 'center' }}><Txt v="small" center>{s.downloads === 'none' ? 'Downloads are off for this gallery' : 'Find your photos to download them'}</Txt></View>}
       </View>
 
       <DownloadSheet open={downloadOpen} onClose={() => setDownloadOpen(false)} photos={photos} event={event} host={capture} albumId={scope === 'album' ? albumId : undefined} personId={scope === 'mine' ? personId : undefined} />

@@ -70,11 +70,18 @@ export function Stage({ photo, url, view, setView, showFaces, personName, waterm
       onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}
       onDoubleClick={() => setView((v) => (v.scale > 1 ? { ...v, scale: 1, x: 0, y: 0 } : { ...v, scale: 2.5 }))}
     >
+      {/* Outer box = what you see (pan/zoom); the inner layer turns the photo, so the watermark stays upright. */}
+      <div className="absolute left-1/2 top-1/2"
+        style={{
+          width: fitW, height: fitH, marginLeft: -fitW / 2, marginTop: -fitH / 2,
+          transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+          transition: drag.current ? 'none' : 'transform 160ms ease-out',
+        }}>
       <div
         className={cn('absolute left-1/2 top-1/2 rounded-[3px] shadow-float', photo.status === 'processing' && 'shimmer bg-side-2')}
         style={{
           width: elW, height: elH, marginLeft: -elW / 2, marginTop: -elH / 2,
-          transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale}) rotate(${view.rotate}deg) scaleX(${view.flip ? -1 : 1})`,
+          transform: `rotate(${view.rotate}deg) scaleX(${view.flip ? -1 : 1})`,
           transition: drag.current ? 'none' : 'transform 160ms ease-out',
           background: photo.status === 'processing' || url ? undefined : toneCss(photo.tone),
         }}
@@ -90,7 +97,8 @@ export function Stage({ photo, url, view, setView, showFaces, personName, waterm
             </div>
           )
         })}
-        {watermark && <div className="pointer-events-none absolute bottom-2.5 right-3.5 font-display text-[15px] text-white/70" style={{ transform: view.flip ? 'scaleX(-1)' : undefined }}>© {watermark}</div>}
+      </div>
+      {watermark && <div className="pointer-events-none absolute bottom-2.5 right-3.5 font-display text-[15px] text-white/70">© {watermark}</div>}
       </div>
     </div>
   )

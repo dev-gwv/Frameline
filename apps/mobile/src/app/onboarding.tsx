@@ -18,20 +18,20 @@ export default function Onboarding() {
   const pickStudio = () => { actions.setMode('studio'); router.replace(session ? '/home' : '/sign-in') }
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.side }}>
+    <View style={{ flex: 1, backgroundColor: c.paper }}>
       <View style={[styles.mosaic, { paddingTop: insets.top + 12 }]}>
-        {mosaic.map((i, k) => <ToneView key={k} tone={TONES[i]!} style={[styles.tile, k === 4 && { borderWidth: 2, borderColor: '#F2D38A' }]} />)}
-        <LinearGradient colors={['transparent', c.side]} style={StyleSheet.absoluteFill} start={{ x: 0.5, y: 0.35 }} end={{ x: 0.5, y: 1 }} />
+        {mosaic.map((i, k) => <ToneView key={k} tone={TONES[i]!} style={[styles.tile, k === 4 && { borderWidth: 2, borderColor: c.accent }]} />)}
+        <LinearGradient colors={['transparent', c.paper]} style={StyleSheet.absoluteFill} start={{ x: 0.5, y: 0.35 }} end={{ x: 0.5, y: 1 }} />
       </View>
       <View style={{ flex: 1, paddingHorizontal: 20, paddingBottom: insets.bottom + 20, justifyContent: 'flex-end', gap: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <LogoMark size={32} />
-          <Txt style={{ fontFamily: font.display, fontSize: 20, color: c.sideInk }}>Frameline</Txt>
+          <Txt weight="heavy" style={{ fontSize: 19 }}>Frameline</Txt>
         </View>
-        <Txt style={{ fontFamily: font.display, fontSize: 32, lineHeight: 36, color: c.sideInk }}>
-          Every guest, their photos, <GoldText size={32}>by tonight.</GoldText>
+        <Txt style={{ fontFamily: font.display, fontSize: 30, lineHeight: 35, color: c.ink }}>
+          Every guest, their photos, <GoldText size={30}>by tonight.</GoldText>
         </Txt>
-        <Txt color={c.sideInk2} style={{ marginBottom: 8 }}>How will you use Frameline on this phone? You can switch any time.</Txt>
+        <Txt v="small" style={{ marginBottom: 8 }}>How will you use Frameline on this phone? You can switch any time.</Txt>
         <Choice icon="smile" title="I’m a guest" body="Open an event, find yourself with a selfie, save your photos." onPress={pickGuest} primary />
         <Choice icon="camera" title="I’m a photographer" body="Manage events, upload from your phone, share galleries." onPress={pickStudio} />
       </View>
@@ -43,18 +43,18 @@ function Choice({ icon, title, body, onPress, primary }: { icon: IconName; title
   const { c } = useTheme()
   const content = (
     <View style={styles.choice}>
-      <View style={[styles.choiceIcon, { backgroundColor: primary ? 'rgba(30,21,8,0.12)' : c.side }]}>
-        <Icon name={icon} size={22} color={primary ? c.accentInk : '#F2D38A'} />
+      <View style={[styles.choiceIcon, { backgroundColor: primary ? 'rgba(30,21,8,0.12)' : c.sunk }]}>
+        <Icon name={icon} size={22} color={primary ? c.accentInk : c.ink2} />
       </View>
       <View style={{ flex: 1 }}>
-        <Txt weight="heavy" color={primary ? c.accentInk : c.sideInk} style={{ fontSize: 17 }}>{title}</Txt>
-        <Txt v="small" color={primary ? 'rgba(30,21,8,0.75)' : c.sideInk2}>{body}</Txt>
+        <Txt weight="heavy" color={primary ? c.accentInk : c.ink} style={{ fontSize: 17 }}>{title}</Txt>
+        <Txt v="small" color={primary ? 'rgba(30,21,8,0.78)' : c.ink2}>{body}</Txt>
       </View>
-      <Icon name="arrow-right" size={20} color={primary ? c.accentInk : c.sideInk2} />
+      <Icon name="arrow-right" size={20} color={primary ? c.accentInk : c.ink3} />
     </View>
   )
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={title} onPress={onPress} style={({ pressed }) => [{ borderRadius: radius.card + 2, overflow: 'hidden', opacity: pressed ? 0.88 : 1 }, primary ? shadow.float : { backgroundColor: c.side2, borderWidth: 1, borderColor: c.sideLine }]}>
+    <Pressable accessibilityRole="button" accessibilityLabel={title} onPress={onPress} style={({ pressed }) => [{ borderRadius: radius.card + 2, overflow: 'hidden', opacity: pressed ? 0.88 : 1 }, primary ? shadow.float : [{ backgroundColor: c.surface, borderWidth: 1, borderColor: c.line }, shadow.card]]}>
       {primary ? <LinearGradient {...goldGradient}>{content}</LinearGradient> : content}
     </Pressable>
   )

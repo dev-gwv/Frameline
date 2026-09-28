@@ -6,7 +6,8 @@ import type {
   AbandonedCart, Asset, DownloadAllowance, PublicEventSummary, PublicStudio, PublicWatermark,
   Album, Broadcast, Camera, CameraUpload, Enquiry, EventSettings, Guest, GuestSession, LedgerEntry, NotificationPrefs, Order, Photo, PhotoEvent,
   Price, PublicEvent, Purchase, SmartQR, StoreSettings, Studio, StudioProfile, TeamMember, Ticket, Usage, UsageBreakdown, UsageReport,
-  WatermarkSettings, Website, ZipRequest,
+  WatermarkSettings, Website, ZipRequest, WalletBalance, NeedsYouItem,
+  AccessRequest, EventStats, HandleCheck, NotifyRequest, PayoutCheck, StudioStats,
 } from './types'
 import type { SeedState } from './seed'
 
@@ -559,7 +560,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     updateEvent: (id, patch) => request<PhotoEvent>('PATCH', `/v1/events/${enc(id)}`, { body: pick(patch, EVENT_KEYS) }),
     updateEventSettings: (id, patch: Partial<EventSettings>) => request<PhotoEvent>('PATCH', `/v1/events/${enc(id)}/settings`, { body: patch }),
     resetPin: async (id) => (await request<{ pin: string }>('POST', `/v1/events/${enc(id)}/pin/reset`, { idempotent: true })).pin,
-    deleteEvent: (id) => request<void>('DELETE', `/v1/events/${enc(id)}`),
+    deleteEvent: (id, o = {}) => request<void>('DELETE', `/v1/events/${enc(id)}`, { query: o.permanent ? { permanent: 'true' } : undefined }),
 
     listAlbums: (eventId) => listAll<Album>(`/v1/events/${enc(eventId)}/albums`),
     createAlbum: (eventId, name) => request<Album>('POST', `/v1/events/${enc(eventId)}/albums`, { body: { name }, idempotent: true }),
@@ -643,7 +644,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     updateStoreSettings: (patch) => request<StoreSettings>('PATCH', '/v1/store/settings', { body: patch }),
     requestPayout: (amount) => request<LedgerEntry>('POST', '/v1/payouts', { body: { amount }, idempotent: true }),
     listPurchases: () => listAll<Purchase>('/v1/purchases'),
-    changePlan: (planId, period) => request<PlanChange>('POST', '/v1/studio/plan', { body: { planId, period }, idempotent: true }),
+    changePlan: (planId, o) => request<PlanChange>('POST', '/v1/studio/plan', { body: { planId, billing: o.billing, payWith: o.payWith ?? 'card' }, idempotent: true }),
     setRenewalMultiplier: (multiplier) => request<Usage>('PUT', '/v1/studio/renewal-multiplier', { body: { multiplier } }),
     redeemCoupon: (code) => request<{ credits: number; walletCredits: number }>('POST', '/v1/studio/coupons', { body: { code }, idempotent: true }),
     spendCredits: (amount, description) => request<{ walletCredits: number; entry: LedgerEntry }>('POST', '/v1/studio/credits/spend', { body: { amount, description }, idempotent: true }),
@@ -780,6 +781,40 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
         return null
       }
     },
+
+    // ── Contract v4 (redesign) ───────────────────────────────────────────────
+    getWallet: () => get<WalletBalance>('/v1/wallet'),
+    listNeedsYou: async () => (await get<{ items: NeedsYouItem[] }>('/v1/needs-you')).items,
+    refundOrder: (orderId, reason) => request<Order>('POST', `/v1/orders/${enc(orderId)}/refund`, { body: { reason }, idempotent: true }),
+
+    // ── Contract v5 ─────────────────────────────────────────────────────────
+    async restorePhotos(ids) {
+      let restored = 0
+      for (const part of chunks(ids, 500)) restored += (await request<{ restored: number }>('POST', '/v1/photos/restore', { body: { ids: part }, idempotent: true })).restored
+      return { restored }
+    },
+    restoreAlbum: (id) => request<Album>('POST', `/v1/albums/${enc(id)}/restore`, { idempotent: true }),
+    restoreQR: (id) => request<SmartQR>('POST', `/v1/qrs/${enc(id)}/restore`, { idempotent: true }),
+    restoreBroadcast: (id) => request<Broadcast>('POST', `/v1/broadcasts/${enc(id)}/restore`, { idempotent: true }),
+    async rotatePhotos(ids, degrees) {
+      let updated = 0
+      for (const part of chunks(ids, 500)) updated += (await request<{ updated: number }>('POST', '/v1/photos/rotate', { body: { ids: part, degrees }, idempotent: true })).updated
+      return { updated }
+    },
+    removeGuest: (guestId) => request<void>('DELETE', `/v1/guests/${enc(guestId)}`),
+    restoreGuest: (guestId) => request<Guest>('POST', `/v1/guests/${enc(guestId)}/restore`, { idempotent: true }),
+    reopenAccessRequest: (id) => request<AccessRequest>('POST', `/v1/access-requests/${enc(id)}/reopen`, { idempotent: true }),
+    getEventStats: (eventId) => get<EventStats>(`/v1/events/${enc(eventId)}/stats`),
+    getStudioStats: (o = {}) => get<StudioStats>('/v1/studio/stats', { month: o.month }),
+    updateOrder: (orderId, patch) => request<Order>('PATCH', `/v1/orders/${enc(orderId)}`, { body: pick(patch, ['trackingNumber'] as const) }),
+    resendDownloadLink: (orderId) => request<{ sentTo: string; order: Order }>('POST', `/v1/orders/${enc(orderId)}/resend-link`, { idempotent: true }),
+    verifyPayoutAccount: () => request<PayoutCheck>('POST', '/v1/store/payout/verify', { idempotent: true }),
+    checkHandle: (handle) => get<HandleCheck>('/v1/studio/handle-check', { handle }),
+    async recordPhotoViews(photoIds, shortId) {
+      for (const part of chunks([...new Set(photoIds)], 500)) await request<void>('POST', '/v1/public/views', { body: { photoIds: part }, guest: shortId ? g(shortId) : (lastGallery ?? '') })
+    },
+    requestNotify: (shortId, phone) => request<NotifyRequest>('POST', `/v1/public/events/${enc(shortId)}/notify`, { body: { phone }, guest: g(shortId), idempotent: true }),
+    cancelNotify: (shortId, phone) => request<void>('POST', `/v1/public/events/${enc(shortId)}/notify/cancel`, { body: { phone }, guest: g(shortId), idempotent: true }),
 
 
 

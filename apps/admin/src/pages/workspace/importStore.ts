@@ -76,8 +76,8 @@ export function previewFolder(folderId: string, eventName: string, albums: Album
   const rootName = `${eventName.replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).filter(Boolean).slice(0, 2).join('-')}-Final`
   const regular = albums.filter((a) => a.kind === 'album').sort((a, b) => a.order - b.order)
   const existingPicks = regular.slice(0, Math.min(2, regular.length))
-  const fresh = [NEW_NAMES[h % NEW_NAMES.length], NEW_NAMES[(h >> 4) % NEW_NAMES.length]].filter((n, i, arr) => arr.indexOf(n) === i && !regular.some((a) => a.name.toLowerCase() === n.toLowerCase()))
-  const count = (name: string) => 20 + (hash(folderId + name) % 360)
+  const fresh = [NEW_NAMES[h % NEW_NAMES.length], NEW_NAMES[(h >>> 4) % NEW_NAMES.length]].filter((n, i, arr) => arr.indexOf(n) === i && !regular.some((a) => a.name.toLowerCase() === n.toLowerCase()))
+  const count = (name: string) => 20 + (Math.abs(hash(folderId + name)) % 360)
   const top = [...fresh, ...existingPicks.map((a) => a.name)]
   const parent = top[top.length - 1] ?? fresh[0] ?? 'Photos'
   const raw: { path: string; parent?: string }[] = [...top.map((p) => ({ path: p })), { path: `${parent}/Candids`, parent }]
@@ -135,7 +135,7 @@ export function startImport(api: FramelineApi, args: { eventId: ID; folderId: st
           if (cancelled.has(job.id)) { finish(job.id, { status: 'cancelled', done }); return }
           const files: UploadFile[] = Array.from({ length: Math.min(BATCH, n - i) }, (_, k) => ({
             filename: `DRV_${prefix}_${String(skipHere + i + k + 1).padStart(4, '0')}.JPG`,
-            size: 8_000_000 + (hash(`${f.path}${i + k}`) % 5_000_000),
+            size: 8_000_000 + (Math.abs(hash(`${f.path}${i + k}`)) % 5_000_000),
           }))
           await api.uploadPhotos(args.eventId, albumId, files, { quality: args.quality, watermark: args.watermark, source: 'drive' })
           done += files.length

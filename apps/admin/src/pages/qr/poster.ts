@@ -21,7 +21,7 @@ export function buildPoster({ qrSvg, studio, name, eventName, slug, color }: {
   <svg x="167.5" y="282" width="260" height="260" viewBox="${vb}">${inner}</svg>
   <text x="297.5" y="620" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="15" fill="#958B7B">Now showing</text>
   <text x="297.5" y="652" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-size="26" font-weight="600" fill="#1B1712">${esc(eventName)}</text>
-  <text x="297.5" y="720" text-anchor="middle" font-family="JetBrains Mono, Consolas, monospace" font-size="16" fill="#1B1712">${esc(shortUrl(slug))}</text>
+  <text x="297.5" y="720" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="16" fill="#1B1712">${esc(shortUrl(slug))}</text>
   <text x="297.5" y="790" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="11" fill="#958B7B">${esc(name)} · Powered by Frameline</text>
 </svg>`
 }

@@ -3,7 +3,7 @@ import type {
   Person, Photo, PhotoEvent, PublicStudio, Purchase, SmartQR, StoreSettings, Studio, StudioAppConfig, Ticket, Usage, WatermarkSettings,
   Website, ZipRequest,
 } from '@frameline/shared'
-import { blankStoreSettings } from '@frameline/shared'
+import { addRotation, blankStoreSettings, withSettingsDefaults, type EventHost } from '@frameline/shared'
 import { toMajor } from '../lib/money'
 import type * as s from './schema'
 
@@ -19,7 +19,7 @@ export function studioOut(r: Row<typeof s.studios>): Studio {
     coverUrl: opt(r.coverUrl), studioType: opt(r.studioType), referralSource: opt(r.referralSource),
     services: r.profile?.services ?? [], testimonials: r.profile?.testimonials ?? [], faq: r.profile?.faq ?? [],
     socialLinks: r.profile?.socialLinks ?? [], portfolioLinks: r.profile?.portfolioLinks ?? [],
-    app: appConfig(r.app), followers: r.followers, billing: opt(r.billing),
+    app: appConfig(r.app), followers: r.followers, billing: opt(r.billing), whatsapp: opt(r.whatsapp),
   }
 }
 
@@ -30,6 +30,7 @@ export function publicStudioOut(r: Row<typeof s.studios>): PublicStudio {
   return {
     id: r.id, name: r.name, handle: r.handle, logoUrl: opt(r.logoUrl), brandColor: r.brandColor, phone: r.phone, email: r.email,
     website: opt(r.website), instagram: opt(r.instagram), city: r.city, followCode: r.followCode,
+    whatsapp: r.whatsapp || r.phone,
   }
 }
 
@@ -50,15 +51,18 @@ export function eventOut(r: Row<typeof s.events>): PhotoEvent {
   return {
     id: r.id, shortId: r.shortId, name: r.name, type: r.type as PhotoEvent['type'], date: r.date, endDate: opt(r.endDate), city: r.city,
     status: r.status, photoCount: r.photoCount, photoLimit: r.photoLimit, visits: r.visits, faceMatches: r.faceMatches,
-    expiresAt: r.expiresAt, createdAt: r.createdAt, coverTones: r.coverTones, settings: r.settings, hosts: r.hosts,
+    expiresAt: r.expiresAt, createdAt: r.createdAt, coverTones: r.coverTones, settings: withSettingsDefaults(r.settings), hosts: r.hosts.map(hostOut),
     highlights: r.highlights, plan: r.plan, coverPhotoId: opt(r.coverPhotoId), deletedAt: opt(r.deletedAt),
   }
 }
 
+/** Hosts always carry access and status (older rows default to full access, invited). */
+export const hostOut = (h: EventHost): EventHost => ({ ...h, access: h.access ?? 'full', status: h.status ?? 'invited' })
+
 export function albumOut(r: Row<typeof s.albums>): Album {
   return {
     id: r.id, eventId: r.eventId, name: r.name, order: r.order, photoCount: r.photoCount, kind: r.kind,
-    firstCapture: opt(r.firstCapture), lastCapture: opt(r.lastCapture), coverPhotoId: opt(r.coverPhotoId),
+    firstCapture: opt(r.firstCapture), lastCapture: opt(r.lastCapture), coverPhotoId: opt(r.coverPhotoId), deletedAt: opt(r.deletedAt),
   }
 }
 
@@ -68,6 +72,7 @@ export function photoOut(r: Row<typeof s.photos>, mediaBase?: string): Photo {
     id: r.id, eventId: r.eventId, albumId: r.albumId, filename: r.filename, index: r.index, capturedAt: r.capturedAt, tone: r.tone,
     url, status: r.status, hidden: r.hidden, favourites: r.favourites, downloads: r.downloads, faces: r.faces, exif: r.exif,
     uploadedBy: r.uploadedBy, source: r.source, reviewStatus: opt(r.reviewStatus), enhancedFrom: opt(r.enhancedFrom),
+    quality: r.quality, views: r.views, rotation: addRotation(r.rotation, 0), deletedAt: opt(r.deletedAt),
   }
 }
 
@@ -91,21 +96,22 @@ export const orderOut = (r: Row<typeof s.orders>): Order => ({
   id: r.id, number: r.number, buyer: r.buyer, eventId: r.eventId, eventName: r.eventName, items: r.items,
   paid: toMajor(r.paidPaise), currency: r.currency, share: toMajor(r.sharePaise), status: r.status, at: r.at,
   photoIds: opt(r.photoIds), buyerEmail: opt(r.buyerEmail), method: opt(r.method), shipping: opt(r.shipping),
+  refundedAt: opt(r.refundedAt), refundReason: opt(r.refundReason), trackingNumber: opt(r.trackingNumber), linkSentAt: opt(r.linkSentAt),
 })
 export const ledgerOut = (r: Row<typeof s.ledgerEntries>): LedgerEntry => ({
   id: r.id, at: r.at, description: r.description, type: r.type, amount: toMajor(r.amountPaise), balance: toMajor(r.balancePaise),
 })
 export const priceOut = (r: Row<typeof s.prices>) => ({ id: r.id, label: r.label, detail: r.detail, price: toMajor(r.pricePaise) })
 export const cameraOut = (r: Row<typeof s.cameras>): Camera => ({
-  id: r.id, label: r.label, eventId: r.eventId, albumId: r.albumId, mode: r.mode, ftpUser: r.ftpUser, status: r.status, today: r.today, lastFile: opt(r.lastFile),
+  id: r.id, label: r.label, eventId: r.eventId, albumId: r.albumId, mode: r.mode, ftpUser: r.ftpUser, status: r.status, today: r.today, lastFile: opt(r.lastFile), lastUploadAt: opt(r.lastUploadAt),
 })
 export const qrOut = (r: Row<typeof s.smartQrs>): SmartQR => ({
   id: r.id, name: r.name, slug: r.slug, eventId: r.eventId, target: r.target, scans: r.scans, color: r.color,
-  scheduledEventId: opt(r.scheduledEventId), scheduledAt: opt(r.scheduledAt), dotStyle: opt(r.dotStyle), logoUrl: opt(r.logoUrl),
+  scheduledEventId: opt(r.scheduledEventId), scheduledAt: opt(r.scheduledAt), dotStyle: opt(r.dotStyle), logoUrl: opt(r.logoUrl), deletedAt: opt(r.deletedAt),
 })
 export const broadcastOut = (r: Row<typeof s.broadcasts>): Broadcast => ({
   id: r.id, title: r.title, body: r.body, audience: r.audience, sentAt: opt(r.sentAt), scheduledAt: opt(r.scheduledAt), openRate: opt(r.openRate),
-  imageUrl: opt(r.imageUrl), cancelledAt: opt(r.cancelledAt),
+  imageUrl: opt(r.imageUrl), cancelledAt: opt(r.cancelledAt), deletedAt: opt(r.deletedAt),
 })
 export const ticketOut = (r: Row<typeof s.tickets>, msgs: Row<typeof s.ticketMessages>[]): Ticket => ({
   id: r.id, subject: r.subject, eventId: opt(r.eventId), platform: r.platform, status: r.status,

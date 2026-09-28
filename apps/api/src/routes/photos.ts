@@ -1,13 +1,11 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, max, ne, sql, type SQL } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, sql, type SQL } from 'drizzle-orm'
 import { ENHANCE_COST, hash, tone } from '@frameline/shared'
-import type { Env } from '../env'
 import { getDb, schema, type DB } from '../db/client'
 import { albumOut, photoOut, zipOut } from '../db/mappers'
 import { toMinor } from '../lib/money'
 import { debitWallet } from '../services/billing'
-import { BadRequest, NotFound, ValidationFailed } from '../lib/errors'
-import { background } from '../lib/http'
+import { BadRequest, Conflict, NotFound, ValidationFailed } from '../lib/errors'
 import { newId, nowIso } from '../lib/ids'
 import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, problems, security } from '../lib/openapi'
 import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
@@ -18,7 +16,6 @@ import { assertEventVisible, type Membership } from '../services/access'
 import { audit } from '../services/audit'
 import { albumForMember, eventForMember, recountStatements } from '../services/events'
 import { emit } from '../services/realtime'
-import { vectorIndex } from '../services/vectors'
 
 export const photoRoutes = createRouter()
 
@@ -37,7 +34,7 @@ photoRoutes.openapi(createRoute({
   const ev = await eventForMember(db, m, c.req.valid('param').id)
   const { limit, cursor } = c.req.valid('query')
   const a = schema.albums
-  const rows = await db.select().from(a).where(and(eq(a.eventId, ev.id), afterCursor(a.order, a.id, 'asc', cursor)))
+  const rows = await db.select().from(a).where(and(eq(a.eventId, ev.id), isNull(a.deletedAt), afterCursor(a.order, a.id, 'asc', cursor)))
     .orderBy(asc(a.order), asc(a.id)).limit(limit + 1)
   return c.json(toPage(rows, limit, (r) => [r.order, r.id], albumOut), 200)
 })
@@ -59,7 +56,7 @@ photoRoutes.openapi(createRoute({
   }
   await db.insert(a).values(album).run()
   emit(c, m.studioId, 'albums')
-  return c.json(albumOut({ ...album, coverPhotoId: null, firstCapture: null, lastCapture: null }), 201)
+  return c.json(albumOut({ ...album, coverPhotoId: null, firstCapture: null, lastCapture: null, deletedAt: null }), 201)
 })
 
 photoRoutes.openapi(createRoute({
@@ -96,34 +93,9 @@ photoRoutes.openapi(createRoute({
   return c.json(albumOut({ ...album, name }), 200)
 })
 
-async function purgeObjects(env: Env, keys: string[], vectorIds: string[]) {
-  for (const part of chunk(keys, 1000)) if (part.length) await env.MEDIA.delete(part)
-  const faces = vectorIndex(env)
-  if (faces) for (const part of chunk(vectorIds, 1000)) if (part.length) await faces.deleteByIds(part).catch(() => undefined)
-}
-
-async function deletePhotoRows(c: Parameters<typeof background>[0], db: DB, where: SQL) {
-  const p = schema.photos
-  const doomed = await db.select({ id: p.id, key: p.r2Key, eventId: p.eventId }).from(p).where(where)
-  if (!doomed.length) return new Set<string>()
-  const vectorIds: string[] = []
-  for (const ids of chunk(doomed.map((d) => d.id))) {
-    const f = await db.select({ v: schema.faces.vectorId }).from(schema.faces).where(inArray(schema.faces.photoId, ids))
-    vectorIds.push(...f.map((x) => x.v).filter((v): v is string => !!v))
-    await db.delete(p).where(inArray(p.id, ids)).run()
-  }
-  // Copies share the original's file: only purge objects no remaining photo points at.
-  const keys = [...new Set(doomed.flatMap((d) => (d.key ? [d.key] : [])))]
-  const stillUsed = new Set<string>()
-  for (const part of chunk(keys)) {
-    for (const r of await db.select({ k: p.r2Key }).from(p).where(inArray(p.r2Key, part))) if (r.k) stillUsed.add(r.k)
-  }
-  background(c, purgeObjects(c.env, keys.filter((k) => !stillUsed.has(k)), vectorIds))
-  return new Set(doomed.map((d) => d.eventId))
-}
-
 photoRoutes.openapi(createRoute({
-  method: 'delete', path: '/albums/{id}', tags: ['Albums'], summary: 'Delete an album and its photos', security,
+  method: 'delete', path: '/albums/{id}', tags: ['Albums'], summary: 'Move an album and its photos to the trash', security,
+  description: 'Restore it with POST /albums/{id}/restore; after 30 days the daily job deletes it for good.',
   middleware: [requireStudio('editor', 'delete albums')] as const,
   request: { params: IdParam },
   responses: { 204: NoContent, ...problems(401, 403, 404) },
@@ -131,22 +103,51 @@ photoRoutes.openapi(createRoute({
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
   const album = await albumForMember(db, m, c.req.valid('param').id)
-  await deletePhotoRows(c, db, eq(schema.photos.albumId, album.id))
-  await db.batch([db.delete(schema.albums).where(eq(schema.albums.id, album.id)), ...recountStatements(db, album.eventId)])
-  audit(c, 'album.delete', { type: 'album', id: album.id }, { name: album.name })
+  const at = nowIso()
+  const p = schema.photos
+  await db.batch([
+    db.update(schema.albums).set({ deletedAt: at }).where(eq(schema.albums.id, album.id)),
+    // Same stamp as the album, so restoring the album brings back exactly these photos.
+    db.update(p).set({ deletedAt: at }).where(and(eq(p.albumId, album.id), isNull(p.deletedAt))),
+    ...recountStatements(db, album.eventId),
+  ])
+  audit(c, 'album.trash', { type: 'album', id: album.id }, { name: album.name })
   emit(c, m.studioId, 'albums', 'events', 'photos')
   return c.body(null, 204)
+})
+
+photoRoutes.openapi(createRoute({
+  method: 'post', path: '/albums/{id}/restore', tags: ['Albums'], summary: 'Restore an album from the trash', security,
+  description: 'Brings back the album and the photos that were trashed with it.',
+  middleware: [requireStudio('editor', 'restore albums'), idempotent] as const,
+  request: { params: IdParam, headers: IdempotencyHeader },
+  responses: { 200: json(Album), ...problems(401, 403, 404, 409) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const album = await albumForMember(db, m, c.req.valid('param').id, { includeDeleted: true })
+  if (!album.deletedAt) throw new Conflict('This album isn’t in the trash.', 'not_deleted')
+  const p = schema.photos
+  await db.batch([
+    db.update(schema.albums).set({ deletedAt: null }).where(eq(schema.albums.id, album.id)),
+    db.update(p).set({ deletedAt: null }).where(and(eq(p.albumId, album.id), eq(p.deletedAt, album.deletedAt))),
+    ...recountStatements(db, album.eventId),
+  ])
+  audit(c, 'album.restore', { type: 'album', id: album.id })
+  emit(c, m.studioId, 'albums', 'events', 'photos')
+  const [fresh] = await db.select().from(schema.albums).where(eq(schema.albums.id, album.id)).limit(1)
+  return c.json(albumOut(fresh), 200)
 })
 
 // ── Photos ─────────────────────────────────────────────────────────────────
 type PhotoFilterQuery = { albumId?: string; filter?: 'all' | 'people' | 'favourites' | 'hidden'; personId?: string }
 
-/** Shared WHERE for the photo list and the id list. No albumId = every regular album (guest uploads excluded). */
+/** Shared WHERE for the photo list and the id list. No albumId = every regular album (guest uploads excluded). Trash is never included. */
 export function photoFilter(eventId: string, q: PhotoFilterQuery): SQL {
   const p = schema.photos
-  const conds: (SQL | undefined)[] = [eq(p.eventId, eventId)]
+  const conds: (SQL | undefined)[] = [eq(p.eventId, eventId), isNull(p.deletedAt)]
   if (q.albumId) conds.push(eq(p.albumId, q.albumId))
-  else conds.push(sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${eventId} AND kind = 'album')`)
+  else conds.push(sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${eventId} AND kind = 'album' AND deleted_at IS NULL)`)
   if (q.filter === 'hidden') conds.push(eq(p.hidden, true))
   else if (q.filter === 'favourites') conds.push(gt(p.favourites, 0))
   else if (q.filter === 'people') conds.push(ne(p.faces, '[]' as never))
@@ -154,10 +155,14 @@ export function photoFilter(eventId: string, q: PhotoFilterQuery): SQL {
   return and(...conds)!
 }
 
-export const sortColumn = (sort?: 'capture' | 'name' | 'sequence') => sort === 'name' ? schema.photos.filename : sort === 'sequence' ? schema.photos.index : schema.photos.capturedAt
+export type PhotoSortKey = 'capture' | 'newest' | 'name' | 'sequence'
+export const sortColumn = (sort?: PhotoSortKey) => sort === 'name' ? schema.photos.filename : sort === 'sequence' ? schema.photos.index : schema.photos.capturedAt
+/** 'newest' is capture time descending; every other sort is ascending. */
+export const sortDir = (sort?: PhotoSortKey): 'asc' | 'desc' => (sort === 'newest' ? 'desc' : 'asc')
+export const PhotoSortEnum = z.enum(['capture', 'newest', 'name', 'sequence']).openapi({ description: 'capture = oldest first, newest = latest capture first, name = file name, sequence = upload order.' })
 const PhotoQuery = PageQuery.extend({
   albumId: z.string().max(128).optional().openapi({ description: 'Omit for all regular albums (guest uploads excluded).' }),
-  sort: z.enum(['capture', 'name', 'sequence']).default('capture'),
+  sort: PhotoSortEnum.default('capture'),
   filter: z.enum(['all', 'people', 'favourites', 'hidden']).default('all'),
   personId: z.string().max(128).optional(),
   offset: z.coerce.number().int().min(0).max(1_000_000).optional().openapi({ description: 'Legacy offset paging; prefer `cursor`.' }),
@@ -180,10 +185,12 @@ photoRoutes.openapi(createRoute({
   const p = schema.photos
   const base = photoFilter(ev.id, q)
   const sortCol = sortColumn(q.sort)
+  const dir = sortDir(q.sort)
+  const order = dir === 'desc' ? [desc(sortCol), desc(p.id)] : [asc(sortCol), asc(p.id)]
   const keyOf = (r: typeof p.$inferSelect): [string | number, string] => [q.sort === 'name' ? r.filename : q.sort === 'sequence' ? r.index : r.capturedAt, r.id]
 
   const [{ total }] = await db.select({ total: count() }).from(p).where(base)
-  let query = db.select().from(p).where(and(base, afterCursor(sortCol, p.id, 'asc', q.cursor))).orderBy(asc(sortCol), asc(p.id)).limit(q.limit + 1)
+  let query = db.select().from(p).where(and(base, afterCursor(sortCol, p.id, dir, q.cursor))).orderBy(...order).limit(q.limit + 1)
   if (q.offset !== undefined && !q.cursor) query = query.offset(q.offset) as typeof query
   const rows = await query
   const page = toPage(rows, q.limit, keyOf, (r) => photoOut(r, c.env.PUBLIC_MEDIA_BASE))
@@ -198,7 +205,7 @@ photoRoutes.openapi(createRoute({
 }), async (c) => {
   const m = membershipOf(c)
   const id = c.req.valid('param').id
-  const [row] = await getDb(c.env.DB).select().from(schema.photos).where(and(eq(schema.photos.id, id), eq(schema.photos.studioId, m.studioId))).limit(1)
+  const [row] = await getDb(c.env.DB).select().from(schema.photos).where(and(eq(schema.photos.id, id), eq(schema.photos.studioId, m.studioId), isNull(schema.photos.deletedAt))).limit(1)
   if (!row) throw new NotFound('Photo', id)
   assertEventVisible(m, row.eventId)
   return c.json(photoOut(row, c.env.PUBLIC_MEDIA_BASE), 200)
@@ -206,11 +213,13 @@ photoRoutes.openapi(createRoute({
 
 const Ids = z.array(z.string().min(1).max(128)).min(1).max(500)
 
-async function photosOwned(db: DB, m: Membership, ids: string[]) {
+/** The caller's photos among `ids` (trash excluded unless `trashed`: then only trashed ones). */
+async function photosOwned(db: DB, m: Membership, ids: string[], opts: { trashed?: boolean } = {}) {
   const p = schema.photos
-  const found: { id: string; eventId: string; albumId: string }[] = []
+  const found: { id: string; eventId: string; albumId: string; deletedAt: string | null }[] = []
   for (const part of chunk([...new Set(ids)])) {
-    found.push(...await db.select({ id: p.id, eventId: p.eventId, albumId: p.albumId }).from(p).where(and(eq(p.studioId, m.studioId), inArray(p.id, part))))
+    found.push(...await db.select({ id: p.id, eventId: p.eventId, albumId: p.albumId, deletedAt: p.deletedAt }).from(p)
+      .where(and(eq(p.studioId, m.studioId), inArray(p.id, part), opts.trashed ? isNotNull(p.deletedAt) : isNull(p.deletedAt))))
   }
   for (const f of found) assertEventVisible(m, f.eventId)
   return found
@@ -242,22 +251,61 @@ photoRoutes.openapi(createRoute({
 })
 
 photoRoutes.openapi(createRoute({
-  method: 'post', path: '/photos/bulk-delete', tags: ['Photos'], summary: 'Delete photos (and their files and face data)', security,
-  middleware: [requireStudio('editor', 'delete photos')] as const,
-  request: { body: body(z.object({ ids: Ids })) },
+  method: 'post', path: '/photos/bulk-delete', tags: ['Photos'], summary: 'Move photos to the trash', security,
+  description: 'Trashed photos disappear from lists and galleries. Restore them with POST /photos/restore; after 30 days the daily job deletes them with their files and face data.',
+  middleware: [requireStudio('editor', 'delete photos'), idempotent] as const,
+  request: { headers: IdempotencyHeader, body: body(z.object({ ids: Ids })) },
   responses: { 200: json(z.object({ deleted: z.number().int() })), ...problems(401, 403, 404, 422) },
 }), async (c) => {
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
   const found = await photosOwned(db, m, c.req.valid('json').ids)
-  const events = new Set<string>()
-  for (const part of chunk(found.map((f) => f.id))) {
-    for (const e of await deletePhotoRows(c, db, inArray(schema.photos.id, part))) events.add(e)
-  }
-  for (const e of events) await db.batch(recountStatements(db, e))
-  audit(c, 'photos.delete', undefined, { count: found.length })
+  const at = nowIso()
+  const p = schema.photos
+  for (const part of chunk(found.map((f) => f.id))) await db.update(p).set({ deletedAt: at }).where(and(inArray(p.id, part), isNull(p.deletedAt))).run()
+  for (const e of new Set(found.map((f) => f.eventId))) await db.batch(recountStatements(db, e))
+  audit(c, 'photos.trash', undefined, { count: found.length })
   emit(c, m.studioId, 'photos', 'albums', 'events')
   return c.json({ deleted: found.length }, 200)
+})
+
+photoRoutes.openapi(createRoute({
+  method: 'post', path: '/photos/restore', tags: ['Photos'], summary: 'Restore photos from the trash', security,
+  description: 'Ids that aren’t in the trash are ignored. A photo whose album is also in the trash brings that album back.',
+  middleware: [requireStudio('editor', 'restore photos'), idempotent] as const,
+  request: { headers: IdempotencyHeader, body: body(z.object({ ids: Ids })) },
+  responses: { 200: json(z.object({ restored: z.number().int() })), ...problems(401, 403, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const found = await photosOwned(db, m, c.req.valid('json').ids, { trashed: true })
+  const p = schema.photos
+  for (const part of chunk(found.map((f) => f.id))) await db.update(p).set({ deletedAt: null }).where(inArray(p.id, part)).run()
+  const albumIds = [...new Set(found.map((f) => f.albumId))]
+  for (const part of chunk(albumIds)) await db.update(schema.albums).set({ deletedAt: null }).where(and(inArray(schema.albums.id, part), isNotNull(schema.albums.deletedAt))).run()
+  for (const e of new Set(found.map((f) => f.eventId))) await db.batch(recountStatements(db, e))
+  audit(c, 'photos.restore', undefined, { count: found.length })
+  emit(c, m.studioId, 'photos', 'albums', 'events')
+  return c.json({ restored: found.length }, 200)
+})
+
+photoRoutes.openapi(createRoute({
+  method: 'post', path: '/photos/rotate', tags: ['Photos'], summary: 'Turn photos clockwise', security,
+  description: '`degrees` is a multiple of 90 (−90 turns left). Stored as `rotation` (0/90/180/270); renditions and downloads follow it.',
+  middleware: [requireStudio('editor', 'edit photos'), idempotent] as const,
+  request: { headers: IdempotencyHeader, body: body(z.object({ ids: Ids, degrees: z.number().int().min(-270).max(270).refine((d) => d % 90 === 0 && d !== 0, 'Turn by 90, 180 or 270 degrees (negative turns left)') })) },
+  responses: { 200: json(z.object({ updated: z.number().int() })), ...problems(401, 403, 422) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const { ids, degrees } = c.req.valid('json')
+  const found = await photosOwned(db, m, ids)
+  const p = schema.photos
+  for (const part of chunk(found.map((f) => f.id))) {
+    await db.update(p).set({ rotation: sql`(((${p.rotation} + ${degrees}) % 360) + 360) % 360` }).where(inArray(p.id, part)).run()
+  }
+  emit(c, m.studioId, 'photos')
+  return c.json({ updated: found.length }, 200)
 })
 
 photoRoutes.openapi(createRoute({
@@ -270,7 +318,7 @@ photoRoutes.openapi(createRoute({
   const db = getDb(c.env.DB)
   const ev = await eventForMember(db, m, c.req.valid('param').id)
   const { photoId, scope } = c.req.valid('json')
-  const [photo] = await db.select().from(schema.photos).where(and(eq(schema.photos.id, photoId), eq(schema.photos.eventId, ev.id))).limit(1)
+  const [photo] = await db.select().from(schema.photos).where(and(eq(schema.photos.id, photoId), eq(schema.photos.eventId, ev.id), isNull(schema.photos.deletedAt))).limit(1)
   if (!photo) throw new NotFound('Photo', photoId)
   if (scope === 'event') {
     await db.update(schema.events).set({ coverPhotoId: photo.id, coverTones: [photo.tone, ev.coverTones[1], ev.coverTones[2]] }).where(eq(schema.events.id, ev.id)).run()
@@ -297,7 +345,8 @@ photoRoutes.openapi(createRoute({
   const q = c.req.valid('query')
   const p = schema.photos
   const sortCol = sortColumn(q.sort)
-  const rows = await db.select({ id: p.id }).from(p).where(photoFilter(ev.id, q)).orderBy(asc(sortCol), asc(p.id)).limit(MAX_IDS + 1)
+  const order = sortDir(q.sort) === 'desc' ? [desc(sortCol), desc(p.id)] : [asc(sortCol), asc(p.id)]
+  const rows = await db.select({ id: p.id }).from(p).where(photoFilter(ev.id, q)).orderBy(...order).limit(MAX_IDS + 1)
   return c.json({ ids: rows.slice(0, MAX_IDS).map((r) => r.id), truncated: rows.length > MAX_IDS }, 200)
 })
 
@@ -323,7 +372,7 @@ photoRoutes.openapi(createRoute({
   const order = new Map(ids.map((id, i) => [id, i]))
   sources.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
   const now = nowIso()
-  const copies = sources.map((src, i) => ({ ...src, id: newId('ph'), albumId: target.id, index: (top ?? 0) + i + 1, favourites: 0, downloads: 0, createdAt: now }))
+  const copies = sources.map((src, i) => ({ ...src, id: newId('ph'), albumId: target.id, index: (top ?? 0) + i + 1, favourites: 0, downloads: 0, views: 0, createdAt: now }))
   const faceRows = copies.flatMap((cp, i) => sources[i].faces.map((f) => ({ id: newId('fc'), photoId: cp.id, eventId: cp.eventId, personId: f.personId, box: f.box, vectorId: null })))
   if (copies.length) {
     const [first, ...rest] = recountStatements(db, target.eventId)
@@ -334,9 +383,10 @@ photoRoutes.openapi(createRoute({
 })
 
 photoRoutes.openapi(createRoute({
-  method: 'post', path: '/photos/review', tags: ['Photos'], summary: 'Approve guest uploads (or send them back to review)', security,
+  method: 'post', path: '/photos/review', tags: ['Photos'], summary: 'Approve or reject guest uploads (or send them back to review)', security,
+  description: '`approved` shows them to guests, `rejected` keeps them out of the gallery for good, `pending` sends them back to review (Undo).',
   middleware: [requireStudio('editor', 'review guest uploads')] as const,
-  request: { body: body(z.object({ ids: Ids, status: z.enum(['approved', 'pending']) })) },
+  request: { body: body(z.object({ ids: Ids, status: z.enum(['approved', 'pending', 'rejected']) })) },
   responses: { 200: json(z.object({ updated: z.number().int() })), ...problems(401, 403, 404, 422) },
 }), async (c) => {
   const m = membershipOf(c)
@@ -351,7 +401,7 @@ photoRoutes.openapi(createRoute({
 
 photoRoutes.openapi(createRoute({
   method: 'post', path: '/photos/{id}/enhance', tags: ['Photos'], summary: 'AI-enhance a photo', security,
-  description: `Debits ${ENHANCE_COST} credits (ledger \`credits-used\`, 402 when short). \`saveAs: new\` adds an enhanced copy next to the original; \`replace\` re-renders the photo in place. The processor applies the preset/prompt (simulated in dev).`,
+  description: `Takes ₹${ENHANCE_COST} from the wallet (ledger \`credits-used\`, 402 \`insufficient_credits\` when the wallet is short). \`saveAs: new\` adds an enhanced copy next to the original; \`replace\` re-renders the photo in place. The processor applies the preset/prompt (simulated in dev).`,
   middleware: [requireStudio('editor', 'enhance photos'), idempotent] as const,
   request: {
     params: IdParam, headers: IdempotencyHeader,
@@ -365,7 +415,7 @@ photoRoutes.openapi(createRoute({
   const id = c.req.valid('param').id
   const o = c.req.valid('json')
   const p = schema.photos
-  const [src] = await db.select().from(p).where(and(eq(p.id, id), eq(p.studioId, m.studioId))).limit(1)
+  const [src] = await db.select().from(p).where(and(eq(p.id, id), eq(p.studioId, m.studioId), isNull(p.deletedAt))).limit(1)
   if (!src) throw new NotFound('Photo', id)
   const label = o.prompt ? `“${o.prompt.slice(0, 40)}”` : o.preset!
   await debitWallet(db, m.studioId, toMinor(ENHANCE_COST), `AI enhance · ${src.filename} (${label})`)
@@ -376,7 +426,7 @@ photoRoutes.openapi(createRoute({
     resultId = newId('ph')
     await db.insert(p).values({
       ...src, id: resultId, index: (top ?? 0) + 1, filename: src.filename.replace(/(\.[^.]+)?$/, '-enhanced$1'), tone: shifted,
-      favourites: 0, downloads: 0, enhancedFrom: id, status: 'processing', createdAt: nowIso(),
+      favourites: 0, downloads: 0, views: 0, enhancedFrom: id, status: 'processing', createdAt: nowIso(),
     }).run()
     await db.batch(recountStatements(db, src.eventId))
   } else {
@@ -399,7 +449,9 @@ photoRoutes.openapi(createRoute({
   const db = getDb(c.env.DB)
   const ev = await eventForMember(db, m, c.req.valid('param').id)
   const p = schema.photos
-  const rows = await db.select({ id: p.id, key: p.r2Key, quality: p.quality }).from(p).where(and(eq(p.eventId, ev.id), eq(p.status, 'ready'), isNotNull(p.r2Key)))
+  const rows = await db.select({ id: p.id, key: p.r2Key, quality: p.quality }).from(p).where(and(eq(p.eventId, ev.id), eq(p.status, 'ready'), isNull(p.deletedAt), isNotNull(p.r2Key)))
+  // Face finding progress (event stats) counts these as pending until the processor is done with them.
+  for (const part of chunk(rows.map((r) => r.id))) await db.update(p).set({ facesIndexedAt: null }).where(inArray(p.id, part)).run()
   const jobs = rows.map((r) => ({ body: { kind: 'process-photo' as const, photoId: r.id, eventId: ev.id, studioId: m.studioId, key: r.key, quality: r.quality, reindex: true } }))
   for (let i = 0; i < jobs.length; i += 100) await c.env.PHOTO_QUEUE.sendBatch(jobs.slice(i, i + 100))
   audit(c, 'faces.reindex', { type: 'event', id: ev.id }, { queued: jobs.length })

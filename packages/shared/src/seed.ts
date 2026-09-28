@@ -48,13 +48,13 @@ export const PERIOD_DAYS = { yearly: 365, quarterly: 91 } as const
 
 /** Base price a client pays to renew one event for a year, before the studio's multiplier. */
 export const BASE_RENEWAL = 1000
-/** Renewing with wallet credits costs half. */
+/** Paying a renewal from the wallet costs half. */
 export const RENEWAL_CREDIT_DISCOUNT = 0.5
-/** Credits charged per AI-enhanced photo. */
+/** Rupees taken from the wallet per AI-enhanced photo. */
 export const ENHANCE_COST = 8
 /** Frameline's commission on store sales (the studio keeps the rest). */
 export const STORE_COMMISSION = 0.1
-/** One-time coupons: code → wallet credits (rupees). */
+/** One-time coupons: code → rupees added to the wallet. */
 export const COUPONS: Record<string, number> = { WELCOME500: 500 }
 
 export const PACKS = [
@@ -84,6 +84,8 @@ export const defaultSettings = (over: Partial<EventSettings> = {}): EventSetting
   storeEnabled: false,
   disabled: false,
   shortLinks: true,
+  priceOverrides: {},
+  forSaleWatermark: true,
   ...over,
 })
 
@@ -147,8 +149,8 @@ export function createSeed(): SeedState {
     ev('ev_portfolio', 'E4B0937', 'Studio Portfolio 2026', 'other', '2026-01-01', 'Mumbai', 'live', 88, 1000, [500, 100, 40], 0, '2027-01-01', [3, 12, 7], { access: 'link', facePrivacy: false, requireRegistration: false }),
   ]
   events[0].hosts = [
-    { id: 'h1', name: 'Priya Rao', email: 'priya.rao@gmail.com', phone: '+91 99870 22113', role: 'client' },
-    { id: 'h2', name: 'Aman Rao', email: 'aman.rao@gmail.com', role: 'host' },
+    { id: 'h1', name: 'Priya Rao', email: 'priya.rao@gmail.com', phone: '+91 99870 22113', role: 'client', access: 'full', status: 'accepted', invitedAt: iso('2026-09-10T12:00:00') },
+    { id: 'h2', name: 'Aman Rao', email: 'aman.rao@gmail.com', role: 'host', access: 'upload', status: 'invited', invitedAt: iso('2026-09-24T09:30:00') },
   ]
 
   const albums: Album[] = []
@@ -193,7 +195,7 @@ export function createSeed(): SeedState {
   return {
     studio: {
       id: 'st_northlight', name: 'Northlight Studio', handle: 'northlight', brandColor: '#8C2F39',
-      phone: '+91 98200 41177', email: 'studio@northlight.in', website: 'https://northlight.in', instagram: '@northlight.studio',
+      phone: '+91 98200 41177', whatsapp: '+91 98200 41177', email: 'studio@northlight.in', website: 'https://northlight.in', instagram: '@northlight.studio',
       city: 'Mumbai', followCode: 'FA-KCGWHY', about: 'Wedding and event photography from Mumbai, since 2014.',
       studioType: 'wedding', referralSource: 'Instagram',
       services: [
@@ -227,7 +229,7 @@ export function createSeed(): SeedState {
     purchases: [
       { id: 'pu3', at: iso('2026-09-21T11:30:00'), description: '3,000-photo pack', kind: 'pack', amount: 1350, method: 'credits', invoiceNumber: 'FL-2026-0193' },
       { id: 'pu2', at: iso('2026-06-02T10:00:00'), description: 'AI enhance · 40 photos', kind: 'enhance', amount: 320, method: 'credits', invoiceNumber: 'FL-2026-0121' },
-      { id: 'pu1', at: iso('2026-03-03T09:00:00'), description: 'Starter plan · yearly', kind: 'plan', amount: 8490, method: 'card', invoiceNumber: 'FL-2026-0042' },
+      { id: 'pu1', at: iso('2026-03-03T09:00:00'), description: 'Starter plan · yearly', kind: 'plan', amount: 10018.2, method: 'card', invoiceNumber: 'FL-2026-0042' },
     ],
     cameraUploads: cameraUploads(),
     zipRequests: [],
@@ -273,8 +275,8 @@ export function createSeed(): SeedState {
       { id: 'l1', at: iso('2026-09-20T21:02:00'), description: 'Order #1037 · Riya & Kabir', type: 'sale', amount: 134.1, balance: 49442.7 },
     ],
     cameras: [
-      { id: 'c1', label: 'Canon R6 · Aarav', eventId: 'ev_tessera', albumId: 'ev_tessera_al0', mode: 'live-2k', ftpUser: 'nl_r6_aarav', status: 'receiving', today: 212, lastFile: 'IMG_4172.JPG' },
-      { id: 'c2', label: 'Sony A7 IV · Meera', eventId: 'ev_tessera', albumId: 'ev_tessera_al1', mode: 'review-first', ftpUser: 'nl_a7_meera', status: 'idle', today: 148, lastFile: 'DSC08812.JPG' },
+      { id: 'c1', label: 'Canon R6 · Aarav', eventId: 'ev_tessera', albumId: 'ev_tessera_al0', mode: 'live-2k', ftpUser: 'nl_r6_aarav', status: 'receiving', today: 212, lastFile: 'IMG_4172.JPG', lastUploadAt: iso('2026-09-26T16:40:00Z') },
+      { id: 'c2', label: 'Sony A7 IV · Meera', eventId: 'ev_tessera', albumId: 'ev_tessera_al1', mode: 'review-first', ftpUser: 'nl_a7_meera', status: 'idle', today: 148, lastFile: 'DSC08812.JPG', lastUploadAt: iso('2026-09-26T15:40:00Z') },
       { id: 'c3', label: 'Nikon Z6 · backup', eventId: 'ev_portfolio', albumId: 'ev_portfolio_al0', mode: 'originals', ftpUser: 'nl_z6_backup', status: 'offline', today: 0 },
     ],
     qrs: [
@@ -372,6 +374,8 @@ export function generatePhotos(album: Album, event: PhotoEvent): Photo[] {
     const cam = CAMERAS[Math.floor(r() * CAMERAS.length)]
     const faces = event.settings.faceSearch ? Math.floor(r() * 4) : 0
     const portrait = r() < 0.3
+    const favourites = Math.floor(r() * r() * 30)
+    const downloads = Math.floor(r() * 60)
     out.push({
       id: `${album.id}_p${i}`,
       eventId: event.id,
@@ -382,8 +386,12 @@ export function generatePhotos(album: Album, event: PhotoEvent): Photo[] {
       tone: tone(Math.floor(r() * 1000)),
       status: 'ready',
       hidden: r() < 0.02,
-      favourites: Math.floor(r() * r() * 30),
-      downloads: Math.floor(r() * 60),
+      favourites,
+      downloads,
+      // Guests open a photo more often than they download or heart it.
+      views: downloads * 9 + favourites * 14 + (hash(`${album.id}:${i}`) % 40),
+      quality: 'web',
+      rotation: 0,
       faces: Array.from({ length: faces }, (_, k) => ({
         personId: ['p_riya', 'p_kabir', 'p_priya', 'p_g1', 'p_g2', 'p_g3'][Math.floor(r() * 6)],
         box: [0.2 + k * 0.22, 0.2 + r() * 0.1, 0.1, 0.16] as [number, number, number, number],

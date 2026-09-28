@@ -1,7 +1,7 @@
 import type { Camera, CameraUpload } from '@frameline/shared'
 
 export const FTP_HOST = 'ftp.frameline.in'
-export const FTP_PORT = '21 · passive (PASV)'
+export const FTP_PORT = '21'
 export const MAX_CAMERAS = 10
 
 export const MODE_LABEL: Record<Camera['mode'], string> = {
@@ -66,4 +66,16 @@ export function agoShort(ms: number) {
   if (s < 3600) return `${Math.round(s / 60)} min ago`
   if (s < 86_400) return `${Math.round(s / 3600)} h ago`
   return `${Math.round(s / 86_400)} d ago`
+}
+
+export type Brand = 'canon' | 'nikon' | 'sony' | 'fuji'
+export const BRAND_LABEL: Record<Brand, string> = { canon: 'Canon', nikon: 'Nikon', sony: 'Sony', fuji: 'Fujifilm' }
+/** Guess the brand from the camera's name ("Canon R6 · Aarav" → canon). */
+export function brandOf(label: string): Brand | undefined {
+  const l = label.toLowerCase()
+  if (/canon|eos/.test(l)) return 'canon'
+  if (/nikon|z ?\d|d\d{3}/.test(l)) return 'nikon'
+  if (/sony|a7|a9|a1/.test(l)) return 'sony'
+  if (/fuji|x-h|x-t|gfx/.test(l)) return 'fuji'
+  return undefined
 }

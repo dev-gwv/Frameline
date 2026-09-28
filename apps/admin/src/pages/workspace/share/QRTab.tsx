@@ -1,41 +1,41 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Download, FileImage, ImagePlus, Printer, X } from 'lucide-react'
+import { ChevronDown, Download, ImagePlus, Printer, X } from 'lucide-react'
 import type { PhotoEvent, Studio } from '@frameline/shared'
-import { Button, Input, Segmented, Tip, useToast, cn } from '@frameline/ui'
+import { Button, Segmented, Toggle, cn, useToast } from '@frameline/ui'
 import { appLink, displayUrl, downloadBlob, galleryLink, slug } from '../lib'
 import { StyledQR, buildPoster, downloadSvg, svgString, svgToPng, type QRCorner, type QRStyle } from './qr'
 
 const MAX_LOGO = 80 * 1024
-const HEX = /^#[0-9a-f]{6}$/i
 
-export function QRTab({ event, studio }: { event: PhotoEvent; studio?: Studio }) {
+/** QR tab: preview, style, colour, logo (≤ 80 KB), More styles (corners, what it opens); SVG, A4 poster, PNG (gold). */
+export function useQRTab(event: PhotoEvent, studio?: Studio): { body: ReactNode; footer: ReactNode } {
   const toast = useToast()
   const svgRef = useRef<SVGSVGElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const [style, setStyle] = useState<QRStyle>('rounded')
-  const [corner, setCorner] = useState<QRCorner>('rounded')
   const brand = studio?.brandColor ?? '#8C2F39'
-  const [color, setColor] = useState(brand)
-  const [hex, setHex] = useState(brand)
+  const swatches = Array.from(new Set(['#1C1814', '#B8862B', brand, '#8E3B46', '#2F6B5E']))
+  const [style, setStyle] = useState<QRStyle>('rounded')
+  const [color, setColor] = useState(swatches[0])
+  const [logoOn, setLogoOn] = useState(false)
   const [logo, setLogo] = useState<{ url: string; name: string } | null>(null)
   const [logoError, setLogoError] = useState('')
+  const [more, setMore] = useState(false)
+  const [corner, setCorner] = useState<QRCorner>('rounded')
   const [target, setTarget] = useState<'web' | 'app'>('web')
 
   const url = target === 'web' ? galleryLink(event, event.settings.shortLinks) : appLink(event)
-  const swatches = Array.from(new Set(['#1B1712', brand, '#8C2F39', '#1D3557', '#264653', '#6D597A', '#B37C22']))
-  const base = `${slug(event.name)}-${target}-qr`
+  const base = `${slug(event.name)}-qr`
 
   const pickLogo = (f?: File) => {
     if (!f) return
     if (!f.type.startsWith('image/')) { setLogoError('That file isn’t an image. Use a PNG, JPG or SVG.'); return }
-    if (f.size > MAX_LOGO) { setLogoError(`That logo is ${Math.round(f.size / 1024)} KB. Logos can be up to 80 KB — export a smaller PNG (about 300 × 300 px).`); return }
+    if (f.size > MAX_LOGO) { setLogoError(`That logo is ${Math.round(f.size / 1024)} KB. Use one up to 80 KB (about 300 × 300 px).`); return }
     setLogoError('')
     const r = new FileReader()
     r.onload = () => setLogo({ url: String(r.result), name: f.name })
     r.onerror = () => setLogoError('Couldn’t read that file. Try another one.')
     r.readAsDataURL(f)
   }
-
   const getSvg = () => (svgRef.current ? svgString(svgRef.current) : null)
   const dlSvg = () => { const s = getSvg(); if (s) { downloadSvg(s, `${base}.svg`); toast.success('SVG downloaded') } }
   const dlPng = async () => {
@@ -44,76 +44,70 @@ export function QRTab({ event, studio }: { event: PhotoEvent; studio?: Studio })
   }
   const dlPoster = () => {
     const s = getSvg(); if (!s) return
-    const poster = buildPoster({ qrSvg: s, studio: studio?.name ?? 'Your studio', event: event.name, link: displayUrl(url), pin: event.settings.access === 'link-pin' ? event.settings.pin : undefined, color })
-    downloadSvg(poster, `${slug(event.name)}-poster-a4.svg`)
-    toast.success('A4 poster downloaded', 'Open it in any browser or print shop app and print at 100%.')
+    downloadSvg(buildPoster({ qrSvg: s, studio: studio?.name ?? 'Your studio', event: event.name, link: displayUrl(url), pin: event.settings.access === 'link-pin' ? event.settings.pin : undefined, color }), `${slug(event.name)}-table-poster-a4.svg`)
+    toast.success('A4 table poster downloaded', 'Print it at 100% for the welcome table.')
   }
 
-  return (
-    <div className="grid gap-5 px-5 py-4 sm:px-6 md:grid-cols-[1fr_300px]">
-      <div className="flex min-w-0 flex-col gap-4">
-        <Row label="Opens">
-          <Segmented value={target} onChange={setTarget} options={[{ value: 'web', label: 'Web gallery' }, { value: 'app', label: 'Frameline app' }]} />
-        </Row>
-        <Row label="Style">
-          <div className="max-w-full overflow-x-auto scrollbar-thin">
-            <Segmented<QRStyle> value={style} onChange={setStyle} options={[{ value: 'rounded', label: 'Rounded' }, { value: 'soft', label: 'Soft' }, { value: 'hybrid', label: 'Hybrid' }, { value: 'classic', label: 'Classic' }]} />
-          </div>
-        </Row>
-        <Row label="Corners">
-          <Segmented<QRCorner> value={corner} onChange={setCorner} options={[{ value: 'rounded', label: 'Rounded' }, { value: 'circle', label: 'Circle' }, { value: 'square', label: 'Square' }]} />
-        </Row>
-        <Row label="Colour">
-          <div className="flex flex-wrap items-center gap-2">
+  const body = (
+    <div className="grid gap-5 sm:grid-cols-[200px_1fr]">
+      <div className="grid place-items-center self-start rounded-card border border-line bg-white p-3.5">
+        <StyledQR ref={svgRef} value={url} size={170} color={color} style={style} corner={corner} logo={logoOn ? logo?.url : undefined} />
+        <span className="mt-1.5 max-w-full truncate text-[11.5px] text-[#5F574B]">{displayUrl(url)}</span>
+      </div>
+      <div className="flex min-w-0 flex-col gap-3.5">
+        <div>
+          <div className="mb-1.5 text-[12.5px] font-bold text-ink-2">Style</div>
+          <Segmented<QRStyle> value={style === 'hybrid' ? 'rounded' : style} onChange={setStyle} options={[{ value: 'rounded', label: 'Rounded' }, { value: 'soft', label: 'Soft' }, { value: 'classic', label: 'Classic' }]} />
+        </div>
+        <div>
+          <div className="mb-1.5 text-[12.5px] font-bold text-ink-2">Colour</div>
+          <div className="flex flex-wrap items-center gap-2.5" role="radiogroup" aria-label="Colour">
             {swatches.map((c) => (
-              <Tip key={c} label={c === brand ? `${c} · brand colour` : c}>
-                <button type="button" aria-label={`Colour ${c}`} aria-pressed={color.toLowerCase() === c.toLowerCase()} onClick={() => { setColor(c); setHex(c) }}
-                  className={cn('size-7 rounded-full border-2', color.toLowerCase() === c.toLowerCase() ? 'border-accent ring-2 ring-accent-soft' : 'border-surface shadow-[0_0_0_1px_var(--line-2)]')}
-                  style={{ background: c }} />
-              </Tip>
+              <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={c === brand ? `Brand colour ${c}` : `Colour ${c}`} onClick={() => setColor(c)}
+                className={cn('size-[30px] rounded-full', color === c ? 'shadow-[0_0_0_2px_var(--surface),0_0_0_4px_var(--accent)]' : 'shadow-[0_0_0_1px_var(--line-2)]')} style={{ background: c }} />
             ))}
-            <Input className="w-[110px] font-mono" value={hex} aria-label="Hex colour" maxLength={7}
-              onChange={(e) => { const v = e.target.value.startsWith('#') ? e.target.value : `#${e.target.value}`; setHex(v); if (HEX.test(v)) setColor(v) }} />
-            <input type="color" aria-label="Pick any colour" value={color} onChange={(e) => { setColor(e.target.value); setHex(e.target.value) }} className="size-8 cursor-pointer rounded border border-line-2 bg-surface p-0.5" />
           </div>
-          {!HEX.test(hex) && <div className="mt-1 text-[11.5px] text-bad">Use a 6-digit hex colour like #8C2F39.</div>}
-        </Row>
-        <Row label="Logo in the centre">
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { pickLogo(e.target.files?.[0]); e.target.value = '' }} />
-          {logo ? (
-            <div className="flex items-center gap-2.5 rounded-control border border-line px-2.5 py-1.5">
-              <img src={logo.url} alt="" className="size-7 rounded object-contain" />
-              <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{logo.name}</span>
-              <Tip label="Remove logo"><button type="button" aria-label="Remove logo" className="rounded p-1 text-ink-3 hover:bg-sunk" onClick={() => setLogo(null)}><X size={14} /></button></Tip>
+        </div>
+        <div className="flex items-start gap-3">
+          <span className="min-w-0 flex-1">
+            <b className="block text-[13.5px]">Put my logo in the middle</b>
+            <span className={cn('text-[12.5px]', logoError ? 'font-semibold text-bad' : 'text-ink-2')}>{logoError || (logo ? logo.name : 'Up to 80 KB')}</span>
+          </span>
+          <Toggle label="Put my logo in the middle" checked={logoOn} onCheckedChange={(v) => { setLogoOn(v); if (v && !logo) fileRef.current?.click() }} />
+        </div>
+        <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { pickLogo(e.target.files?.[0]); e.target.value = '' }} />
+        {logoOn && (
+          <div className="-mt-1.5 flex gap-2">
+            <Button size="sm" icon={<ImagePlus size={13} />} onClick={() => fileRef.current?.click()}>{logo ? 'Change logo' : 'Choose logo'}</Button>
+            {logo && <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => { setLogo(null); setLogoOn(false) }}>Remove</Button>}
+          </div>
+        )}
+        <div>
+          <button type="button" aria-expanded={more} onClick={() => setMore((v) => !v)} className="inline-flex min-h-[32px] items-center gap-1 text-[13px] font-bold text-accent-text">
+            More styles <ChevronDown size={13} className={cn('transition-transform', more && 'rotate-180')} />
+          </button>
+          {more && (
+            <div className="mt-1.5 flex flex-col gap-3">
+              <div>
+                <div className="mb-1.5 text-[12.5px] font-bold text-ink-2">Corners</div>
+                <Segmented<QRCorner> value={corner} onChange={setCorner} options={[{ value: 'rounded', label: 'Rounded' }, { value: 'circle', label: 'Circle' }, { value: 'square', label: 'Square' }]} />
+              </div>
+              <div>
+                <div className="mb-1.5 text-[12.5px] font-bold text-ink-2">Opens</div>
+                <Segmented value={target} onChange={setTarget} options={[{ value: 'web', label: 'Web gallery' }, { value: 'app', label: 'Frameline app' }]} />
+              </div>
             </div>
-          ) : (
-            <Button icon={<ImagePlus size={14} />} onClick={() => fileRef.current?.click()}>Upload logo</Button>
           )}
-          <div className={cn('mt-1 text-[11.5px]', logoError ? 'font-semibold text-bad' : 'text-ink-3')}>{logoError || 'PNG, JPG or SVG, up to 80 KB. Square logos work best.'}</div>
-        </Row>
-      </div>
-      <div className="flex flex-col items-center gap-3 rounded-card bg-sunk p-4">
-        <div className="eyebrow">Preview</div>
-        <div className="rounded-[10px] bg-white p-2 shadow-card">
-          <StyledQR ref={svgRef} value={url} size={210} color={HEX.test(color) ? color : '#1B1712'} style={style} corner={corner} logo={logo?.url} />
         </div>
-        <div className="max-w-full truncate font-mono text-[11px] text-ink-2">{displayUrl(url)}</div>
-        <div className="grid w-full grid-cols-2 gap-2">
-          <Button icon={<Download size={14} />} className="justify-center" onClick={dlSvg}>SVG</Button>
-          <Button icon={<FileImage size={14} />} className="justify-center" onClick={dlPng}>PNG</Button>
-        </div>
-        <Button variant="primary" className="w-full justify-center" icon={<Printer size={14} />} onClick={dlPoster}>A4 poster</Button>
-        <div className="text-center text-[11px] text-ink-3">Separate codes for the web gallery and the app. The poster includes the {event.settings.access === 'link-pin' ? 'PIN and ' : ''}link.</div>
       </div>
     </div>
   )
-}
-
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <div className="mb-1.5 text-[12px] font-bold text-ink-2">{label}</div>
-      {children}
-    </div>
+  const footer = (
+    <>
+      <Button variant="ghost" onClick={dlSvg} className="mr-auto max-sm:mr-0">Download SVG</Button>
+      <Button icon={<Printer size={15} />} onClick={dlPoster}>A4 table poster</Button>
+      <Button variant="primary" icon={<Download size={15} />} onClick={() => void dlPng()}>Download PNG</Button>
+    </>
   )
+  return { body, footer }
 }

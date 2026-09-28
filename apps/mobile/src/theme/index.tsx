@@ -3,7 +3,7 @@ import { useColorScheme, type TextStyle } from 'react-native'
 import { gold, palette, radius, space, type Palette } from '@frameline/shared'
 
 /**
- * Gilt theme for React Native. Colours come from `palette.light/dark` in @frameline/shared and follow the
+ * Theme for React Native (redesign v2: light everywhere except the photo viewer, Manrope UI, Fraunces only for page titles). Colours come from `palette.light/dark` in @frameline/shared and follow the
  * OS appearance. Font family names match the keys loaded in `src/app/_layout.tsx`.
  */
 export const font = {
@@ -14,8 +14,9 @@ export const font = {
   bodySemi: 'Manrope_600SemiBold',
   bodyBold: 'Manrope_700Bold',
   bodyHeavy: 'Manrope_800ExtraBold',
-  mono: 'JetBrainsMono_500Medium',
-  monoBold: 'JetBrainsMono_700Bold',
+  /** No mono in the redesign: counts, money and codes use Manrope with tabular numbers. Kept as aliases. */
+  mono: 'Manrope_600SemiBold',
+  monoBold: 'Manrope_800ExtraBold',
 } as const
 
 /** Gold leaf gradient for expo-linear-gradient (135° → top-left to bottom-right). */
@@ -49,11 +50,13 @@ export function makeTheme(dark: boolean): Theme {
     dark,
     t: {
       display: (size) => ({ fontFamily: font.display, fontSize: size, lineHeight: Math.round(size * 1.12), color: c.ink, letterSpacing: -0.3 }),
-      eyebrow: { fontFamily: font.bodyBold, fontSize: 11, letterSpacing: 1.1, textTransform: 'uppercase', color: c.ink3 },
+      /** Small bold label (no uppercase, no letter-spacing in the redesign). */
+      eyebrow: { fontFamily: font.bodyBold, fontSize: 12.5, color: c.ink3 },
       body: { fontFamily: font.body, fontSize: 15, lineHeight: 21, color: c.ink },
       small: { fontFamily: font.body, fontSize: 13, lineHeight: 18, color: c.ink2 },
       label: { fontFamily: font.bodyBold, fontSize: 13, color: c.ink2 },
-      mono: { fontFamily: font.mono, fontSize: 13, color: c.ink, fontVariant: ['tabular-nums'] },
+      /** Numbers, money and codes: Manrope with tabular figures. */
+      mono: { fontFamily: font.bodySemi, fontSize: 13, color: c.ink, fontVariant: ['tabular-nums'] },
     },
   }
 }

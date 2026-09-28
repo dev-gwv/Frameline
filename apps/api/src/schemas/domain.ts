@@ -40,6 +40,7 @@ export const Studio = z.object({
   app: z.object({ featuredEventIds: z.array(z.string()), showServices: z.boolean(), showFaq: z.boolean(), showPrivate: z.boolean() }),
   followers: z.number().int(),
   billing: z.object({ name: z.string(), gstin: z.string().optional(), address: z.string(), state: z.string(), invoiceEmail: z.string() }).optional(),
+  whatsapp: z.string().optional(),
 }).openapi('Studio')
 
 const ItemId = z.string().trim().min(1).max(64)
@@ -50,6 +51,7 @@ export const StudioPatch = z.object({
   logoUrl: z.url().max(2048),
   brandColor: HexColor,
   phone: z.string().max(40),
+  whatsapp: z.string().max(40),
   email: z.email().max(254),
   website: z.string().max(2048),
   instagram: z.string().max(80),
@@ -103,10 +105,15 @@ export const EventSettings = z.object({
   storeEnabled: z.boolean(),
   disabled: z.boolean(),
   shortLinks: z.boolean(),
+  priceOverrides: z.record(z.string().regex(/^[a-z0-9-]{1,40}$/), z.number().min(0).max(1_000_000)).refine((r) => Object.keys(r).length <= 50, 'Up to 50 price overrides'),
+  forSaleWatermark: z.boolean(),
 }).openapi('EventSettings')
 
 export const EventHost = z.object({
   id: Id, name: z.string().max(120), email: z.string().max(254), phone: z.string().max(40).optional(), role: z.enum(['client', 'host']),
+  access: z.enum(['full', 'upload']).optional().openapi({ description: 'full = sees everything and changes settings; upload = only uploads. Default full.' }),
+  status: z.enum(['invited', 'accepted']).optional().openapi({ description: 'Set by the server: invited until they open the gallery with that email/phone.' }),
+  invitedAt: z.string().optional(),
 }).openapi('EventHost')
 
 export const PhotoEvent = z.object({
@@ -164,7 +171,7 @@ export const EventSettingsPatch = EventSettings.partial().strict().openapi('Even
 export const Album = z.object({
   id: Id, eventId: Id, name: z.string(), order: z.number().int(), photoCount: z.number().int(),
   kind: z.enum(['album', 'guest', 'store']), firstCapture: z.string().optional(), lastCapture: z.string().optional(),
-  coverPhotoId: z.string().optional(),
+  coverPhotoId: z.string().optional(), deletedAt: z.string().optional(),
 }).openapi('Album')
 
 export const Film = z.object({ id: Id, eventId: Id, name: z.string(), url: z.string() }).openapi('Film')
@@ -181,7 +188,9 @@ export const Photo = z.object({
   url: z.string().optional(), status: z.enum(['ready', 'processing']), hidden: z.boolean(), favourites: z.number().int(),
   downloads: z.number().int(), faces: z.array(z.object({ personId: Id, box: Box })), exif: Exif, uploadedBy: z.string(),
   source: z.enum(['web', 'camera', 'drive', 'guest', 'desktop']),
-  reviewStatus: z.enum(['pending', 'approved']).optional(), enhancedFrom: z.string().optional(),
+  reviewStatus: z.enum(['pending', 'approved', 'rejected']).optional(), enhancedFrom: z.string().optional(),
+  quality: z.enum(['web', 'original']), views: z.number().int(), rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]),
+  deletedAt: z.string().optional(),
 }).openapi('Photo')
 
 export const Person = z.object({ id: Id, eventId: Id, name: z.string().optional(), photoCount: z.number().int(), tone: Tone }).openapi('Person')
@@ -204,6 +213,7 @@ export const Order = z.object({
   photoIds: z.array(z.string()).optional(), buyerEmail: z.string().optional(), method: z.enum(['upi', 'card', 'netbanking', 'international']).optional(),
   checkout: z.object({ provider: z.literal('razorpay'), orderId: z.string(), keyId: z.string(), amount: z.number(), currency: z.literal('INR') }).optional(),
   shipping: z.object({ name: z.string(), phone: z.string(), line1: z.string(), line2: z.string().optional(), city: z.string(), state: z.string(), postal: z.string(), country: z.string().optional() }).optional(),
+  refundedAt: z.string().optional(), refundReason: z.string().optional(), trackingNumber: z.string().optional(), linkSentAt: z.string().optional(),
 }).openapi('Order')
 
 export const ShippingAddressInput = z.object({
@@ -222,6 +232,20 @@ export const LedgerEntry = z.object({
   amount: z.number(), balance: z.number(),
 }).openapi('LedgerEntry')
 
+export const WalletBalance = z.object({
+  balance: z.number().openapi({ description: 'Show this as "Wallet": prepaid + earnings (rupees).' }),
+  withdrawable: z.number().openapi({ description: 'What a payout may send to the bank (earnings, never below 0).' }),
+  prepaid: z.number().openapi({ description: 'Added money and coupons; spending (packs, renewals, AI enhance) uses this first, then earnings.' }),
+  earnings: z.number().openapi({ description: 'Store earnings after fees, refunds and payouts; can be below 0 after a refund.' }),
+  currency: z.literal('INR'), asOf: z.string(),
+}).openapi('WalletBalance')
+
+export const NeedsYouItem = z.object({
+  id: z.string(), kind: z.enum(['access-request', 'guest-uploads', 'event-expiring', 'face-data-expiring']),
+  eventId: Id, eventName: z.string(), title: z.string(), detail: z.string(),
+  accessRequestId: z.string().optional(), count: z.number().int().optional(), daysLeft: z.number().int().optional(), at: z.string(),
+}).openapi('NeedsYouItem')
+
 export const Price = z.object({ id: z.string(), label: z.string(), detail: z.string(), price: z.number() }).openapi('Price')
 
 export const CameraMode = z.enum(['live-2k', 'review-first', 'originals'])
@@ -229,6 +253,7 @@ export const Camera = z.object({
   id: Id, label: z.string(), eventId: Id, albumId: Id, mode: CameraMode, ftpUser: z.string(),
   status: z.enum(['receiving', 'idle', 'offline']), today: z.number().int(), lastFile: z.string().optional(),
   password: z.string().optional().openapi({ description: 'Only on create and password reset.' }),
+  lastUploadAt: z.string().optional(),
 }).openapi('Camera')
 
 export const CameraUpload = z.object({
@@ -239,11 +264,12 @@ export const CameraUpload = z.object({
 export const SmartQR = z.object({
   id: Id, name: z.string(), slug: z.string(), eventId: Id, target: z.enum(['web', 'app', 'smart']), scans: z.number().int(), color: z.string(),
   scheduledEventId: z.string().optional(), scheduledAt: z.string().optional(), dotStyle: z.enum(['square', 'rounded', 'dots']).optional(), logoUrl: z.string().optional(),
+  deletedAt: z.string().optional(),
 }).openapi('SmartQR')
 
 export const Broadcast = z.object({
   id: Id, title: z.string(), body: z.string(), audience: z.string(), sentAt: z.string().optional(), scheduledAt: z.string().optional(), openRate: z.number().optional(),
-  imageUrl: z.string().optional(), cancelledAt: z.string().optional(),
+  imageUrl: z.string().optional(), cancelledAt: z.string().optional(), deletedAt: z.string().optional(),
 }).openapi('Broadcast')
 
 export const TicketPlatform = z.enum(['web-gallery', 'app', 'admin', 'desktop'])
@@ -261,7 +287,7 @@ export const WatermarkSettings = z.object({
   mode: z.enum(['text', 'logo']),
   text: z.string().max(80),
   subtitle: z.string().max(80),
-  position: z.enum(['tl', 'tr', 'bl', 'br']),
+  position: z.enum(['tl', 'tc', 'tr', 'bl', 'bc', 'br']),
   size: z.enum(['subtle', 'normal', 'bold']),
   opacity: z.number().int().min(0).max(100),
   font: z.string().max(60),
@@ -310,16 +336,21 @@ export const Purchase = z.object({
 const Address = z.object({ street: z.string().max(200), city: z.string().max(120), state: z.string().max(120), postal: z.string().max(12) })
 const KycDocument = z.object({ kind: z.enum(['pan', 'id', 'gst', 'cheque']), status: z.enum(['verified', 'review', 'needed']), fileName: z.string().max(255), assetId: z.string().max(64).optional() })
 const SaleWatermark = z.object({
-  template: z.enum(['forsale', 'centre']), text: z.string().max(80), orientation: z.enum(['diagonal', 'vertical', 'horizontal']),
+  template: z.enum(['forsale', 'centre', 'logo', 'corner', 'frame']), text: z.string().max(80), orientation: z.enum(['diagonal', 'vertical', 'horizontal']),
   size: z.number().min(0).max(10), opacity: z.number().int().min(0).max(100), color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a hex colour like #FFFFFF'),
 })
 const International = z.object({
   enabled: z.boolean(), plan: z.enum(['starter', 'growth', 'pro']).optional(), paymentLink: z.string().max(2048).optional(),
   upiQrUrl: z.string().max(4096).optional(), upiQrName: z.string().max(255).optional(), email: z.string().max(254).optional(), whatsapp: z.string().max(40).optional(),
 })
+export const PayoutCheck = z.object({
+  status: z.enum(['checking', 'verified', 'name_mismatch', 'failed']), nameAtBank: z.string().optional(), bankName: z.string().optional(),
+  checkedAt: z.string(), message: z.string().optional(),
+}).openapi('PayoutCheck')
+
 export const StoreSettings = z.object({
   kyc: z.object({ legalName: z.string(), pan: z.string(), gstRegistered: z.boolean(), gstin: z.string(), address: Address, documents: z.array(KycDocument) }),
-  payout: z.object({ holder: z.string(), accountLast4: z.string(), ifsc: z.string(), bank: z.string(), branch: z.string(), verified: z.boolean() }),
+  payout: z.object({ holder: z.string(), accountLast4: z.string(), ifsc: z.string(), bank: z.string(), branch: z.string(), verified: z.boolean(), check: PayoutCheck.optional() }),
   saleWatermark: SaleWatermark,
   international: International,
   terms: z.string(),
@@ -364,6 +395,7 @@ export const UsageBreakdown = z.object({
 export const PublicStudio = z.object({
   id: Id, name: z.string(), handle: z.string(), logoUrl: z.string().optional(), brandColor: z.string(), phone: z.string(), email: z.string(),
   website: z.string().optional(), instagram: z.string().optional(), city: z.string(), followCode: z.string(),
+  whatsapp: z.string().openapi({ description: 'WhatsApp number (falls back to phone).' }),
 }).openapi('PublicStudio')
 
 export const PublicEvent = z.object({
@@ -408,9 +440,36 @@ export const Asset = z.object({
   id: Id, kind: AssetKind, url: z.string(), contentType: z.string(), size: z.number().int(), fileName: z.string(), createdAt: z.string(),
 }).openapi('Asset')
 
-export const PublicWatermark = z.object({ enabled: z.boolean(), settings: WatermarkSettings }).openapi('PublicWatermark')
+export const PublicWatermark = z.object({ enabled: z.boolean(), settings: WatermarkSettings, sale: SaleWatermark.optional().openapi({ description: 'The For sale watermark, when the event sells with forSaleWatermark on.' }) }).openapi('PublicWatermark')
 export const DownloadAllowance = z.object({ remaining: z.number().int(), limit: z.number().int() }).openapi('DownloadAllowance')
 export const PublicEventSummary = z.object({
   id: Id, shortId: z.string(), name: z.string(), type: EventType, date: z.string(), city: z.string(), coverTones: z.tuple([Tone, Tone, Tone]),
   photoCount: z.number().int(), studioName: z.string(), lastOpenedAt: z.string(),
 }).openapi('PublicEventSummary')
+
+// ── Added with contract v5 ──────────────────────────────────────────────────
+export const EventStats = z.object({
+  eventId: Id, visits: z.number().int(), photoViews: z.number().int(), downloads: z.number().int(), favourites: z.number().int(),
+  guests: z.number().int(), faceSearches: z.number().int(), photos: z.number().int(), processing: z.number().int(),
+  faces: z.object({ ready: z.number().int(), total: z.number().int(), pending: z.number().int() }), asOf: z.string(),
+}).openapi('EventStats')
+
+const StatsTotals = z.object({
+  visits: z.number().int(), downloads: z.number().int(), faceSearches: z.number().int(), photoViews: z.number().int(),
+  photosDelivered: z.number().int(), sales: z.number(), orders: z.number().int(),
+}).openapi('StatsTotals')
+export const StudioStats = z.object({
+  month: z.string(), thisMonth: StatsTotals, lastMonth: StatsTotals,
+  allTime: StatsTotals.pick({ visits: true, downloads: true, faceSearches: true, photoViews: true }), asOf: z.string(),
+}).openapi('StudioStats')
+
+export const HandleCheck = z.object({ handle: z.string(), available: z.boolean(), reason: z.enum(['invalid', 'reserved', 'taken', 'yours']).optional() }).openapi('HandleCheck')
+export const NotifyRequest = z.object({ eventId: Id, phone: z.string(), createdAt: z.string() }).openapi('NotifyRequest')
+export const FaceSearchResult = z.object({
+  faceFound: z.boolean(), reason: z.literal('no_face').optional(), personId: z.string().nullable(), photoIds: z.array(z.string()),
+}).openapi('FaceSearchResult')
+export const FaceSearchInput = z.object({
+  key: z.string().min(1).max(512), embedding: z.array(z.number().finite()).min(64).max(2048).optional(), minScore: z.number().min(0).max(1).default(0.5),
+  faces: z.number().int().min(0).max(100).optional().openapi({ description: 'Faces the client detector found (0 = no face).' }),
+  image: z.object({ width: z.number().int().min(0).max(100_000), height: z.number().int().min(0).max(100_000) }).optional(),
+})

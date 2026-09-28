@@ -70,3 +70,19 @@ export function captureRange(first?: string, last?: string) {
   if (a.toDateString() === b.toDateString()) return `${d.format(a)}, ${t.format(a)} – ${t.format(b)}`
   return `${d.format(a)}, ${t.format(a)} – ${d.format(b)}, ${t.format(b)}`
 }
+
+/** "1 photo" / "1,248 photos". */
+export const photosLabel = (n: number) => `${n.toLocaleString('en-IN')} photo${n === 1 ? '' : 's'}`
+
+/* ---------------- Photos tab sort (one menu: order + the old filters) ---------------- */
+
+export type GridSort = 'newest' | 'oldest' | 'name' | 'people' | 'favourites' | 'hidden'
+export const GRID_SORTS: { value: GridSort; label: string; description?: string }[] = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'name', label: 'File name' },
+  { value: 'people', label: 'With people', description: 'Photos where faces were found' },
+  { value: 'favourites', label: 'Guest favourites', description: 'Photos guests have hearted' },
+  { value: 'hidden', label: 'Hidden from guests' },
+]
+export const parseSort = (v: string | null): GridSort => (GRID_SORTS.some((s) => s.value === v) ? (v as GridSort) : 'newest')

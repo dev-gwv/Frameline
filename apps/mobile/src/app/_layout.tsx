@@ -13,8 +13,6 @@ import { Manrope_500Medium } from '@expo-google-fonts/manrope/500Medium'
 import { Manrope_600SemiBold } from '@expo-google-fonts/manrope/600SemiBold'
 import { Manrope_700Bold } from '@expo-google-fonts/manrope/700Bold'
 import { Manrope_800ExtraBold } from '@expo-google-fonts/manrope/800ExtraBold'
-import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono/500Medium'
-import { JetBrainsMono_700Bold } from '@expo-google-fonts/jetbrains-mono/700Bold'
 import { ApiProvider } from '@/lib/api'
 import { iconFonts, ToastHost } from '@/components'
 import { useStackOptions } from '@/lib/nav'
@@ -29,7 +27,6 @@ export default function RootLayout() {
   const [loaded, error] = useFonts({
     Fraunces_500Medium, Fraunces_600SemiBold,
     Manrope_400Regular, Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold,
-    JetBrainsMono_500Medium, JetBrainsMono_700Bold,
     ...iconFonts,
   })
   const ready = loaded || !!error
@@ -71,10 +68,9 @@ function Root() {
           <Stack.Screen name="viewer" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade' }} />
           <Stack.Screen name="scan" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
           <Stack.Screen name="join" options={{ title: 'Join an event', presentation: 'modal' }} />
-          <Stack.Screen name="buy" options={{ title: 'Buy photos', presentation: 'modal' }} />
+          <Stack.Screen name="buy" options={{ title: 'Buy', presentation: 'modal' }} />
           <Stack.Screen name="enquiry" options={{ title: 'Enquire', presentation: 'modal' }} />
           <Stack.Screen name="guest-upload" options={{ title: 'Add your photos', presentation: 'modal' }} />
-          <Stack.Screen name="share/[id]" options={{ title: 'Share gallery', presentation: 'modal' }} />
         </Stack>
         <ToastHost />
       </View>

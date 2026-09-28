@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Lock, ScanFace, Share2, ShoppingBag } from 'lucide-react'
-import { Button, cn, Tip, useToast } from '@frameline/ui'
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Link2, Lock, MoreHorizontal, Printer, ScanFace, Share2, ShoppingBag } from 'lucide-react'
+import { Button, cn, Menu, Tip, useToast } from '@frameline/ui'
 import { fmt, toneCss, type Photo } from '@frameline/shared'
 import { useQueryClient } from '@tanstack/react-query'
 import { useHighlights, usePhotoList } from '../lib/queries'
 import { useApi } from '../lib/api'
+import { SaleMark } from '../components/SaleWatermark'
 import { guest, snapshot } from '../lib/guest'
 import { canDownload } from '../lib/access'
 import { friendlyError } from '../lib/errors'
-import { IconBtn } from '../components/common'
 import { Sheet } from '../components/Sheet'
 import { BuySheet } from '../components/BuySheet'
-import { EnquirySheet } from '../components/EnquirySheet'
 import { useDownloadOne } from '../components/DownloadSheet'
 import { useEventCtx } from './EventLayout'
+
+/** Photo viewer (dark): swipe or arrow keys; Favourite · Download · Share · Buy print (only while selling). */
+/** Photos already counted as viewed in this page session. */
+const viewed = new Set<string>()
 
 export function PhotoView() {
   const { photoId = '' } = useParams()
@@ -56,10 +59,17 @@ export function PhotoView() {
 
   const [info, setInfo] = useState(false)
   const [buy, setBuy] = useState(false)
-  const [enquire, setEnquire] = useState(false)
   const [blocked, setBlocked] = useState<{ reason: string; buy?: boolean; selfie?: boolean } | null>(null)
   const dl = useDownloadOne(event, studio)
-  const anySheet = info || buy || enquire || !!blocked
+  const anySheet = info || buy || !!blocked
+
+  // One gallery view per photo per page session (api.recordPhotoViews feeds the studio's per-photo views).
+  useEffect(() => {
+    if (!photo || !allowed || viewed.has(photo.id)) return
+    const id = photo.id
+    const t = setTimeout(() => { viewed.add(id); api.recordPhotoViews([id], event.shortId).catch(() => viewed.delete(id)) }, 800)
+    return () => clearTimeout(t)
+  }, [photo?.id, allowed, api, event.shortId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keyboard: ← → step, Esc goes back, F favourites.
   useEffect(() => {
@@ -70,7 +80,7 @@ export function PhotoView() {
       if (e.key === 'ArrowLeft') { e.preventDefault(); go(prev) }
       else if (e.key === 'ArrowRight') { e.preventDefault(); go(next) }
       else if (e.key === 'Escape') navigate(backTo)
-      else if (e.key.toLowerCase() === 'f' && allowed) toggleFav()
+      else if (e.key.toLowerCase() === 'f' && allowed) void toggleFav()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -98,7 +108,7 @@ export function PhotoView() {
       return { favourites: want ? [...s.favourites.filter((x) => x !== id), id] : s.favourites.filter((x) => x !== id), favPhotos }
     })
     apply(on)
-    toast({ kind: 'success', title: on ? 'Added to favourites' : 'Removed from favourites', body: on ? `${studio.name} can see your picks.` : undefined })
+    toast({ kind: 'success', title: on ? 'Added to favourites' : 'Removed from favourites', body: on ? `${studio.name} can see your favourites.` : undefined, action: { label: 'Undo', onClick: () => { apply(!on); void api.setFavourite(id, !on, event.shortId).catch(() => {}) } } })
     try {
       await api.setFavourite(id, on, event.shortId)
       void qc.invalidateQueries({ queryKey: ['photos', 'favs', event.shortId.toUpperCase()] })
@@ -116,25 +126,38 @@ export function PhotoView() {
     else setBlocked(v)
   }
 
+  const link = `${location.origin}${base}/p/${photoId}`
   async function share() {
-    const url = `${location.origin}${base}/p/${photoId}`
     try {
-      if (navigator.share) await navigator.share({ title: event.name, text: `A photo from ${event.name}`, url })
-      else { await navigator.clipboard.writeText(url); toast({ title: 'Link copied', body: 'Anyone with the link still needs the gallery PIN.' }) }
+      if (navigator.share) await navigator.share({ title: event.name, text: `A photo from ${event.name}`, url: link })
+      else await copyLink()
     } catch { /* dismissed */ }
+  }
+  async function copyLink() {
+    try { await navigator.clipboard.writeText(link); toast({ title: 'Link copied', body: 'Anyone with the link still needs the gallery PIN.' }) }
+    catch { toast({ kind: 'error', title: 'Couldn’t copy the link', body: 'Use Share instead.' }) }
   }
 
   useEffect(() => { document.documentElement.style.overflow = 'hidden'; return () => { document.documentElement.style.overflow = '' } }, [])
 
-  const w = photo?.exif.width ?? 3, h = photo?.exif.height ?? 2
+  const rotation = photo?.rotation ?? 0
+  const sideways = rotation === 90 || rotation === 270
+  const w0 = photo?.exif.width ?? 3, h0 = photo?.exif.height ?? 2
+  // The frame takes the turned shape; the image inside keeps its own and is rotated (Photo.rotation).
+  const w = sideways ? h0 : w0, h = sideways ? w0 : h0
   const store = event.settings.storeEnabled
 
   return (
     <div className="fixed inset-0 z-20 flex flex-col bg-side text-side-ink" role="region" aria-label="Photo viewer">
       <header className="flex items-center justify-between gap-2 px-2 pt-safe sm:px-4">
         <Tip label="Back (Esc)"><Link to={backTo} aria-label="Back" className="grid size-11 place-items-center rounded-full hover:bg-side-2"><ArrowLeft size={20} /></Link></Tip>
-        <span className="font-mono text-[12px] tnum text-side-ink-2" aria-live="polite">{idx >= 0 && list.length ? `${idx + 1} / ${list.length}` : photo ? photo.filename : ''}</span>
-        <IconBtn dark label="Photo details" onClick={() => setInfo(true)} disabled={!photo}><Info size={19} /></IconBtn>
+        <span className="text-[13px] font-semibold tnum text-side-ink-2" aria-live="polite">{idx >= 0 && list.length ? `${fmt.count(idx + 1)} of ${fmt.count(list.length)}` : ''}</span>
+        <Menu align="end" width={200} trigger={
+          <button type="button" aria-label="More" disabled={!photo || !allowed} className="grid size-11 place-items-center rounded-full hover:bg-side-2 disabled:opacity-40"><MoreHorizontal size={20} /></button>
+        } items={[
+          { label: 'Photo details', icon: <Info size={15} />, onSelect: () => setInfo(true) },
+          { label: 'Copy link', icon: <Link2 size={15} />, onSelect: () => void copyLink() },
+        ]} />
       </header>
 
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden px-0 sm:px-16"
@@ -142,21 +165,29 @@ export function PhotoView() {
         {loading ? (
           <div className="shimmer aspect-[3/2] w-full max-w-3xl bg-side-2" />
         ) : !photo && seeAll ? (
-          <div className="px-6 text-center"><b className="font-display text-[20px]">This photo isn't available</b><p className="mt-1 text-[13px] text-side-ink-2">It may have been removed by the studio.</p><Link to={backTo}><Button variant="side" className="mt-4">Back to photos</Button></Link></div>
+          <div className="flex max-w-sm flex-col items-center gap-2 px-6 text-center">
+            <b className="text-[18px]">This photo isn’t here any more</b>
+            <p className="text-[14px] text-side-ink-2">The studio may have removed it.</p>
+            <Link to={backTo} className="mt-3 inline-flex h-11 items-center rounded-[10px] border border-side-line px-5 font-bold hover:bg-side-2">Back to photos</Link>
+          </div>
         ) : !photo || !allowed ? (
-          <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center">
-            <span className="grid size-14 place-items-center rounded-full bg-side-2 text-side-gold"><Lock size={24} /></span>
-            <b className="font-display text-[20px]">This photo is private</b>
-            <p className="text-[13px] text-side-ink-2">Guests see only the photos they are in. Take a selfie to find yours.</p>
-            <Link to={base}><Button variant="primary" icon={<ScanFace size={16} />}>Find my photos</Button></Link>
+          <div className="flex max-w-sm flex-col items-center gap-2 px-6 text-center">
+            <span className="mb-1 grid size-14 place-items-center rounded-full bg-side-2 text-side-gold"><Lock size={24} /></span>
+            <b className="text-[18px]">Find your photos first</b>
+            <p className="text-[14px] text-side-ink-2">This gallery shows each guest only the photos they’re in. Take a selfie to find yours.</p>
+            <Link to={base} className="mt-3 inline-flex h-[46px] items-center gap-2 rounded-[10px] bg-gold px-5 font-bold text-accent-ink"><ScanFace size={17} />Find my photos</Link>
           </div>
         ) : (
           <div
             className="relative max-h-full max-w-full overflow-hidden transition-transform duration-150 motion-reduce:transition-none"
-            style={{ aspectRatio: `${w} / ${h}`, width: `min(100%, calc((100dvh - 260px) * ${w / h}))`, background: photo.url ? undefined : toneCss(photo.tone), transform: dx ? `translateX(${dx}px)` : undefined }}
+            style={{ aspectRatio: `${w} / ${h}`, width: `min(100%, calc((100dvh - 220px) * ${w / h}))`, background: photo.url ? undefined : toneCss(photo.tone), transform: dx ? `translateX(${dx}px)` : undefined }}
           >
-            {photo.url && <img src={photo.url} alt={photo.filename} className="size-full object-cover" draggable={false} />}
+            {photo.url && (rotation
+              ? <img src={photo.url} alt={photo.filename} draggable={false} className="absolute left-1/2 top-1/2 max-w-none object-cover"
+                  style={{ width: `${(sideways ? h / w : 1) * 100}%`, height: `${(sideways ? w / h : 1) * 100}%`, transform: `translate(-50%, -50%) rotate(${rotation}deg)` }} />
+              : <img src={photo.url} alt={photo.filename} className="size-full object-cover" draggable={false} />)}
             {!photo.url && <span className="sr-only">{`Photo ${photo.filename}`}</span>}
+            <SaleMark shortId={event.shortId} photoId={photo.id} scale={2.5} logoUrl={studio.logoUrl} />
           </div>
         )}
         {prev && <NavBtn side="left" label="Previous photo (←)" onClick={() => go(prev)} />}
@@ -165,45 +196,46 @@ export function PhotoView() {
 
       {photo && allowed && (
         <div className="mx-auto w-full max-w-xl pb-safe">
-          <div className={cn('grid px-2 pt-3 text-center text-[11px]', store ? 'grid-cols-4' : 'grid-cols-3')}>
-            <Action label={isFav ? 'Favourited' : 'Favourite'} on={isFav} onClick={toggleFav} icon={<Heart size={20} className={isFav ? 'fill-current' : undefined} />} pressed={isFav} />
-            <Action label={dl.busy ? 'Saving…' : 'Download'} onClick={download} icon={<Download size={20} />} disabled={dl.busy} />
-            <Action label="Share" onClick={share} icon={<Share2 size={20} />} />
-            {store && <Action label="Buy print" onClick={() => setBuy(true)} icon={<ShoppingBag size={20} />} />}
+          <div className={cn('grid px-2 pt-2 text-center text-[12px]', store ? 'grid-cols-4' : 'grid-cols-3')}>
+            <Action label={isFav ? 'Favourited' : 'Favourite'} on={isFav} onClick={() => void toggleFav()} icon={<Heart size={21} className={isFav ? 'fill-current' : undefined} />} pressed={isFav} />
+            <Action label={dl.busy ? 'Saving…' : 'Download'} onClick={download} icon={<Download size={21} />} disabled={dl.busy} />
+            <Action label="Share" onClick={() => void share()} icon={<Share2 size={21} />} />
+            {store && <Action label="Buy print" onClick={() => setBuy(true)} icon={<Printer size={21} />} />}
           </div>
-          {event.settings.allowEnquiries && (
-            <button type="button" onClick={() => setEnquire(true)} className="mx-3 mb-1 mt-2 flex w-[calc(100%-24px)] items-center gap-2 rounded-card border border-side-line bg-side-2 px-3.5 py-2.5 text-left text-[12.5px] text-side-ink-2 hover:border-side-ink-2/40">
-              <span className="flex-1">Want photos like these? <b className="text-side-gold">Enquire with {studio.name}</b></span>
-              <ChevronRight size={15} />
-            </button>
-          )}
         </div>
       )}
 
-      <Sheet dark open={info} onOpenChange={setInfo} title={photo?.filename ?? 'Photo'} description={photo ? fmt.dateTime(photo.capturedAt) : undefined}>
+      <Sheet dark open={info} onOpenChange={setInfo} title="Photo details" description={photo ? fmt.dateTime(photo.capturedAt) : undefined}>
         {photo && (
-          <dl className="grid grid-cols-[110px_1fr] gap-y-2 text-[13px]">
+          <dl className="grid grid-cols-[110px_1fr] gap-y-2.5 text-[14px]">
+            <dt className="text-side-ink-2">File</dt><dd className="min-w-0 truncate">{photo.filename}</dd>
             <dt className="text-side-ink-2">Event</dt><dd>{event.name}</dd>
-            <dt className="text-side-ink-2">Size</dt><dd className="font-mono tnum">{photo.exif.width} × {photo.exif.height}</dd>
+            <dt className="text-side-ink-2">Size</dt><dd className="tnum">{photo.exif.width} × {photo.exif.height}</dd>
             {photo.exif.camera && <><dt className="text-side-ink-2">Camera</dt><dd>{photo.exif.camera}</dd></>}
             {photo.exif.lens && <><dt className="text-side-ink-2">Lens</dt><dd>{photo.exif.lens}</dd></>}
-            {photo.exif.exposure && <><dt className="text-side-ink-2">Exposure</dt><dd className="font-mono text-[12px]">{photo.exif.exposure}</dd></>}
-            <dt className="text-side-ink-2">Photographer</dt><dd>{photo.source === 'guest' ? 'A guest' : `${studio.name}`}</dd>
+            {photo.exif.exposure && <><dt className="text-side-ink-2">Exposure</dt><dd>{photo.exif.exposure}</dd></>}
+            <dt className="text-side-ink-2">Taken by</dt><dd>{photo.source === 'guest' ? 'A guest' : studio.name}</dd>
           </dl>
         )}
-        <p className="mt-4 text-[11.5px] text-side-ink-2">Keys: ← → to move, F to favourite, Esc to close.</p>
+        <p className="mt-4 text-[12.5px] text-side-ink-2">On a keyboard: ← → to move, F to favourite, Esc to close.</p>
       </Sheet>
 
-      <Sheet dark open={!!blocked} onOpenChange={(v) => { if (!v) setBlocked(null) }} title="Can't download this photo">
-        <p className="text-[13.5px] text-side-ink-2">{blocked?.reason}</p>
-        <div className="mt-4 flex flex-col gap-2">
-          {blocked?.selfie && <Link to={base}><Button variant="primary" size="lg" icon={<ScanFace size={16} />} className="w-full justify-center">Find my photos</Button></Link>}
-          {blocked?.buy && store && <Button variant={blocked.selfie ? 'side' : 'primary'} size="lg" icon={<ShoppingBag size={16} />} className="w-full justify-center" onClick={() => { setBlocked(null); setBuy(true) }}>Buy this photo</Button>}
+      <Sheet dark open={!!blocked} onOpenChange={(v) => { if (!v) setBlocked(null) }} title="Can’t download this photo" description={blocked?.reason}>
+        <div className="flex flex-col gap-2 pt-1">
+          {blocked?.selfie && (
+            <Link to={base} className="inline-flex h-[46px] w-full items-center justify-center gap-2 rounded-[10px] bg-gold font-bold text-accent-ink"><ScanFace size={17} />Find my photos</Link>
+          )}
+          {blocked?.buy && store && (
+            <Button variant={blocked.selfie ? 'side' : 'primary'} size="lg" icon={<ShoppingBag size={16} />} className="h-[46px] w-full justify-center" onClick={() => { setBlocked(null); setBuy(true) }}>Buy this photo</Button>
+          )}
+          {!blocked?.selfie && !(blocked?.buy && store) && <Button variant="side" size="lg" className="h-11 w-full justify-center" onClick={() => setBlocked(null)}>Close</Button>}
         </div>
       </Sheet>
 
-      {photo && store && <BuySheet open={buy} onOpenChange={setBuy} photos={[photo]} mode="photo" event={event} studio={studio} session={session} />}
-      <EnquirySheet dark open={enquire} onOpenChange={setEnquire} studio={studio} source={`${event.name} gallery · photo viewer`} shortId={event.shortId} session={session} />
+      {photo && store && (
+        <BuySheet open={buy} onOpenChange={setBuy} photos={[photo]} mode="photo" event={event} studio={studio} session={session} allMine={matches}
+          onDownload={(bought) => { if (bought.length === 1 && bought[0].id === photo.id) void dl.run(photo); else navigate(`${base}/me?download=1`) }} />
+      )}
     </div>
   )
 }
@@ -211,7 +243,7 @@ export function PhotoView() {
 function Action({ label, icon, onClick, on, disabled, pressed }: { label: string; icon: ReactNode; onClick: () => void; on?: boolean; disabled?: boolean; pressed?: boolean }) {
   return (
     <button type="button" onClick={onClick} disabled={disabled} aria-pressed={pressed}
-      className={cn('flex flex-col items-center gap-1 rounded-control py-2 font-semibold transition hover:bg-side-2 disabled:opacity-60', on ? 'text-side-gold' : 'text-side-ink-2 hover:text-side-ink')}>
+      className={cn('flex min-h-14 flex-col items-center justify-center gap-1 rounded-control py-2 font-bold transition hover:bg-side-2 disabled:opacity-60', on ? 'text-side-gold' : 'text-side-ink hover:text-side-ink')}>
       {icon}{label}
     </button>
   )

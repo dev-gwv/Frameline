@@ -51,3 +51,46 @@ export function svgMarkup(el: HTMLElement | null) {
   return clone.outerHTML
 }
 
+
+/** Renders an SVG string to a PNG blob (white background) at `size` px. Rejects if the image can't be drawn. */
+export function svgToPng(svg: string, size = 1024): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }))
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas')
+        c.width = size; c.height = size
+        const ctx = c.getContext('2d')!
+        ctx.fillStyle = '#fff'
+        ctx.fillRect(0, 0, size, size)
+        ctx.drawImage(img, 0, 0, size, size)
+        c.toBlob((b) => (b ? resolve(b) : reject(new Error('Couldn’t make the PNG'))), 'image/png')
+      } catch (e) { reject(e) } finally { URL.revokeObjectURL(url) }
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Couldn’t make the PNG')) }
+    img.src = url
+  })
+}
+
+export function downloadBlobFile(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** "7 pm Sat", "10:30 am 4 Oct" for scheduled switches. */
+export function switchTime(iso: string, now = Date.now()) {
+  const d = new Date(iso)
+  const h = d.getHours() % 12 || 12
+  const m = d.getMinutes()
+  const time = `${h}${m ? `:${String(m).padStart(2, '0')}` : ''} ${d.getHours() < 12 ? 'am' : 'pm'}`
+  const days = (d.getTime() - now) / 86_400_000
+  const day = days < 6 ? d.toLocaleDateString('en-IN', { weekday: 'short' }) : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  return `${time} ${day}`
+}
