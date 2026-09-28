@@ -3,7 +3,7 @@ import type {
   ChangeTopic, FramelineApi, GuestLinkResult, ListPhotosQuery, PlanChange, RenewalLink, RenewalResult, ResolvedGuestLink, UploadFile, UploadOptions,
 } from './api'
 import type {
-  AbandonedCart, Asset, DownloadAllowance, PublicEventSummary, PublicStudio, PublicWatermark,
+  AbandonedCart, Asset, DownloadAllowance, DownloadEvent, PublicEventSummary, PublicStudio, PublicWatermark,
   Album, Broadcast, Camera, CameraUpload, Enquiry, EventSettings, Guest, GuestSession, LedgerEntry, NotificationPrefs, Order, Photo, PhotoEvent,
   Price, PublicEvent, Purchase, SmartQR, StoreSettings, Studio, StudioProfile, TeamMember, Ticket, Usage, UsageBreakdown, UsageReport,
   WatermarkSettings, Website, ZipRequest, WalletBalance, NeedsYouItem,
@@ -668,6 +668,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     reindexFaces: (eventId) => request<{ queued: number }>('POST', `/v1/events/${enc(eventId)}/faces/reindex`, { idempotent: true }),
     requestZip: (eventId, email, opts = {}) => request<ZipRequest>('POST', `/v1/events/${enc(eventId)}/zips`, { body: { email, ...opts }, idempotent: true }),
     listZipRequests: (eventId) => listAll<ZipRequest>(`/v1/events/${enc(eventId)}/zips`),
+    listDownloadEvents: (eventId) => listAll<DownloadEvent>(`/v1/events/${enc(eventId)}/downloads`),
     updateFilm: (id, patch) => request('PATCH', `/v1/films/${enc(id)}`, { body: pick(patch, ['name', 'url'] as const) }),
 
     // ── Tools ──────────────────────────────────────────────────────────────

@@ -43,7 +43,7 @@ Nothing below is required for the app to run; each feature just simulates until 
 | `RESEND_API_KEY` | Real sign-in emails (without it, `production` returns a clear "email sign-in isn't configured" error — there's no dev fallback outside `development`/`test`) | resend.com (has a free tier) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in | Google Cloud Console → OAuth consent screen + credentials |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | Real payments (without them, orders simulate as paid) | razorpay.com |
-| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` (+ var `R2_ACCOUNT_ID`) | Direct-to-R2 presigned uploads (without them, large uploads proxy through the Worker instead — works, just less efficient at scale) | Cloudflare dashboard → R2 → "Manage API tokens" |
+| ~~`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`~~ | **Decided: not setting these.** Uploads proxy through the Worker (`storage.ts`'s `'proxy'` mode) rather than going direct-to-R2 with presigned URLs. Fine at our current scale; revisit only if upload throughput becomes a real bottleneck. | — |
 
 **This is the first step toward doing all of the above for real** — none of it is wired up yet, so sign-in by
 email/Google, real payments and direct-to-R2 uploads still need those secrets added before they work outside

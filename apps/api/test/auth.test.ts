@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { call, expectProblem, freshIp, uniqueEmail } from './helpers'
 
@@ -112,6 +113,13 @@ describe('password login', () => {
   })
 
   it('reports Google sign-in as not configured without secrets', async () => {
-    expectProblem(await call('/v1/auth/google/start'), 501, 'not_configured')
+    // Force the "absent" case regardless of a developer's own .dev.vars (real Google keys for local testing).
+    const id = env.GOOGLE_CLIENT_ID, secret = env.GOOGLE_CLIENT_SECRET
+    env.GOOGLE_CLIENT_ID = undefined; env.GOOGLE_CLIENT_SECRET = undefined
+    try {
+      expectProblem(await call('/v1/auth/google/start'), 501, 'not_configured')
+    } finally {
+      env.GOOGLE_CLIENT_ID = id; env.GOOGLE_CLIENT_SECRET = secret
+    }
   })
 })

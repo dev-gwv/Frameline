@@ -1,8 +1,10 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { BuildZipJob, Env, PhotoJob, ProcessPhotoJob } from '../env'
 import { getMailer } from './mailer'
 import { getDb, schema } from '../db/client'
 import { newId } from '../lib/ids'
+import { chunk, photoFilter } from '../routes/photos'
+import { logDownloadsBatch } from './downloads'
 import { notifyWaitingGuests } from './notify'
 import { publishTopics } from './realtime'
 import { vectorIndex } from './vectors'
@@ -144,6 +146,15 @@ export async function buildZip(env: Env, job: BuildZipJob): Promise<void> {
   if (!z || z.status === 'ready') return
   const url = `${(env.API_PUBLIC_URL ?? '').replace(/\/$/, '')}/v1/public/zips/${z.id}`
   await db.update(schema.zipRequests).set({ status: 'ready', readyAt: new Date().toISOString(), url }).where(eq(schema.zipRequests.id, z.id)).run()
+  // One download_events row per photo the ZIP actually covers (an explicit selection, or everything the request
+  // matched at build time — an album, or the whole event's regular albums).
+  const p = schema.photos
+  const photos = z.photoIds?.length
+    ? (await Promise.all(chunk(z.photoIds).map((part) => db.select({ id: p.id, filename: p.filename }).from(p).where(and(inArray(p.id, part), isNull(p.deletedAt)))))).flat()
+    : await db.select({ id: p.id, filename: p.filename }).from(p).where(photoFilter(z.eventId, { albumId: z.albumId ?? undefined }))
+  for (const part of chunk(photos)) {
+    await logDownloadsBatch(db, part.map((ph) => ({ studioId: z.studioId, eventId: z.eventId, photoId: ph.id, filename: ph.filename, guestId: z.guestId, kind: 'zip' as const })))
+  }
   const [ev] = await db.select({ name: schema.events.name }).from(schema.events).where(eq(schema.events.id, z.eventId)).limit(1)
   await getMailer(env).send({
     to: z.email,

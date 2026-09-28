@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ChevronRight, Film, ImagePlus, Images, Lock, Play, ScanFace, Share2, Sparkles, Store } from 'lucide-react'
+import { ChevronRight, Film, ImagePlus, Images, Lock, MessageCircle, Play, ScanFace, Share2, Sparkles, Store } from 'lucide-react'
 import { cn } from '@frameline/ui'
 import { fmt, toneCss, type Album, type Tone } from '@frameline/shared'
 import { guestAlbums, useAlbumCover, useHighlights } from '../lib/queries'
@@ -8,7 +8,7 @@ import { Container, EventHero, PrimaryButton, TextButton, WideButton } from '../
 import { EventShell, useShareGallery } from '../components/Shell'
 import { SelfieFlow } from '../components/SelfieFlow'
 import { UploadSheet } from '../components/UploadSheet'
-import { useEventCtx } from './EventLayout'
+import { useEventCtx, waLink } from './EventLayout'
 
 export function EventHome() {
   const { event, studio, session, base, seeAll, matches, matchesLoading, forceOffline } = useEventCtx()
@@ -118,6 +118,8 @@ export function EventHome() {
             <ActionRow icon={<ImagePlus size={17} />} title="Add your photos" body={`Share what you shot at ${event.name}`} onClick={() => setUpload(true)} />
           )}
           <ActionRow icon={<Store size={17} />} title={`More from ${studio.name}`} body="Their galleries, services and contact" onClick={() => navigate(`/studio/${studio.followCode.toLowerCase()}`)} />
+          <ActionRow icon={<MessageCircle size={17} />} title="Message on WhatsApp" body={`Ask ${studio.name} a question`}
+            href={waLink(studio, `Hi ${studio.name}, I have a question about ${event.name} (${event.shortId}).`)} />
         </section>
 
         <footer className="pb-4 text-center text-[12px] text-ink-3">
@@ -131,14 +133,17 @@ export function EventHome() {
   )
 }
 
-function ActionRow({ icon, title, body, onClick }: { icon: ReactNode; title: string; body: string; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className="flex min-h-14 min-w-0 items-center gap-3 rounded-card border border-line bg-surface p-3.5 text-left shadow-card transition hover:bg-sunk">
+function ActionRow({ icon, title, body, onClick, href }: { icon: ReactNode; title: string; body: string; onClick?: () => void; href?: string }) {
+  const cls = 'flex min-h-14 min-w-0 items-center gap-3 rounded-card border border-line bg-surface p-3.5 text-left shadow-card transition hover:bg-sunk'
+  const inner = (
+    <>
       <span className="grid size-9 shrink-0 place-items-center rounded-[8px] bg-accent-soft text-accent-text">{icon}</span>
       <span className="min-w-0 flex-1"><b className="block text-[14px]">{title}</b><span className="block truncate text-[12.5px] text-ink-2">{body}</span></span>
       <ChevronRight size={17} className="text-ink-3" />
-    </button>
+    </>
   )
+  if (href) return <a href={href} target="_blank" rel="noreferrer noopener" className={cls}>{inner}</a>
+  return <button type="button" onClick={onClick} className={cls}>{inner}</button>
 }
 
 /** Cover = the album's first photo. Locked albums (face privacy) can't be listed, so they show an event tone. */

@@ -93,6 +93,11 @@ export const useZipRequests = (eventId?: ID) => {
     refetchInterval: (q) => (q.state.data?.some((z) => z.status === 'queued') ? 2500 : false),
   })
 }
+/** The event's download log: every guest single-photo download, and one row per photo once a ZIP is ready. */
+export const useDownloadEvents = (eventId?: ID) => {
+  const api = useApi()
+  return useQuery({ queryKey: ['downloads', eventId], queryFn: () => api.listDownloadEvents(eventId!), enabled: !!eventId })
+}
 /** Events in the trash (soft-deleted; purged 30 days after deletion). */
 export const useDeletedEvents = (enabled = true) => {
   const api = useApi()

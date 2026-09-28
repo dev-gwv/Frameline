@@ -36,6 +36,13 @@
       "when": 1790605152567,
       "tag": "0004_contract_v5",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790616814050,
+      "tag": "0005_picks_and_downloads",
+      "breakpoints": true
     }
   ]
 }

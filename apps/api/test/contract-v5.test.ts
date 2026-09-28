@@ -265,10 +265,13 @@ describe('faces', () => {
 describe('stats', () => {
   it('reports event totals and face finding progress', async () => {
     const token = await tokenFor('editor')
+    // `downloads` comes from download_events (real per-photo download tracking), not a seeded counter.
+    const [seed] = await firstPhotos('ev_riya', 1)
+    expect((await call('/v1/public/downloads', { body: { photoIds: [seed.id] } })).status).toBe(204)
     const s = await call('/v1/events/ev_riya/stats', { token })
     expect(s.status).toBe(200)
     expect(s.json).toMatchObject({ eventId: 'ev_riya', visits: 1420 + 640 + 250, faceSearches: expect.any(Number), guests: expect.any(Number), processing: 0 })
-    expect(s.json.downloads).toBeGreaterThan(0)
+    expect(s.json.downloads).toBe(1)
     expect(s.json.photoViews).toBeGreaterThan(s.json.downloads)
     expect(s.json.faces).toEqual({ ready: s.json.photos, total: s.json.photos, pending: 0 })
     const [ph] = await firstPhotos('ev_riya', 1)

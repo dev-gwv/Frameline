@@ -282,7 +282,14 @@ describe('guest identity: follows, galleries, access requests; auth extras', () 
   })
 
   it('allows only allowlisted native redirects for Google sign-in', async () => {
-    expectProblem(await call('/v1/auth/google/start?redirect=frameline://sign-in&mode=json'), 501, 'not_configured')
+    // Force the "absent" case regardless of a developer's own .dev.vars (real Google keys for local testing).
+    const id = env.GOOGLE_CLIENT_ID, secret = env.GOOGLE_CLIENT_SECRET
+    env.GOOGLE_CLIENT_ID = undefined; env.GOOGLE_CLIENT_SECRET = undefined
+    try {
+      expectProblem(await call('/v1/auth/google/start?redirect=frameline://sign-in&mode=json'), 501, 'not_configured')
+    } finally {
+      env.GOOGLE_CLIENT_ID = id; env.GOOGLE_CLIENT_SECRET = secret
+    }
   })
 
   it('files access requests from guests', async () => {

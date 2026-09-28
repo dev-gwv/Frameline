@@ -20,6 +20,7 @@ import {
   DownloadAllowance, Enquiry, FaceSearchInput, FaceSearchResult, GuestLinkPayload, GuestSession, NotifyRequest, Order, Photo, Price, PublicEvent, PublicEventSummary, PublicStudio,
   PublicWatermark, ShippingAddressInput, StudioProfile, ZipRequest,
 } from '../schemas/domain'
+import { logDownload, logDownloadsBatch, type DownloadLogRow } from '../services/downloads'
 import { bumpDaily } from '../services/stats'
 import { PhotoSortEnum } from './photos'
 import { addLedger } from '../services/billing'
@@ -384,18 +385,22 @@ publicRoutes.openapi(createRoute({
 }), async (c) => {
   const db = getDb(c.env.DB)
   const p = schema.photos
+  const g = await readGuest(c)
   const studios = new Set<string>()
   const perEvent = new Map<string, { studioId: string; n: number }>()
+  const logRows: DownloadLogRow[] = []
   for (const part of chunk([...new Set(c.req.valid('json').photoIds)])) {
     await db.update(p).set({ downloads: sql`${p.downloads} + 1` }).where(and(inArray(p.id, part), visible(p))).run()
-    for (const r of await db.select({ s: p.studioId, e: p.eventId }).from(p).where(and(inArray(p.id, part), visible(p)))) {
+    for (const r of await db.select({ id: p.id, filename: p.filename, s: p.studioId, e: p.eventId }).from(p).where(and(inArray(p.id, part), visible(p)))) {
       studios.add(r.s)
       const x = perEvent.get(r.e) ?? { studioId: r.s, n: 0 }
       x.n++
       perEvent.set(r.e, x)
+      logRows.push({ studioId: r.s, eventId: r.e, photoId: r.id, filename: r.filename, guestId: g?.eventId === r.e ? g.guestId : undefined, kind: 'single' })
     }
   }
   for (const [eventId, x] of perEvent) await bumpDaily(db, x.studioId, eventId, 'downloads', x.n)
+  for (const part of chunk(logRows)) await logDownloadsBatch(db, part)
   for (const s of studios) emit(c, s, 'photos')
   return c.body(null, 204)
 })
@@ -521,7 +526,7 @@ publicRoutes.openapi(createRoute({
   }
   const row = {
     id: newId('zip'), studioId: e.studioId, eventId: e.id, albumId: input.albumId ?? null, photoIds: ids ?? null, email: input.email,
-    photoCount, status: 'queued' as const, requestedAt: nowIso(), readyAt: null, url: null,
+    photoCount, status: 'queued' as const, requestedAt: nowIso(), readyAt: null, url: null, guestId: g?.guestId ?? null,
   }
   await db.insert(schema.zipRequests).values(row).run()
   await c.env.PHOTO_QUEUE.send({ kind: 'build-zip', zipId: row.id, studioId: e.studioId })
@@ -536,7 +541,7 @@ publicRoutes.openapi(createRoute({
   responses: { 200: { description: 'JPEG rendition' }, ...problems(401, 403, 404) },
 }), async (c) => {
   const { p, e } = await visiblePhoto(c, c.req.valid('param').photoId)
-  await guestAccess(c, e)
+  const g = await guestAccess(c, e)
   if (e.settings.downloads === 'none') throw new Forbidden('Downloads are turned off for this gallery.', 'downloads_disabled')
   const size = c.req.valid('query').size
   if (size === '3072' && !e.settings.originalDownloads) throw new Forbidden('High-resolution downloads are off for this gallery.', 'originals_disabled')
@@ -547,6 +552,7 @@ publicRoutes.openapi(createRoute({
   if (c.req.method !== 'HEAD') {
     background(c, getDb(c.env.DB).update(schema.photos).set({ downloads: sql`${schema.photos.downloads} + 1` }).where(eq(schema.photos.id, p.id)).run())
     background(c, bumpDaily(getDb(c.env.DB), e.studioId, e.id, 'downloads'))
+    background(c, logDownload(getDb(c.env.DB), { studioId: e.studioId, eventId: e.id, photoId: p.id, filename: p.filename, guestId: g?.guestId, kind: 'single' }))
   }
   return new Response(c.req.method === 'HEAD' ? null : obj.body, {
     headers: { 'Content-Type': 'image/jpeg', 'Content-Disposition': `attachment; filename="${p.filename.replace(/"/g, '')}"`, 'Cache-Control': 'private, max-age=3600' },

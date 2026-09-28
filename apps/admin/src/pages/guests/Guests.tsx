@@ -73,9 +73,11 @@ export default function Guests() {
   const viewing = m.modal === 'picks' ? guestList.find((g) => g.id === m.params.get('guest')) ?? null : null
   const viewPicks = (g: Guest) => m.open('picks', { guest: g.id })
 
-  /** Acts at once; Undo reopens the request (and takes back the access approving gave). */
+  /** Acts at once; Undo reopens the request (and takes back the access approving gave). Approving moves the
+   * person out of Requests, so switch to Everyone (Decline leaves them out of both lists — stay on Requests). */
   const decide = (r: AccessRequest, approve: boolean) => {
     api.resolveAccessRequest(r.id, approve).then(() => {
+      if (approve) setFilter('all')
       toast.undo(approve ? `${firstName(r.name)} can now see the photos` : `Declined ${firstName(r.name)}’s request`,
         () => void api.reopenAccessRequest(r.id).catch((e) => toast.error('Couldn’t undo that', errorMessage(e))))
     }, (e) => toast.error(`Couldn’t ${approve ? 'approve' : 'decline'} ${firstName(r.name)}`, errorMessage(e)))

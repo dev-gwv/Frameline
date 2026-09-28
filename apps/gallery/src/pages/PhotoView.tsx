@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Link2, Lock, MoreHorizontal, Printer, ScanFace, Share2, ShoppingBag } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Link2, Lock, MessageCircle, MoreHorizontal, Printer, ScanFace, Share2, ShoppingBag } from 'lucide-react'
 import { Button, cn, Menu, Tip, useToast } from '@frameline/ui'
 import { fmt, toneCss, type Photo } from '@frameline/shared'
 import { useQueryClient } from '@tanstack/react-query'
@@ -13,7 +13,7 @@ import { friendlyError } from '../lib/errors'
 import { Sheet } from '../components/Sheet'
 import { BuySheet } from '../components/BuySheet'
 import { useDownloadOne } from '../components/DownloadSheet'
-import { useEventCtx } from './EventLayout'
+import { useEventCtx, waLink } from './EventLayout'
 
 /** Photo viewer (dark): swipe or arrow keys; Favourite · Download · Share · Buy print (only while selling). */
 /** Photos already counted as viewed in this page session. */
@@ -202,6 +202,12 @@ export function PhotoView() {
             <Action label="Share" onClick={() => void share()} icon={<Share2 size={21} />} />
             {store && <Action label="Buy print" onClick={() => setBuy(true)} icon={<Printer size={21} />} />}
           </div>
+          <a href={waLink(studio, `Hi ${studio.name}, I have a question about a photo from ${event.name} (${event.shortId}).`)} target="_blank" rel="noreferrer noopener"
+            className="mx-3 mb-1 mt-2 flex w-[calc(100%-24px)] items-center gap-2 rounded-card border border-side-line bg-side-2 px-3.5 py-2.5 text-left text-[12.5px] text-side-ink-2 hover:border-side-ink-2/40">
+            <MessageCircle size={15} className="shrink-0 text-side-gold" />
+            <span className="flex-1">Questions about this photo? <b className="text-side-gold">Message on WhatsApp</b></span>
+            <ChevronRight size={15} />
+          </a>
         </div>
       )}
 

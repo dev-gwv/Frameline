@@ -2,7 +2,7 @@ import { createRoute, z } from '@hono/zod-openapi'
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, sql, type SQL } from 'drizzle-orm'
 import { ENHANCE_COST, hash, tone } from '@frameline/shared'
 import { getDb, schema, type DB } from '../db/client'
-import { albumOut, photoOut, zipOut } from '../db/mappers'
+import { albumOut, downloadEventOut, photoOut, zipOut } from '../db/mappers'
 import { toMinor } from '../lib/money'
 import { debitWallet } from '../services/billing'
 import { BadRequest, Conflict, NotFound, ValidationFailed } from '../lib/errors'
@@ -11,7 +11,7 @@ import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, proble
 import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
 import { membershipOf, requireStudio } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
-import { Album, Photo, ZipRequest } from '../schemas/domain'
+import { Album, DownloadEvent, Photo, ZipRequest } from '../schemas/domain'
 import { assertEventVisible, type Membership } from '../services/access'
 import { audit } from '../services/audit'
 import { albumForMember, eventForMember, recountStatements } from '../services/events'
@@ -372,7 +372,11 @@ photoRoutes.openapi(createRoute({
   const order = new Map(ids.map((id, i) => [id, i]))
   sources.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
   const now = nowIso()
-  const copies = sources.map((src, i) => ({ ...src, id: newId('ph'), albumId: target.id, index: (top ?? 0) + i + 1, favourites: 0, downloads: 0, views: 0, createdAt: now }))
+  const copies = sources.map((src, i) => ({
+    ...src, id: newId('ph'), albumId: target.id, index: (top ?? 0) + i + 1, favourites: 0, downloads: 0, views: 0, createdAt: now,
+    // Shares the original file and never counts a second time in the event's photoCount/quota (recountStatements).
+    copiedFrom: src.id,
+  }))
   const faceRows = copies.flatMap((cp, i) => sources[i].faces.map((f) => ({ id: newId('fc'), photoId: cp.id, eventId: cp.eventId, personId: f.personId, box: f.box, vectorId: null })))
   if (copies.length) {
     const [first, ...rest] = recountStatements(db, target.eventId)
@@ -479,7 +483,7 @@ photoRoutes.openapi(createRoute({
   }
   const row = {
     id: newId('zip'), studioId: m.studioId, eventId: ev.id, albumId: input.albumId ?? null, photoIds: input.photoIds ?? null, email: input.email,
-    photoCount, status: 'queued' as const, requestedAt: nowIso(), readyAt: null, url: null,
+    photoCount, status: 'queued' as const, requestedAt: nowIso(), readyAt: null, url: null, guestId: null,
   }
   await db.insert(schema.zipRequests).values(row).run()
   await c.env.PHOTO_QUEUE.send({ kind: 'build-zip', zipId: row.id, studioId: m.studioId })
@@ -500,4 +504,23 @@ photoRoutes.openapi(createRoute({
   const t = schema.zipRequests
   const rows = await db.select().from(t).where(and(eq(t.eventId, ev.id), afterCursor(t.requestedAt, t.id, 'desc', cursor))).orderBy(desc(t.requestedAt), desc(t.id)).limit(limit + 1)
   return c.json(toPage(rows, limit, (r) => [r.requestedAt, r.id], zipOut), 200)
+})
+
+photoRoutes.openapi(createRoute({
+  method: 'get', path: '/events/{id}/downloads', tags: ['Photos'], summary: 'Download log for an event: every single-photo download, and one row per photo in a ready ZIP', security,
+  middleware: [requireStudio('editor', 'view the download log')] as const,
+  request: { params: IdParam, query: PageQuery },
+  responses: { 200: json(pageOf(DownloadEvent, 'DownloadEventPage')), ...problems(401, 403, 404) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id)
+  const { limit, cursor } = c.req.valid('query')
+  const t = schema.downloadEvents
+  const rows = await db.select({
+    id: t.id, eventId: t.eventId, photoId: t.photoId, filename: t.filename, guestId: t.guestId, kind: t.kind, createdAt: t.createdAt,
+    guestName: schema.guests.name,
+  }).from(t).leftJoin(schema.guests, eq(schema.guests.id, t.guestId))
+    .where(and(eq(t.eventId, ev.id), afterCursor(t.createdAt, t.id, 'desc', cursor))).orderBy(desc(t.createdAt), desc(t.id)).limit(limit + 1)
+  return c.json(toPage(rows, limit, (r) => [r.createdAt, r.id], downloadEventOut), 200)
 })

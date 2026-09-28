@@ -64,12 +64,12 @@ export const queryClient = new QueryClient({
 const TOPIC_KEYS: Record<ChangeTopic, string[]> = {
   events: ['events', 'event', 'needs-you', 'event-stats', 'studio-stats'],
   albums: ['albums'],
-  photos: ['photos', 'photo', 'needs-you', 'event-stats', 'studio-stats'],
+  photos: ['photos', 'photo', 'needs-you', 'event-stats', 'studio-stats', 'downloads'],
   studio: ['studio'],
   usage: ['usage', 'wallet'],
   guests: ['guests', 'access-requests', 'needs-you', 'event-stats'],
   activity: ['activity', 'event-stats', 'studio-stats'],
-  misc: ['films', 'zips', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'website', 'enquiries', 'ledger', 'orders', 'wallet', 'studio-stats'],
+  misc: ['films', 'zips', 'downloads', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'website', 'enquiries', 'ledger', 'orders', 'wallet', 'studio-stats'],
 }
 
 function LiveUpdates({ api }: { api: FramelineApi }) {

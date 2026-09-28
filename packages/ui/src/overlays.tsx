@@ -257,7 +257,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={api}>
       {children}
-      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-[calc(84px+env(safe-area-inset-bottom))] z-[60] flex flex-col items-center gap-2 px-4 md:bottom-7">
+      {/* bottom offset is a CSS var so a full-screen surface with its own bottom bar (e.g. the photo viewer) can
+          raise toasts above it for as long as it's mounted, without changing the offset anywhere else. */}
+      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-[var(--toast-bottom-mobile,calc(84px+env(safe-area-inset-bottom)))] z-[60] flex flex-col items-center gap-2 px-4 md:bottom-[var(--toast-bottom-desktop,1.75rem)]">
         {items.map((t) => (
           <div key={t.id} role={t.kind === 'error' ? 'alert' : 'status'}
             className="pointer-events-auto flex min-h-[44px] max-w-[min(520px,100%)] items-center gap-3 rounded-[10px] bg-inverse py-2.5 pl-4 pr-2 text-inverse-ink shadow-float animate-[fl-slide-up_160ms_ease-out]">

@@ -191,6 +191,12 @@ export const photos = sqliteTable('photos', {
   /** When face detection last finished for this photo (null = not scanned yet). */
   facesIndexedAt: ts('faces_indexed_at'),
   deletedAt: ts('deleted_at'),
+  /**
+   * Set on copies made by POST /photos/copy (e.g. "Make an album from these" picks albums): the id of the photo
+   * it was copied from. Copies share the original file and are never counted a second time in the event's
+   * photoCount/quota (see recountStatements) — never exposed in the API's Photo shape, like r2Key.
+   */
+  copiedFrom: text('copied_from'),
 }, (t) => [
   index('photos_deleted_idx').on(t.deletedAt),
   index('photos_r2key_idx').on(t.r2Key),
@@ -493,7 +499,23 @@ export const zipRequests = sqliteTable('zip_requests', {
   requestedAt: ts('requested_at').notNull(),
   readyAt: ts('ready_at'),
   url: text('url'),
+  /** The guest who asked for it (a guest-facing ZIP); null for a studio-initiated export from admin. */
+  guestId: text('guest_id'),
 }, (t) => [index('zips_event_idx').on(t.eventId, t.requestedAt)])
+
+/** One row per photo actually downloaded (single click, or one per photo when a ZIP is generated) — the source of
+ * truth other download counts read from (getEventStats' `downloads`, the Guests tab stat). */
+export const downloadEvents = sqliteTable('download_events', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  eventId: text('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  photoId: text('photo_id').notNull(),
+  /** Null when the download wasn't tied to a signed-up guest (anonymous or PIN-only access). */
+  guestId: text('guest_id'),
+  kind: text('kind', { enum: ['single', 'zip'] }).notNull(),
+  filename: text('filename').notNull(),
+  createdAt: ts('created_at').notNull(),
+}, (t) => [index('download_events_event_idx').on(t.eventId, t.createdAt)])
 
 export const cameraUploads = sqliteTable('camera_uploads', {
   id: text('id').primaryKey(),

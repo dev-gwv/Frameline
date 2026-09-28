@@ -383,6 +383,12 @@ export const ZipRequest = z.object({
   status: z.enum(['queued', 'ready', 'failed']), requestedAt: z.string(), readyAt: z.string().optional(), url: z.string().optional(),
 }).openapi('ZipRequest')
 
+/** One row per photo actually downloaded (a guest single-photo download, or one per photo in a ZIP). */
+export const DownloadEvent = z.object({
+  id: Id, eventId: Id, photoId: Id, filename: z.string(), guestId: Id.optional(), guestName: z.string().optional(),
+  kind: z.enum(['single', 'zip']), createdAt: z.string(),
+}).openapi('DownloadEvent')
+
 export const UsageReport = z.object({
   id: Id, status: z.enum(['processing', 'ready']), requestedAt: z.string(), readyAt: z.string().optional(), csv: z.string().optional(),
 }).openapi('UsageReport')

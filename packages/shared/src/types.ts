@@ -486,6 +486,24 @@ export interface ZipRequest {
   status: 'queued' | 'ready' | 'failed'; requestedAt: string; readyAt?: string; url?: string
 }
 
+/**
+ * One row per photo actually downloaded: a guest's single-photo download, or (once a ZIP is ready) one row per
+ * photo it contained. The download-log modal (event settings) and every other download count (getEventStats'
+ * `downloads`, the Guests tab stat) read from this — there's no separate counter to keep in sync.
+ */
+export interface DownloadEvent {
+  id: ID
+  eventId: ID
+  photoId: ID
+  filename: string
+  /** Absent for an anonymous/PIN-only guest, or a studio-initiated export. */
+  guestId?: ID
+  /** The guest's name when `guestId` is set and they haven't been removed; else absent ("Anonymous" in the UI). */
+  guestName?: string
+  kind: 'single' | 'zip'
+  createdAt: string
+}
+
 export interface UsageReport { id: ID; status: 'processing' | 'ready'; requestedAt: string; readyAt?: string; /** CSV text once ready. */ csv?: string }
 
 export interface UsageBreakdown {

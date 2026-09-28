@@ -157,6 +157,14 @@ export default function PhotoViewer() {
     } catch (e) { toast.error('Download failed', errorMessage(e)) } finally { setDownloading(false) }
   }, [api, photo, url, event?.settings.watermarkOff, wm?.text, studio?.name, toast])
 
+  // Raise toasts (Rotate, Trash+Undo…) above this page's own bottom row (slideshow/zoom/keyboard hints) while it's mounted.
+  useEffect(() => {
+    const root = document.documentElement
+    root.style.setProperty('--toast-bottom-mobile', 'calc(150px + env(safe-area-inset-bottom))')
+    root.style.setProperty('--toast-bottom-desktop', '6rem')
+    return () => { root.style.removeProperty('--toast-bottom-mobile'); root.style.removeProperty('--toast-bottom-desktop') }
+  }, [])
+
   /* ---------- Keyboard ---------- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

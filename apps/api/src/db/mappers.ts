@@ -1,5 +1,5 @@
 import type {
-  AccessRequest, ActivityItem, Album, Broadcast, Camera, CameraUpload, Enquiry, Film, Guest, LedgerEntry, NotificationPrefs, Order,
+  AccessRequest, ActivityItem, Album, Broadcast, Camera, CameraUpload, DownloadEvent, Enquiry, Film, Guest, LedgerEntry, NotificationPrefs, Order,
   Person, Photo, PhotoEvent, PublicStudio, Purchase, SmartQR, StoreSettings, Studio, StudioAppConfig, Ticket, Usage, WatermarkSettings,
   Website, ZipRequest,
 } from '@frameline/shared'
@@ -130,6 +130,12 @@ export const purchaseOut = (r: Row<typeof s.purchases>): Purchase => ({
 export const zipOut = (r: Row<typeof s.zipRequests>): ZipRequest => ({
   id: r.id, eventId: r.eventId, albumId: opt(r.albumId), email: r.email, photoCount: r.photoCount, status: r.status,
   requestedAt: r.requestedAt, readyAt: opt(r.readyAt), url: opt(r.url),
+})
+export const downloadEventOut = (r: {
+  id: string; eventId: string; photoId: string; filename: string; guestId: string | null; kind: 'single' | 'zip'; createdAt: string; guestName?: string | null
+}): DownloadEvent => ({
+  id: r.id, eventId: r.eventId, photoId: r.photoId, filename: r.filename, kind: r.kind, createdAt: r.createdAt,
+  guestId: opt(r.guestId), guestName: opt(r.guestName),
 })
 export const cameraUploadOut = (r: Row<typeof s.cameraUploads>): CameraUpload => ({
   id: r.id, cameraId: r.cameraId, filename: r.filename, at: r.at, sizeBytes: r.sizeBytes, status: r.status, photoId: opt(r.photoId), error: opt(r.error),

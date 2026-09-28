@@ -23,7 +23,12 @@ export async function albumForMember(db: DB, m: Membership, albumId: string, opt
   return row
 }
 
-/** Recomputes album counts/capture ranges and the event total (albums of kind 'store' are excluded). */
+/**
+ * Recomputes album counts/capture ranges and the event total (albums of kind 'store' are excluded).
+ * Copies made by POST /photos/copy (e.g. a guest-picks album) share the original file and keep `copiedFrom`
+ * set: they count in their own album's photoCount (so it displays correctly) but never a second time in the
+ * event total, which is what plan/event photo limits are checked against.
+ */
 export function recountStatements(db: DB, eventId: string) {
   const a = schema.albums
   return [
@@ -33,7 +38,7 @@ export function recountStatements(db: DB, eventId: string) {
       lastCapture: sql`(SELECT max(captured_at) FROM photos p WHERE p.album_id = ${a.id} AND p.deleted_at IS NULL)`,
     }).where(eq(a.eventId, eventId)),
     db.update(schema.events).set({
-      photoCount: sql`(SELECT coalesce(sum(photo_count), 0) FROM albums a2 WHERE a2.event_id = ${schema.events.id} AND a2.kind != 'store' AND a2.deleted_at IS NULL)`,
+      photoCount: sql`(SELECT count(*) FROM photos p JOIN albums a2 ON a2.id = p.album_id WHERE a2.event_id = ${schema.events.id} AND a2.kind != 'store' AND a2.deleted_at IS NULL AND p.deleted_at IS NULL AND p.copied_from IS NULL)`,
     }).where(eq(schema.events.id, eventId)),
   ] as const
 }

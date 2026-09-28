@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, ExternalLink, FileText, Mail } from 'lucide-react'
-import type { DownloadMode, PhotoEvent, ZipRequest } from '@frameline/shared'
+import { ChevronRight, FileText, Image, Mail } from 'lucide-react'
+import type { DownloadMode, PhotoEvent } from '@frameline/shared'
 import { fmt } from '@frameline/shared'
-import { Button, Chip, EmptyState, Input, Modal, RadioCardGroup, SettingRow, Skeleton, Toggle } from '@frameline/ui'
+import { Avatar, Button, Chip, EmptyState, Input, Modal, RadioCardGroup, SettingRow, Skeleton, Toggle } from '@frameline/ui'
 import { useApi } from '../../lib/api'
-import { useAction, useStudio, useZipRequests } from '../../lib/queries'
+import { useAction, useDownloadEvents, useStudio } from '../../lib/queries'
 import { QueryError } from '../system'
 import type { SaveSettings } from './useEventSaver'
 
@@ -21,7 +21,7 @@ export function DownloadsModal({ open, onOpenChange, event, set, onLog, session 
   const api = useApi()
   const s = event.settings
   const studioEmail = useStudio().data?.email ?? ''
-  const logCount = useZipRequests(open ? event.id : undefined).data?.length
+  const logCount = useDownloadEvents(open ? event.id : undefined).data?.length
   const [mode, setMode] = useState<DownloadMode>(s.downloads)
   const [anon, setAnon] = useState(s.anonymousDownloads)
   const [zipOpen, setZipOpen] = useState(false)
@@ -79,36 +79,28 @@ export function DownloadsModal({ open, onOpenChange, event, set, onLog, session 
   )
 }
 
-const STATUS: Record<ZipRequest['status'], { label: string; tone: 'accent' | 'ok' | 'bad' }> = {
-  queued: { label: 'Preparing', tone: 'accent' },
-  ready: { label: 'Ready', tone: 'ok' },
-  failed: { label: 'Failed', tone: 'bad' },
-}
-
+/** Every real download: a guest single-photo download, or one row per photo once a "Send" ZIP is ready
+ * (see apps/api's download_events — the same table getEventStats' `downloads` and the Guests tab stat read from). */
 export function DownloadLogModal({ open, onOpenChange, eventId, onBack }: { open: boolean; onOpenChange: (v: boolean) => void; eventId: string; onBack: () => void }) {
-  const q = useZipRequests(open ? eventId : undefined)
+  const q = useDownloadEvents(open ? eventId : undefined)
   const rows = q.data ?? []
   return (
-    <Modal open={open} onOpenChange={onOpenChange} width={620} title="Download log" description="Every “email me all the photos” request for this event."
+    <Modal open={open} onOpenChange={onOpenChange} width={620} title="Download log" description="Every photo a guest downloaded, and every ZIP export, most recent first."
       bodyClassName="p-0 gap-0" footer={<Button variant="ghost" onClick={onBack}>Back</Button>}>
       {q.error ? <div className="p-5"><QueryError error={q.error} retry={() => q.refetch()} /></div>
         : q.isLoading ? <div className="flex flex-col gap-2 p-5">{Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-11" />)}</div>
           : rows.length === 0 ? (
-            <EmptyState className="py-10" icon={<FileText size={22} />} title="No downloads yet" body="When you or a guest asks for every photo by email, the ZIP files show up here." />
+            <EmptyState className="py-10" icon={<FileText size={22} />} title="No downloads yet" body="When a guest downloads a photo, or a ZIP export finishes, it shows up here." />
           ) : (
             <ul>
               {rows.map((r) => (
                 <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-[22px] py-3 last:border-0">
+                  <Avatar name={r.guestName || 'Anonymous'} tone="neutral" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13.5px] font-bold">{r.email}</div>
-                    <div className="text-[12.5px] text-ink-2 tnum">{fmt.count(r.photoCount)} photos · {zipsFor(r.photoCount)} ZIP file{zipsFor(r.photoCount) > 1 ? 's' : ''} · {fmt.dateTime(r.requestedAt)}</div>
+                    <div className="truncate text-[13.5px] font-bold">{r.guestName || 'Anonymous'}</div>
+                    <div className="truncate text-[12.5px] text-ink-2">{r.filename} · {fmt.dateTime(r.createdAt)}</div>
                   </div>
-                  <span className="flex items-center gap-2">
-                    <Chip tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Chip>
-                    {r.status === 'ready' && r.url && (
-                      <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex min-h-8 items-center gap-1 text-[12.5px] font-bold text-accent-text hover:underline">Open<ExternalLink size={12} aria-hidden /></a>
-                    )}
-                  </span>
+                  <Chip tone="accent" icon={r.kind === 'zip' ? <FileText size={11} /> : <Image size={11} />}>{r.kind === 'zip' ? 'ZIP' : 'Single photo'}</Chip>
                 </li>
               ))}
             </ul>

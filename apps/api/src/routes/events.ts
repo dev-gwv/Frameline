@@ -436,19 +436,20 @@ eventRoutes.openapi(createRoute({
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
   const ev = await eventForMember(db, m, c.req.valid('param').id)
-  const [t] = await db.all<{ photos: number; views: number; downloads: number; favourites: number; processing: number; total: number; ready: number }>(sql`
+  const [t] = await db.all<{ photos: number; views: number; favourites: number; processing: number; total: number; ready: number }>(sql`
     SELECT
-      coalesce(sum(CASE WHEN a.kind = 'album' THEN 1 ELSE 0 END), 0) AS photos,
-      coalesce(sum(p.views), 0) AS views, coalesce(sum(p.downloads), 0) AS downloads, coalesce(sum(p.favourites), 0) AS favourites,
+      coalesce(sum(CASE WHEN a.kind = 'album' AND p.copied_from IS NULL THEN 1 ELSE 0 END), 0) AS photos,
+      coalesce(sum(p.views), 0) AS views, coalesce(sum(p.favourites), 0) AS favourites,
       coalesce(sum(CASE WHEN p.status = 'processing' THEN 1 ELSE 0 END), 0) AS processing,
-      coalesce(sum(CASE WHEN a.kind = 'album' THEN 1 ELSE 0 END), 0) AS total,
-      coalesce(sum(CASE WHEN a.kind = 'album' AND p.status = 'ready' AND p.faces_indexed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS ready
+      coalesce(sum(CASE WHEN a.kind = 'album' AND p.copied_from IS NULL THEN 1 ELSE 0 END), 0) AS total,
+      coalesce(sum(CASE WHEN a.kind = 'album' AND p.copied_from IS NULL AND p.status = 'ready' AND p.faces_indexed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS ready
     FROM photos p JOIN albums a ON a.id = p.album_id
     WHERE p.event_id = ${ev.id} AND p.deleted_at IS NULL AND a.deleted_at IS NULL`)
   const [{ n: guests }] = await db.select({ n: count() }).from(schema.guests).where(and(eq(schema.guests.eventId, ev.id), isNull(schema.guests.removedAt)))
+  const [{ n: downloads }] = await db.select({ n: count() }).from(schema.downloadEvents).where(eq(schema.downloadEvents.eventId, ev.id))
   const num = (v: unknown) => Number(v ?? 0)
   return c.json({
-    eventId: ev.id, visits: ev.visits.web + ev.visits.android + ev.visits.ios, photoViews: num(t?.views), downloads: num(t?.downloads), favourites: num(t?.favourites),
+    eventId: ev.id, visits: ev.visits.web + ev.visits.android + ev.visits.ios, photoViews: num(t?.views), downloads: num(downloads), favourites: num(t?.favourites),
     guests, faceSearches: ev.faceMatches, photos: num(t?.photos), processing: num(t?.processing),
     faces: { ready: num(t?.ready), total: num(t?.total), pending: Math.max(0, num(t?.total) - num(t?.ready)) }, asOf: nowIso(),
   }, 200)

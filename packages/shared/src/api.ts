@@ -3,7 +3,7 @@ import {
   createSeed, defaultSettings, generatePhotos, hash, planPrice, tone, type SeedState,
 } from './seed'
 import type {
-  AbandonedCart, Asset, AssetKind, DownloadAllowance, PublicEventSummary, PublicWatermark, ShippingAddress,
+  AbandonedCart, Asset, AssetKind, DownloadAllowance, DownloadEvent, PublicEventSummary, PublicWatermark, ShippingAddress,
   Album, Broadcast, Camera, CameraUpload, Enquiry, EventSettings, EventType, Film, Guest, GuestSession, ID, LedgerEntry,
   NotificationPrefs, Order, OrderItemInput, PaymentMethod, Photo, PhotoEvent, Plan, PresetId, Price, PublicEvent, PublicStudio,
   Purchase, SmartQR, StoreSettings, StoreSettingsPatch, Studio, StudioProfile, TeamMember, Ticket, Usage, UsageBreakdown,
@@ -192,8 +192,10 @@ export interface FramelineApi {
   /** Takes ENHANCE_COST rupees from the wallet (ledger 'credits-used') and returns the new or updated photo. */
   enhancePhoto(photoId: ID, opts: EnhanceOptions): Promise<Photo>
   reindexFaces(eventId: ID): Promise<{ queued: number }>
-  requestZip(eventId: ID, email: string, opts?: { albumId?: ID; photoIds?: ID[] }): Promise<ZipRequest>
+  requestZip(eventId: ID, email: string, opts?: { albumId?: ID; photoIds?: ID[]; /** Set by requestPublicZip for a guest-initiated export; admin callers omit it. */ guestId?: ID }): Promise<ZipRequest>
   listZipRequests(eventId: ID): Promise<ZipRequest[]>
+  /** The event's download log (most recent first): every guest single-photo download, and one row per photo once a ZIP is ready. */
+  listDownloadEvents(eventId: ID): Promise<DownloadEvent[]>
 
   listPeople(eventId: ID): Promise<SeedState['people']>
   listFilms(eventId: ID): Promise<Film[]>
@@ -395,11 +397,19 @@ interface MockExtra {
   notify: { eventId: ID; phone: string; createdAt: string; notifiedAt?: string }[]
   /** Face finding runs started by reindexFaces: eventId → start time and photo count (pending counts down). */
   faceScan: Record<ID, { startedAt: number; total: number }>
+  /**
+   * Copies made by copyPhotosToAlbum (e.g. a guest-picks album): copy photo id → the photo it was copied from.
+   * Copies share the original file and are excluded from the event's photoCount/quota total (see recount).
+   */
+  copiedFrom: Record<ID, ID>
+  /** The download log: one row per photo actually downloaded (see DownloadEvent). Source of truth for every
+   * download count (getEventStats' `downloads`, the Guests tab stat) — nothing else increments separately. */
+  downloadEvents: DownloadEvent[]
 }
 
 const EXTRA_DEFAULTS = (): MockExtra => ({
   coupons: [], usageReport: null, guestIds: {}, pinVerified: [], vipPin: [], downloadUses: {}, followed: [], recent: {}, myOrders: [], cartReminders: {}, assets: [],
-  removedGuests: {}, resolvedRequests: {}, notify: [], faceScan: {},
+  removedGuests: {}, resolvedRequests: {}, notify: [], faceScan: {}, copiedFrom: {}, downloadEvents: [],
 })
 
 /**
@@ -635,7 +645,9 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       const caps = ps.map((p) => p.capturedAt).sort()
       a.firstCapture = caps[0]
       a.lastCapture = caps[caps.length - 1]
-      if (a.kind !== 'store') total += a.photoCount
+      // Copies (copyPhotosToAlbum) share the original file: they count in their own album (a.photoCount, shown
+      // above) but never a second time in the event total, which plan/event photo limits are checked against.
+      if (a.kind !== 'store') total += ps.filter((p) => !state.extra.copiedFrom[p.id]).length
     }
     ev.photoCount = total
   }
@@ -743,7 +755,8 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
   }
   /** Face finding progress for an event: photos still processing, plus a running reindexFaces scan. */
   function faceProgress(e: PhotoEvent) {
-    const photos = liveAlbums().filter((a) => a.eventId === e.id && a.kind === 'album').flatMap(albumPhotos)
+    // Copies (copyPhotosToAlbum) share the original's face data and status: counted once, under the original.
+    const photos = liveAlbums().filter((a) => a.eventId === e.id && a.kind === 'album').flatMap(albumPhotos).filter((p) => !state.extra.copiedFrom[p.id])
     const total = photos.length
     const processing = photos.filter((p) => p.status === 'processing').length
     const scan = state.extra.faceScan[e.id]
@@ -983,7 +996,10 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       for (const id of ids) {
         const p = getPhotoMerged(id)
         if (!p || p.eventId !== album.eventId) continue
-        copies.push({ ...clone(p), id: uid(`${albumId}_cp`), albumId, index: ++next, favourites: 0, downloads: 0, views: 0 })
+        const copyId = uid(`${albumId}_cp`)
+        copies.push({ ...clone(p), id: copyId, albumId, index: ++next, favourites: 0, downloads: 0, views: 0 })
+        // Shares the original file and never counts a second time in the event's photoCount/quota (see recount).
+        state.extra.copiedFrom[copyId] = id
       }
       state.added.push(...copies)
       invalidate()
@@ -1072,17 +1088,27 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     async requestZip(eventId, email, o = {}) {
       await wait(latency)
       const e = findEvent(eventId)
-      const count = o.photoIds?.length ?? (o.albumId ? findAlbum(o.albumId).photoCount : e.photoCount)
-      const z: ZipRequest = { id: uid('zip'), eventId: e.id, albumId: o.albumId, email, photoCount: count, status: 'queued', requestedAt: new Date().toISOString() }
+      const targetAlbum = o.albumId ? findAlbum(o.albumId) : undefined
+      const ids = o.photoIds ?? (targetAlbum ? albumPhotos(targetAlbum) : liveAlbums().filter((a) => a.eventId === e.id && a.kind === 'album').flatMap(albumPhotos)).map((p) => p.id)
+      const z: ZipRequest = { id: uid('zip'), eventId: e.id, albumId: o.albumId, email, photoCount: ids.length, status: 'queued', requestedAt: new Date().toISOString() }
       s().zipRequests.unshift(z)
       emit('misc')
       setTimeout(() => {
         Object.assign(z, { status: 'ready', readyAt: new Date().toISOString(), url: `${GALLERY_ORIGIN}/zip/${z.id}` })
+        // One download_events row per photo the ZIP actually covers — the single source of truth for download counts.
+        const at = new Date().toISOString()
+        const rows: DownloadEvent[] = ids.map((id) => ({ id: uid('dl'), eventId: e.id, photoId: id, filename: getPhotoMerged(id)?.filename ?? id, guestId: o.guestId, kind: 'zip' as const, createdAt: at }))
+        state.extra.downloadEvents.unshift(...rows)
         emit('misc')
       }, 1500)
       return clone(z)
     },
     async listZipRequests(eventId) { await wait(latency); return clone(s().zipRequests.filter((z) => z.eventId === eventId)) },
+    async listDownloadEvents(eventId) {
+      await wait(latency)
+      const rows = state.extra.downloadEvents.filter((d) => d.eventId === eventId)
+      return clone(rows.map((d) => ({ ...d, guestName: d.guestId ? liveGuests().find((g) => g.id === d.guestId)?.name : undefined })))
+    },
 
     async listPeople(eventId) { await wait(latency); return clone(s().people.filter((p) => p.eventId === eventId)) },
     async listFilms(eventId) { await wait(latency); return clone(s().films.filter((f) => f.eventId === eventId)) },
@@ -1470,7 +1496,15 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     },
     async recordDownload(photoIds) {
       await wait(latency / 2)
-      photoIds.forEach((id) => { const p = getPhotoMerged(id); if (p) patchPhoto(id, { downloads: p.downloads + 1 }) })
+      const at = new Date().toISOString()
+      const rows: DownloadEvent[] = []
+      photoIds.forEach((id) => {
+        const p = getPhotoMerged(id)
+        if (!p) return
+        patchPhoto(id, { downloads: p.downloads + 1 })
+        rows.push({ id: uid('dl'), eventId: p.eventId, photoId: id, filename: p.filename, guestId: myGuest(p.eventId)?.id, kind: 'single', createdAt: at })
+      })
+      state.extra.downloadEvents.unshift(...rows)
       emit('photos')
     },
     async getStudioProfile(followCode) {
@@ -1608,7 +1642,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       const e = findEvent(shortId)
       if (e.settings.downloads === 'none') fail(403, 'downloads_disabled', 'Downloads are turned off for this gallery.')
       if (e.settings.downloads === 'own' && !o.photoIds?.length) fail(403, 'downloads_own_only', 'You can download only the photos you’re in. Find yours with a selfie first.')
-      return api.requestZip(e.id, email, { albumId: o.albumId, photoIds: o.photoIds })
+      return api.requestZip(e.id, email, { albumId: o.albumId, photoIds: o.photoIds, guestId: myGuest(e.id)?.id })
     },
     async verifyDownloadPin(shortId, pin) {
       await wait(latency)
@@ -1803,7 +1837,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       const all = liveAlbums().filter((a) => a.eventId === e.id && a.kind !== 'store').flatMap(albumPhotos)
       return {
         eventId: e.id, visits: e.visits.web + e.visits.android + e.visits.ios,
-        photoViews: photos.reduce((n, p) => n + p.views, 0), downloads: all.reduce((n, p) => n + p.downloads, 0),
+        photoViews: photos.reduce((n, p) => n + p.views, 0), downloads: state.extra.downloadEvents.filter((d) => d.eventId === e.id).length,
         favourites: all.reduce((n, p) => n + p.favourites, 0), guests: liveGuests().filter((g) => g.eventId === e.id).length,
         faceSearches: e.faceMatches, photos: photos.length, processing: all.filter((p) => p.status === 'processing').length,
         faces, asOf: new Date().toISOString(),

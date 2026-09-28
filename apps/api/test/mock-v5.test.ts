@@ -155,11 +155,13 @@ describe('mock v5: stats', () => {
   it('event stats add up and face finding counts down after reindex', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     const m = api()
+    const [ph] = (await m.listPhotos('ev_riya', { limit: 1 })).items
+    await m.recordDownload([ph.id]) // downloads comes from the download log now, not a seeded counter
     const st = await m.getEventStats('ev_riya')
     const ev = await m.getEvent('ev_riya')
     expect(st).toMatchObject({ eventId: 'ev_riya', visits: ev.visits.web + ev.visits.android + ev.visits.ios, faceSearches: ev.faceMatches, guests: 6 })
     expect(st.faces).toEqual({ ready: st.photos, total: st.photos, pending: 0 })
-    expect(st.downloads).toBeGreaterThan(0)
+    expect(st.downloads).toBe(1)
     await m.reindexFaces('ev_riya')
     const during = await m.getEventStats('ev_riya')
     expect(during.faces.pending).toBeGreaterThan(0)
@@ -349,5 +351,55 @@ describe('mock v5: tabs stay in sync', () => {
     const b = api(shared)
     await a.deleteQR('q3')
     expect((await b.listQRs()).map((q) => q.id)).not.toContain('q3')
+  })
+})
+
+describe('mock v5: picks album quota and the download log', () => {
+  it('copying photos into a new album ("Make an album from these") does not inflate the event photo count', async () => {
+    const m = api()
+    const before = await m.getEvent('ev_kapoor')
+    const [a, b] = (await m.listPhotos('ev_kapoor', { limit: 2 })).items
+    const album = await m.createAlbum('ev_kapoor', 'Priya’s picks')
+    const copies = await m.copyPhotosToAlbum([a.id, b.id], album.id)
+    expect(copies).toHaveLength(2)
+    expect(copies.map((c) => c.id)).not.toEqual(expect.arrayContaining([a.id, b.id])) // real copies, not references
+    // The physical photos are still only counted once against the event's photo limit.
+    expect((await m.getEvent('ev_kapoor')).photoCount).toBe(before.photoCount)
+    const albums = await m.listAlbums('ev_kapoor')
+    expect(albums.find((x) => x.id === album.id)?.photoCount).toBe(2)
+    // The photo shows correctly in both the new album…
+    const inNew = (await m.listPhotos('ev_kapoor', { albumId: album.id })).items.map((p) => p.id).sort()
+    expect(inNew).toEqual([...copies.map((c) => c.id)].sort())
+    // …and its original album.
+    const inOriginal = (await m.listPhotos('ev_kapoor', { albumId: a.albumId })).items.map((p) => p.id)
+    expect(inOriginal).toEqual(expect.arrayContaining([a.id, b.id]))
+  })
+
+  it('logs a guest single-photo download, reflected in getEventStats and nowhere else separately', async () => {
+    const m = api()
+    await m.registerGuest('2A6F1C9', { name: 'Kabir', email: 'kabir@example.com' })
+    const [ph] = (await m.listPhotos('ev_kapoor', { limit: 1 })).items
+    const before = await m.getEventStats('ev_kapoor')
+    await m.recordDownload([ph.id], '2A6F1C9')
+    const after = await m.getEventStats('ev_kapoor')
+    expect(after.downloads).toBe(before.downloads + 1)
+    const log = await m.listDownloadEvents('ev_kapoor')
+    expect(log[0]).toMatchObject({ photoId: ph.id, kind: 'single', guestName: 'Kabir' })
+  })
+
+  it('logs one download_events row per photo once a ZIP is ready', async () => {
+    const m = createMockApi(undefined, { latency: 0 })
+    const album = (await m.listAlbums('ev_kapoor')).find((a) => a.kind === 'album')!
+    const before = await m.getEventStats('ev_kapoor')
+    // Fake timers only from here: earlier awaits above already resolved their own (real) 0ms waits.
+    vi.useFakeTimers()
+    const zip = m.requestZip('ev_kapoor', 'client@example.com', { albumId: album.id })
+    await vi.advanceTimersByTimeAsync(1600)
+    await zip
+    vi.useRealTimers()
+    const after = await m.getEventStats('ev_kapoor')
+    expect(after.downloads).toBe(before.downloads + album.photoCount)
+    const log = await m.listDownloadEvents('ev_kapoor')
+    expect(log.filter((d) => d.kind === 'zip')).toHaveLength(album.photoCount)
   })
 })
