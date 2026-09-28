@@ -3,12 +3,19 @@ import { createBrowserRouter, Navigate, Outlet, useSearchParams } from 'react-ro
 import { FEATURES } from '@frameline/shared'
 import { AppShell } from './layout/AppShell'
 import { RequireAuth } from './lib/auth'
+import { safeDestination } from './pages/auth/signin/authHelpers'
 import { RouteError, PageFallback, TabFallback } from './pages/system'
 
-/** Google sign-in lands here. New studios go to /setup, same as a new email sign-up (?new=1, set by the API). */
+/**
+ * Google sign-in lands here (the redirect target is always /auth/callback, never `from` directly — that's
+ * what makes AuthProvider's effect notice the tokens in the URL fragment at all). New studios go to /setup,
+ * same as a new email sign-up (?new=1, set by the API); everyone else goes back to where the "Continue with
+ * Google" button was clicked from (?from=, set by SignIn.tsx).
+ */
 function GoogleCallback() {
   const [params] = useSearchParams()
-  return <Navigate to={params.get('new') === '1' ? '/setup' : '/'} replace />
+  const isNew = params.get('new') === '1'
+  return <Navigate to={isNew ? '/setup' : safeDestination(params.get('from'))} replace />
 }
 
 const page = (load: () => Promise<{ default: ComponentType }>) => {

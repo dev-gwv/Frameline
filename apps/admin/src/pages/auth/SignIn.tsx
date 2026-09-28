@@ -26,7 +26,9 @@ export default function SignIn() {
   const finish = (r: VerifyResult) => navigate(r.isNewUser ? '/setup' : from, { replace: true })
 
   const google = () => {
-    const url = auth.googleUrl(from)
+    // Must land back on /auth/callback (not `from` directly) — that's the only page that reads the
+    // tokens out of the URL fragment. `from` rides along as a query param and is applied from there.
+    const url = auth.googleUrl(`/auth/callback?from=${encodeURIComponent(from)}`)
     if (url) { setGoogleBusy(true); window.location.assign(url); return }
     // Sample data: there is no Google account to check, so continue as the demo studio.
     auth.signIn(DEMO_USER)
