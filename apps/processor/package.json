@@ -1,0 +1,26 @@
+{
+  "name": "@frameline/processor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.ts",
+    "start": "node src/index.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "models:download": "node scripts/download-models.mjs",
+    "test:pipeline": "node scripts/test-pipeline.mjs"
+  },
+  "dependencies": {
+    "@frameline/faces": "workspace:*",
+    "@hono/node-server": "^1.19.6",
+    "aws4fetch": "^1.0.20",
+    "hono": "^4.13.9",
+    "onnxruntime-node": "^1.23.0",
+    "sharp": "^0.34.4",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "~5.8.3"
+  }
+}

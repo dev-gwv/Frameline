@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // This package runs directly under Node (no bundler) in apps/processor, so its own relative imports use
+  // explicit .ts extensions (Node's ESM resolver requires them); tsc needs this flag to allow that with noEmit.
+  "compilerOptions": { "allowImportingTsExtensions": true },
+  "include": ["src"]
+}
+

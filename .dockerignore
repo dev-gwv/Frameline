@@ -1,0 +1,11 @@
+# Used by apps/processor/Dockerfile (build context is the repo root, so every app's workspace deps resolve).
+node_modules
+**/node_modules
+**/dist
+**/.turbo
+**/.tmp
+apps/processor/models
+.git
+docs
+*.md
+!apps/processor/README.md

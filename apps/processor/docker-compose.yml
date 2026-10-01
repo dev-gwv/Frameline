@@ -1,0 +1,17 @@
+# Run from the repo root: docker compose -f apps/processor/docker-compose.yml up -d --build
+services:
+  processor:
+    build:
+      context: ../..
+      dockerfile: apps/processor/Dockerfile
+    restart: unless-stopped
+    ports: ["8788:8788"]
+    env_file: .env
+    volumes:
+      - ./models:/app/apps/processor/models:ro
+    # Caps CPU so this never starves other services on the same VPS (e.g. your other two APIs).
+    # Adjust to your VPS's actual core count; this assumes 4 cores and reserves 1 for everything else.
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
