@@ -1,0 +1,19 @@
+{
+  "rules": [
+    {
+      "id": "frameline-browser-uploads",
+      "allowed": {
+        "methods": ["PUT", "GET", "HEAD"],
+        "origins": [
+          "https://frameline-admin.pages.dev",
+          "https://frameline-gallery.pages.dev",
+          "http://localhost:5173",
+          "http://localhost:5174"
+        ],
+        "headers": ["*"]
+      },
+      "exposeHeaders": ["ETag"],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}

@@ -54,7 +54,15 @@ the simulated/dev behaviour.
 Created under the `dev@gratefulworldventures.in` account (id `d9b73b5a2afa3689965e35065b313604`):
 
 - D1 database `frameline` (`32bf8f23-7594-4c5f-8e7a-51b5eed336a7`)
-- R2 bucket `frameline-media`
+- R2 bucket `frameline-media`, with a **CORS policy** (`apps/api/r2-cors.json`, applied via
+  `wrangler r2 bucket cors set frameline-media --file r2-cors.json`) allowing `PUT`/`GET`/`HEAD` from the admin
+  and gallery origins (+ localhost dev ports), exposing `ETag`. This is required for direct-to-R2 presigned
+  uploads (`uploadMode() === 's3'`, once `R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` are set) — without it the
+  browser's own CORS enforcement silently blocks every upload PUT before it reaches R2, which the client's
+  `putPart()` then indistinguishably reports as "you're offline" (a bare `TypeError` from a blocked `fetch()`
+  looks identical to a real network failure in JS). If the bucket is ever recreated, redo this step, or
+  uploads will "go offline" the moment direct uploads are enabled again. Add a new Pages URL (a real domain
+  later, say) to `allowed.origins` in `r2-cors.json` and re-run the same command.
 - KV namespace `e672b1baa531411a90176fa35a293291`
 - Queues `frameline-photos` + `frameline-photos-dlq`
 - Vectorize index `frameline-faces` — **128 dimensions**, chosen to match the SFace face-embedding model
