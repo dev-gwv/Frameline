@@ -205,7 +205,7 @@ function JobRow({ job: j, single, min, onMin, onPause, onRetry, onDismiss }: {
         <div className="-mr-1.5 flex shrink-0 items-center gap-1">
           {j.state === 'running' || j.state === 'paused'
             ? <Button size="sm" variant="ghost" icon={j.state === 'paused' ? <Play size={12} /> : <Pause size={12} />} onClick={onPause}>{j.state === 'paused' ? 'Resume' : 'Pause'}</Button>
-            : j.state === 'stopped' ? <Button size="sm" icon={<RotateCcw size={12} />} onClick={onRetry}>Retry</Button>
+            : j.state === 'stopped' || j.state === 'offline' ? <Button size="sm" icon={<RotateCcw size={12} />} onClick={onRetry}>Retry now</Button>
             : j.state === 'done' ? <button type="button" aria-label="Dismiss" className="grid size-8 place-items-center rounded-control text-ink-3 hover:bg-sunk" onClick={onDismiss}><X size={14} /></button>
             : null}
           {single && j.state !== 'done' && <MinButton min={min} onClick={onMin} />}
@@ -215,7 +215,7 @@ function JobRow({ job: j, single, min, onMin, onPause, onRetry, onDismiss }: {
         <>
           <Meter value={j.done} max={j.total} className="my-2" tone={j.state === 'offline' || j.state === 'paused' ? 'muted' : j.state === 'stopped' ? 'bad' : 'gold'} label={`${j.done} of ${j.total} uploaded`} />
           {j.state === 'offline' ? (
-            <p className="text-[12.5px] text-ink-2"><span className="tnum">{fmt.count(j.done)} of {fmt.count(j.total)}</span> done. The rest will upload by themselves when you’re back.</p>
+            <p className="text-[12.5px] text-ink-2"><span className="tnum">{fmt.count(j.done)} of {fmt.count(j.total)}</span> done. Carries on by itself once you're back online — or press Retry now if you think you already are.</p>
           ) : j.state === 'stopped' ? (
             <p className="text-[12.5px] text-ink-2">{j.error} <span className="tnum">{fmt.count(j.total - j.done)}</span> photos didn’t upload yet.</p>
           ) : (
