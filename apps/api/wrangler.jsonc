@@ -87,6 +87,10 @@
         "GALLERY_URL": "https://frameline-gallery.pages.dev",
         "MAIL_FROM": "Frameline <login@frameline.in>",
         "R2_BUCKET_NAME": "frameline-media",
+        // Not secret (it's just the account id, already public in our own docs) — enables direct-to-R2
+        // presigned uploads (uploadMode() in services/storage.ts) once R2_ACCESS_KEY_ID/SECRET are also set
+        // via `wrangler secret put`. Without all three, uploads fall back to proxying through the Worker.
+        "R2_ACCOUNT_ID": "d9b73b5a2afa3689965e35065b313604",
         "GOOGLE_NATIVE_REDIRECTS": "frameline://sign-in"
       },
       "triggers": { "crons": ["* * * * *", "0 3 * * *"] },
