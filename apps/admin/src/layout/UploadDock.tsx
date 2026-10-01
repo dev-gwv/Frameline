@@ -35,7 +35,12 @@ interface UploadCtx {
 }
 const Ctx = createContext<UploadCtx | null>(null)
 
-const BATCH = 6
+// A batch becomes real photos (status 'processing', queued for AI) only once ALL its files finish uploading --
+// this is also the most a page refresh/close can lose mid-upload, since the browser forgets picked files on
+// reload regardless of anything we do. Smaller batches mean more start/complete round trips (each is a small
+// JSON call, not the photo bytes themselves) in exchange for a smaller loss window; 2 is a deliberate balance,
+// not a magic number -- raise it if large bulk uploads (camera-sync, big Drive imports) show real overhead.
+const BATCH = 2
 const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false
 const networkError = (e: unknown) => isOffline() || (e instanceof ApiError && (e.status === 0 || e.code === 'network_error')) || e instanceof TypeError
 
@@ -92,6 +97,17 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     window.addEventListener('offline', off)
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [patch, run])
+
+  // Closing the tab or refreshing forgets the picked files entirely (the browser won't let any website keep a
+  // reference to them across a reload) and loses whatever's mid-upload -- warn while anything isn't finished,
+  // so this only happens by choice. Chrome/Firefox/Safari ignore the custom text and show their own wording.
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (jobsRef.current.some((j) => j.state !== 'done')) { e.preventDefault(); e.returnValue = '' }
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [])
 
   const start = useCallback<UploadCtx['start']>(({ eventId, albumId, albumName, files, ...opts }) => {
     const id = Math.random().toString(36).slice(2)
