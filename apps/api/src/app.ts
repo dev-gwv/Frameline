@@ -74,11 +74,12 @@ export function createApp() {
   // ── Unversioned ──────────────────────────────────────────────────────────
   app.openapi(createRoute({
     method: 'get', path: '/health', tags: ['Meta'], summary: 'Liveness + D1 check (unversioned)',
-    responses: { 200: json(z.object({ status: z.literal('ok'), checks: z.object({ db: z.literal('ok') }) })), ...problems(503) },
+    description: '`processor: simulated` means no image processor is connected (PROCESSOR_URL): photos go live without face finding or download renditions.',
+    responses: { 200: json(z.object({ status: z.literal('ok'), checks: z.object({ db: z.literal('ok'), processor: z.enum(['http', 'simulated']) }) })), ...problems(503) },
   }), async (c) => {
     await c.env.DB.prepare('SELECT 1').first()
     c.header('Cache-Control', 'no-store')
-    return c.json({ status: 'ok' as const, checks: { db: 'ok' as const } }, 200)
+    return c.json({ status: 'ok' as const, checks: { db: 'ok' as const, processor: c.env.PROCESSOR_URL ? 'http' as const : 'simulated' as const } }, 200)
   })
 
   // ── v1 ───────────────────────────────────────────────────────────────────

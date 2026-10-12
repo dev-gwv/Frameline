@@ -10,15 +10,13 @@ import { publishTopics } from './realtime'
 import { vectorIndex } from './vectors'
 
 /**
- * Image processing contract. The real implementation runs in a Cloudflare Container
- * (sharp for renditions + InsightFace ONNX for face detection/512-d embeddings), which:
- *   1. reads the original from R2 (`job.key`),
- *   2. writes renditions next to it (…/thumb.webp, …/preview.webp, …/2k.jpg),
- *   3. returns dimensions, EXIF and one embedding per detected face.
- *
- * TODO(processor): bind the container (`containers` + a Durable Object class in wrangler.jsonc) and add a
- * `ContainerProcessor` that calls it via `env.PROCESSOR.get(id).fetch(...)`. Until then `HttpProcessor`
- * talks to any HTTP deployment of the same service (PROCESSOR_URL), and `SimulatedProcessor` is used in dev.
+ * Image processing contract. The real implementation is apps/processor (Node + sharp + YuNet/SFace ONNX,
+ * 128-d embeddings), reached over HTTP at PROCESSOR_URL. Per photo it:
+ *   1. reads the original from R2 (`job.key`) and turns it upright from its EXIF orientation,
+ *   2. writes download renditions next to it (…/renditions/2048.jpg and 3072.jpg, no watermark),
+ *   3. returns dimensions and one embedding per detected face,
+ *   4. answers 422 for a file it can't decode, which marks the photo `failed` here.
+ * Without PROCESSOR_URL, `SimulatedProcessor` marks photos ready with no faces or renditions (warned outside dev).
  */
 export interface ProcessResult {
   width: number
@@ -36,6 +34,12 @@ export interface PhotoProcessor {
   process(job: ProcessPhotoJob): Promise<ProcessResult>
 }
 
+/** The processor can never handle this file (not an image it can read, no file): retrying won't help. */
+export class ProcessingRejected extends Error {}
+
+/** Attempts before a photo is given up on and marked `failed` (so it never sits in `processing` forever). */
+export const MAX_PROCESS_ATTEMPTS = 5
+
 export class HttpProcessor implements PhotoProcessor {
   readonly name = 'http'
   constructor(private url: string, private token?: string, private bucket?: string) {}
@@ -45,6 +49,8 @@ export class HttpProcessor implements PhotoProcessor {
       headers: { 'Content-Type': 'application/json', ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) },
       body: JSON.stringify({ ...job, bucket: this.bucket }),
     })
+    // 422 = the file itself is the problem (HEIC it can't decode, a video, a corrupt upload, no key).
+    if (res.status === 422) throw new ProcessingRejected(`processor rejected the file: ${await res.text().catch(() => '')}`.slice(0, 500))
     if (!res.ok) throw new Error(`processor responded ${res.status}`)
     return (await res.json()) as ProcessResult
   }
@@ -65,7 +71,20 @@ export class SimulatedProcessor implements PhotoProcessor {
 }
 
 export function getProcessor(env: Env): PhotoProcessor {
-  return env.PROCESSOR_URL ? new HttpProcessor(env.PROCESSOR_URL, env.PROCESSOR_TOKEN, env.R2_BUCKET_NAME) : new SimulatedProcessor(env)
+  if (env.PROCESSOR_URL) return new HttpProcessor(env.PROCESSOR_URL, env.PROCESSOR_TOKEN, env.R2_BUCKET_NAME)
+  // Without a processor photos still go live (galleries keep working), but nothing finds faces or writes
+  // download renditions. Say so loudly outside development; GET /health reports `processor: simulated` too.
+  if (env.ENVIRONMENT !== 'development' && env.ENVIRONMENT !== 'test') {
+    console.warn(JSON.stringify({ level: 'warn', msg: 'processor_not_configured', detail: 'PROCESSOR_URL is not set: photos are marked ready without face finding or renditions' }))
+  }
+  return new SimulatedProcessor(env)
+}
+
+/** Gives up on a photo: `failed` instead of `processing` forever. Studios see it and can delete or re-upload. */
+async function markFailed(env: Env, job: ProcessPhotoJob, error: string) {
+  await getDb(env.DB).update(schema.photos).set({ status: 'failed' })
+    .where(and(eq(schema.photos.id, job.photoId), eq(schema.photos.status, 'processing'))).run()
+  console.error(JSON.stringify({ level: 'error', msg: 'photo_failed', photoId: job.photoId, eventId: job.eventId, error }))
 }
 
 /** Applies a processing result: marks the photo ready, stores faces (D1 + Vectorize namespace = event id). */
@@ -113,7 +132,8 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
     try {
       if (job.kind === 'build-zip') { await buildZip(env, job); msg.ack(); continue }
       if (job.kind !== 'process-photo') { msg.ack(); continue }
-      const result = await processor.process(job)
+      // Photos registered by URL have no file in R2 for the processor to read.
+      const result = await (job.key ? processor : new SimulatedProcessor(env)).process(job)
       if (await applyResult(env, job, result)) {
         if (!touched.has(job.studioId)) touched.set(job.studioId, new Set())
         touched.get(job.studioId)!.add(job.eventId)
@@ -121,6 +141,13 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
       msg.ack()
     } catch (e) {
       console.error(JSON.stringify({ level: 'error', msg: 'queue job failed', job, attempt: msg.attempts, error: String(e) }))
+      if (job.kind === 'process-photo' && (e instanceof ProcessingRejected || msg.attempts >= MAX_PROCESS_ATTEMPTS)) {
+        await markFailed(env, job, String(e)).catch(() => undefined)
+        if (!touched.has(job.studioId)) touched.set(job.studioId, new Set())
+        touched.get(job.studioId)!.add(job.eventId)
+        msg.ack()
+        continue
+      }
       msg.retry({ delaySeconds: Math.min(300, 2 ** msg.attempts * 5) })
     }
   }

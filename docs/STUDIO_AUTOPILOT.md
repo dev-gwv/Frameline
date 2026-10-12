@@ -200,6 +200,17 @@ The findings above describe the code as it was on 12 Oct 2026. These are fixed s
 - Studio uploads stop at the event's `photoLimit` (402 `event_limit_reached`); photo packs raise it.
 - A lapsed plan or trial blocks new uploads (402 `plan_expired`) only while Razorpay is live. Without payments a studio couldn't renew, so nothing is enforced. Galleries stay open either way.
 
+**Batch 6, processing**
+- New photo status `failed`: the processor's 422 (a file it can't decode) or the 5th failed attempt sets it. The admin grid shows "Couldn't process", and guests never see the photo.
+- Photos registered by URL skip the HTTP processor.
+- Without `PROCESSOR_URL`, production logs `processor_not_configured` and `GET /health` reports `processor: simulated`, so it is no longer silent.
+- The processor:
+  - turns photos upright from EXIF before finding faces;
+  - writes `renditions/2048.jpg` and `3072.jpg`;
+  - answers 422 for files it can't decode.
+- Downloads use a rendition only when no watermark applies. Otherwise the gallery burns the watermark in itself.
+- Still open here: deploying the processor (needs the owner), EXIF capture time and camera, watermark burn-in, face clustering, selfie embeddings in the browser.
+
 **Still open, in order:**
 - Processor work: no silent simulation in production, a `failed` status and dead-letter consumer, EXIF rotation, renditions.
 - Real ZIP, a signed receipt link, guest verification.

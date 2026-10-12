@@ -48,8 +48,11 @@ function Tile({ photo, index, selected, selecting, onToggle, onOpen }: { photo: 
     <div className="group/tile relative" onContextMenu={(e) => { if (press.current.fired) e.preventDefault() }}>
       <PhotoTile tone={photo.tone} url={liveUrl(photo.url)} rotation={photo.rotation} selected={selected} processing={processing} hidden={photo.hidden} alt={photo.filename}
         rounded="rounded-[8px]" className="max-sm:!aspect-square max-sm:rounded-[4px]" />
+      {photo.status === 'failed' && (
+        <span className="pointer-events-none absolute left-1.5 top-1.5 z-[5] rounded bg-bad px-1.5 py-0.5 text-[9.5px] font-bold text-white" title="This file couldn’t be processed. Delete it or upload it again.">Couldn’t process</span>
+      )}
       <button
-        type="button" aria-label={processing ? `${photo.filename}, still processing` : `Open ${photo.filename}`} aria-pressed={selecting ? selected : undefined}
+        type="button" aria-label={processing ? `${photo.filename}, still processing` : photo.status === 'failed' ? `${photo.filename}, couldn’t be processed` : `Open ${photo.filename}`} aria-pressed={selecting ? selected : undefined}
         className="absolute inset-0 z-[4] rounded-[8px]" onClick={onClick}
         onPointerDown={onPointerDown} onPointerUp={cancelPress} onPointerLeave={cancelPress} onPointerCancel={cancelPress}
       />

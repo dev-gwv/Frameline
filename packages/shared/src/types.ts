@@ -180,7 +180,8 @@ export interface Photo {
   tone: Tone
   /** Object URL / CDN URL once a real file exists. */
   url?: string
-  status: 'ready' | 'processing'
+  /** `failed`: the file couldn't be processed (unsupported or corrupt); delete it or upload it again. */
+  status: 'ready' | 'processing' | 'failed'
   hidden: boolean
   favourites: number
   downloads: number

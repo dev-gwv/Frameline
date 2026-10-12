@@ -564,7 +564,12 @@ publicRoutes.openapi(createRoute({
   }
   const size = c.req.valid('query').size
   if (size === '3072' && !e.settings.originalDownloads) throw new Forbidden('High-resolution downloads are off for this gallery.', 'originals_disabled')
-  const key = p.r2Key ? p.r2Key.replace(/\/[^/]+$/, `/renditions/${size}.jpg`) : null
+  // Renditions carry no watermark. When this download needs one, answer 404 so the gallery renders the file
+  // itself with the watermark burned in (apps/gallery/src/lib/download.ts) instead of saving a clean copy.
+  const [wm] = e.settings.watermarkOff ? [] : await getDb(c.env.DB).select({ s: schema.watermarks.settings }).from(schema.watermarks).where(eq(schema.watermarks.studioId, e.studioId)).limit(1)
+  // No watermark saved yet: the gallery falls back to the studio's name, so that needs one too.
+  const needsWatermark = !e.settings.watermarkOff && (!wm || (size === '3072' ? wm.s.applyTo.originals : wm.s.applyTo.downloads))
+  const key = p.r2Key && !needsWatermark ? p.r2Key.replace(/\/[^/]+$/, `/renditions/${size}.jpg`) : null
   const obj = key && c.env.PROCESSOR_URL ? await c.env.MEDIA.get(key) : null
   if (!obj) throw new AppError(404, 'rendition_unavailable', 'Not found', 'No download rendition exists for this photo yet. Use the photo URL instead.')
   // HEAD (clients checking the link exists) must not count as a download.

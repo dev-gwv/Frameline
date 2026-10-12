@@ -5,7 +5,7 @@ describe('meta, errors, versioning', () => {
   it('serves /health and /v1/meta', async () => {
     const h = await call('/health')
     expect(h.status).toBe(200)
-    expect(h.json).toEqual({ status: 'ok', checks: { db: 'ok' } })
+    expect(h.json).toEqual({ status: 'ok', checks: { db: 'ok', processor: 'simulated' } })
     const m = await call('/v1/meta')
     expect(m.json).toMatchObject({ apiVersion: 'v1', version: '1.0.0', environment: 'test' })
     expect(m.headers.get('api-version')).toBe('1')

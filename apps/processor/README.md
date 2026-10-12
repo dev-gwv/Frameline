@@ -73,10 +73,15 @@ runs identically in this Node service and (later) in the gallery's on-device sel
    model should be the **same** YuNet+SFace pair running via `onnxruntime-web`, reusing `packages/faces`
    unchanged (it's pure math, no Node-specific APIs) — the guest's selfie image never has to leave their device,
    just a 128-number vector does.
-3. **Renditions, watermarking, AI enhance.** `ProcessResult.previewUrl`/`exif` are left at their defaults; the
-   Worker keeps using the original upload as-is, same as `SimulatedProcessor` does today.
+3. **Watermark burn-in, gallery previews, AI enhance.** Photos are turned upright from EXIF and download
+   renditions (`renditions/2048.jpg`, `3072.jpg`, unwatermarked) are written. The API serves those only when no
+   watermark applies; otherwise the gallery burns the watermark in itself. `previewUrl` is still unset, so
+   galleries show the original. AI enhance is switched off (`FEATURES.aiEnhance`).
 4. **Real EXIF extraction** (camera/lens/capture time) — `sharp(...).metadata()` exposes the raw EXIF buffer;
    parsing it into `ProcessResult.exif` is a small, separate addition.
+
+A file sharp can't decode (video, an unsupported HEIC, a corrupt upload) gets a 422; the API marks that photo
+`failed` instead of retrying. Other errors are retried up to 5 times, then the photo is marked `failed` too.
 
 ## Running locally
 

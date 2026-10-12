@@ -185,7 +185,7 @@ export const Box = z.tuple([z.number(), z.number(), z.number(), z.number()])
 
 export const Photo = z.object({
   id: Id, eventId: Id, albumId: Id, filename: z.string(), index: z.number().int(), capturedAt: z.string(), tone: Tone,
-  url: z.string().optional(), status: z.enum(['ready', 'processing']), hidden: z.boolean(), favourites: z.number().int(),
+  url: z.string().optional(), status: z.enum(['ready', 'processing', 'failed']), hidden: z.boolean(), favourites: z.number().int(),
   downloads: z.number().int(), faces: z.array(z.object({ personId: Id, box: Box })), exif: Exif, uploadedBy: z.string(),
   source: z.enum(['web', 'camera', 'drive', 'guest', 'desktop']),
   reviewStatus: z.enum(['pending', 'approved', 'rejected']).optional(), enhancedFrom: z.string().optional(),

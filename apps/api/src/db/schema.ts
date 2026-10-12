@@ -209,7 +209,8 @@ export const photos = sqliteTable('photos', {
   tone: json<Tone>('tone').notNull(),
   url: text('url'),
   r2Key: text('r2_key'),
-  status: text('status', { enum: ['ready', 'processing'] }).notNull().default('processing'),
+  /** `failed`: the processor couldn't read the file (or gave up after MAX_PROCESS_ATTEMPTS). */
+  status: text('status', { enum: ['ready', 'processing', 'failed'] }).notNull().default('processing'),
   hidden: bool('hidden').notNull().default(false),
   favourites: integer('favourites').notNull().default(0),
   downloads: integer('downloads').notNull().default(0),
