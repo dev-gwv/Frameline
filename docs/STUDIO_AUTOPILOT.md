@@ -96,6 +96,72 @@ Container plan in `services/processor.ts` is stale.
 lines. The "payment and invoice emails always go out" setting has no email
 code behind it.
 
+### Code review (12 Oct 2026): holes, not just gaps
+
+**Money (launch blockers)**
+- `POST /v1/studio/credits` adds up to ₹10 lakh to the wallet with no payment
+  (`routes/studio.ts:122-138`).
+- Plan changes, renewals and packs paid "by card/UPI" are never charged, even
+  with Razorpay keys (`account.ts:123-129`, `events.ts:448-450,556-558`).
+- Store orders are `paid` without keys (`public.ts:711-733`). The `international`
+  method is always `paid-direct`: it unlocks the photos and credits the
+  payout balance, even with keys and even if the studio never enabled it.
+- The production gallery shows its own card/CVC form ("Test payments"), because CI
+  never sets `VITE_RAZORPAY_KEY`.
+- Payouts are a ledger line and the ₹1 bank check is simulated. Refunds are
+  simulated without keys. The trial (`validTill`) is never enforced, and photo
+  packs raise a limit nothing checks.
+
+**Privacy and access (launch blockers)**
+- **`POST /public/events/:id/pin`** checks the PIN only for `link-pin` galleries;
+  on `link` galleries any PIN returns a see-all session, which defeats face
+  privacy (`public.ts:164-165`).
+- **Originals are public** at `/v1/media/*` with a one-year public cache. A photo
+  hidden or trashed later stays fetchable. The "for sale" watermark is a
+  browser overlay over the original. There is no `PUBLIC_MEDIA_BASE`/CDN, so
+  every image streams through the Worker.
+- **`GET /public/zips/:id`** needs no auth and skips the hidden/review checks. The
+  "ZIP" is a list of links.
+- **Guest `/register`** matches existing guests by email or phone without
+  verification and hands over their session; with `/me/orders` matching by
+  email, someone else's paid orders can be read. Guests also choose the
+  `personId` and the selfie `minScore`.
+
+**Breaks at real events**
+- Rate limits are 300/min per IP and 120/min for public routes, and every image
+  goes through the Worker, so guests on shared venue Wi-Fi are blocked in
+  seconds.
+- Without `PROCESSOR_URL`, production silently simulates processing.
+- There is no `failed` status or dead-letter consumer: HEIC, video or corrupt
+  files stay `processing` forever.
+- The processor ignores EXIF rotation, so portrait shots are scanned sideways.
+- Single-photo download 404s because nothing writes renditions.
+- "Download all" is one browser download per photo.
+
+**Other**
+- **Smart QR** slugs are unique only per studio, have no resolver, and the scan
+  count is never incremented.
+- **Google Drive import** creates fake `DRV_*.JPG` rows that use up quota.
+- **Studio dates are frozen** at `DEMO_NOW` 26 Sep 2026 (`packages/shared/src/format.ts:47`).
+- **KYC documents** are never reviewed.
+- **No sample-data fallback guard:** a build without `VITE_API_URL` silently runs on
+  sample data.
+- **Tests:** none for the frontends, the processor or `packages/faces`. API tests
+  never exercise the real processor.
+
+**Suggested order:**
+1. Lock the money paths.
+2. Always verify the PIN.
+3. Serve renditions behind a CDN, not originals; hidden photos unreachable.
+4. Make selfie search real, or keep it off.
+5. No silent simulated processor in production; add a `failed` status and a
+   dead-letter consumer.
+6. Rate limits keyed by guest or device.
+7. Real ZIP with auth and visibility checks.
+8. QR resolver with unique slugs; disable Drive import.
+9. Real clock, the Razorpay key in CI, guest verification, plan expiry.
+10. The four launch blockers from the docs review above.
+
 **Contradictions to fix in the docs**
 - Vector size: 512 in the api README and `processor.ts:14`, versus 128 (correct).
 - Upload mode: "decided: proxy" versus direct-to-R2 being enabled.
