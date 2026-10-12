@@ -128,7 +128,8 @@ publicRoutes.openapi(createRoute({
   const films = await db.select().from(schema.films).where(eq(schema.films.eventId, e.id)).orderBy(asc(schema.films.createdAt))
   let coverUrl: string | undefined
   if (e.coverPhotoId) {
-    const [cp] = await db.select().from(schema.photos).where(and(eq(schema.photos.id, e.coverPhotoId), isNull(schema.photos.deletedAt))).limit(1)
+    // A cover the studio has since hidden is not shown to guests.
+    const [cp] = await db.select().from(schema.photos).where(and(eq(schema.photos.id, e.coverPhotoId), visible())).limit(1)
     if (cp) coverUrl = photoOut(cp, c.env.PUBLIC_MEDIA_BASE).url
   }
   const { pin: _pin, ...settings } = e.settings
@@ -162,7 +163,9 @@ publicRoutes.openapi(createRoute({
   const { e } = await openEvent(c, c.req.valid('param').shortId)
   const existing = await readGuest(c).catch(() => null)
   const guestId = existing?.eventId === e.id ? existing.guestId : undefined
-  if (e.settings.access === 'link-pin') await checkPin(c, e, c.req.valid('json').pin)
+  // Always the real PIN: on a gallery with no PIN gate this call still hands out a see-all session, which
+  // is what lifts face privacy -- it used to accept any PIN at all there.
+  await checkPin(c, e, c.req.valid('json').pin)
   return c.json(await issueGuestSession(c, e, { guestId, seeAll: true }), 200)
 })
 
@@ -201,6 +204,10 @@ publicRoutes.openapi(createRoute({
     g = same.find((x) => digits(x.phone) === digits(phone))
   }
   if (g?.removedAt) throw new Forbidden('The photographer removed your access to this gallery. Ask them if you think this is a mistake.', 'guest_removed')
+  // Nobody proves they own an email or a number here, so a match is never handed over: typing someone else's
+  // email used to return their session -- their orders and paid photos with it. Only the guest this session
+  // already is gets their record back; anyone else gets a record of their own.
+  if (g && prior?.guestId !== g.id) g = undefined
   if (g) {
     g = { ...g, name: input.name, phone: phone || g.phone, email: email || g.email, lastActive: now }
     await db.update(gt).set({ name: g.name, phone: g.phone, email: g.email, lastActive: now }).where(eq(gt.id, g.id)).run()
@@ -314,7 +321,8 @@ publicRoutes.openapi(createRoute({
   if (!e.settings.faceSearch) throw new Forbidden('Face search is turned off for this gallery.', 'face_search_disabled')
   const input = c.req.valid('json')
   if (selfieHasNoFace(input)) return c.json({ faceFound: false, reason: 'no_face' as const, personId: null, photoIds: [] }, 200)
-  const result = await matchFaces(c.env, e.id, input.key, input.embedding, input.minScore)
+  // A guest may ask for a stricter match, never a looser one: a low threshold would list other people's faces.
+  const result = await matchFaces(c.env, e.id, input.key, input.embedding, Math.max(input.minScore, 0.5))
   if (result.photoIds.length) {
     const db = getDb(c.env.DB)
     background(c, bumpDaily(db, e.studioId, e.id, 'faceSearches'))
@@ -544,6 +552,16 @@ publicRoutes.openapi(createRoute({
   const { p, e } = await visiblePhoto(c, c.req.valid('param').photoId)
   const g = await guestAccess(c, e)
   if (e.settings.downloads === 'none') throw new Forbidden('Downloads are turned off for this gallery.', 'downloads_disabled')
+  // The same rule as a ZIP: "own photos only" (or face privacy without a see-all session) means a photo the
+  // guest's selfie matched -- `personId` from face search -- and nothing else.
+  const needOwn = e.settings.downloads === 'own' || (e.settings.facePrivacy && e.settings.faceSearch && g?.all !== true)
+  if (needOwn) {
+    const personId = c.req.query('personId')
+    const [mine] = personId
+      ? await getDb(c.env.DB).select({ id: schema.faces.id }).from(schema.faces).where(and(eq(schema.faces.photoId, p.id), eq(schema.faces.personId, personId))).limit(1)
+      : []
+    if (!mine) throw new Forbidden('You can download only the photos you’re in. Find yours with a selfie first.', 'downloads_own_only')
+  }
   const size = c.req.valid('query').size
   if (size === '3072' && !e.settings.originalDownloads) throw new Forbidden('High-resolution downloads are off for this gallery.', 'originals_disabled')
   const key = p.r2Key ? p.r2Key.replace(/\/[^/]+$/, `/renditions/${size}.jpg`) : null
@@ -762,7 +780,7 @@ publicRoutes.openapi(createRoute({
 
 publicRoutes.openapi(createRoute({
   method: 'get', path: '/events/{shortId}/me/orders', tags: ['Public gallery'], summary: 'My orders in this gallery',
-  description: 'Orders placed with this guest session, or with the registered guest’s email.',
+  description: 'Orders placed with this guest session. Not by email: an unverified email would show anyone’s orders (and unlock their photos) to whoever typed it. A buyer on another device uses the link in their receipt email.',
   request: { params: ShortIdParam },
   responses: { 200: json(z.object({ items: z.array(Order) })), ...problems(401, 403, 404) },
 }), async (c) => {
@@ -770,9 +788,8 @@ publicRoutes.openapi(createRoute({
   const g = await guestAccess(c, e)
   if (!g?.guestId) return c.json({ items: [] }, 200)
   const db = getDb(c.env.DB)
-  const [guest] = await db.select({ email: schema.guests.email }).from(schema.guests).where(eq(schema.guests.id, g.guestId)).limit(1)
   const o = schema.orders
-  const rows = await db.select().from(o).where(and(eq(o.eventId, e.id), or(eq(o.guestId, g.guestId), guest ? eq(o.buyerEmail, guest.email.toLowerCase()) : undefined))).orderBy(desc(o.at)).limit(100)
+  const rows = await db.select().from(o).where(and(eq(o.eventId, e.id), eq(o.guestId, g.guestId))).orderBy(desc(o.at)).limit(100)
   return c.json({ items: rows.map(orderOut) }, 200)
 })
 
@@ -898,9 +915,10 @@ publicRoutes.openapi(createRoute({
   const p = schema.photos
   const rows: (typeof p.$inferSelect)[] = []
   if (z0.photoIds?.length) {
-    for (const part of chunk(z0.photoIds)) rows.push(...await db.select().from(p).where(and(inArray(p.id, part), eq(p.status, 'ready'), isNull(p.deletedAt))))
+    // The same rules as the gallery: a photo hidden, trashed or unreviewed since the request is left out.
+    for (const part of chunk(z0.photoIds)) rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), inArray(p.id, part), visible(p))))
   } else {
-    rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), eq(p.status, 'ready'), isNull(p.deletedAt),
+    rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), visible(p),
       z0.albumId ? eq(p.albumId, z0.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${z0.eventId} AND kind = 'album' AND deleted_at IS NULL)`)).orderBy(asc(p.capturedAt)).limit(5000))
   }
   return c.json({ eventName: ev?.name ?? '', photos: rows.map((r) => ({ id: r.id, filename: r.filename, url: photoOut(r, c.env.PUBLIC_MEDIA_BASE).url ?? null })) }, 200)

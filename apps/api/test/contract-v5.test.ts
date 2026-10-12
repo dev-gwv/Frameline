@@ -168,12 +168,16 @@ describe('photos', () => {
 })
 
 describe('guests', () => {
-  it('signs guests up with a phone only and recognises them again', async () => {
+  it('signs guests up with a phone only and recognises them again from their own session only', async () => {
     const a = await call(`/v1/public/events/${TESSERA}/register`, { body: { name: 'Phone Only', phone: '+91 98450 55012' } })
     expect(a.status).toBe(200)
     expect(a.json.guest).toMatchObject({ name: 'Phone Only', email: '', phone: '+91 98450 55012' })
-    const b = await call(`/v1/public/events/${TESSERA}/register`, { body: { name: 'Phone Again', phone: '9845055012' } })
+    // Their own session: the same record.
+    const b = await call(`/v1/public/events/${TESSERA}/register`, { token: a.json.token, body: { name: 'Phone Again', phone: '9845055012' } })
     expect(b.json.guest.id).toBe(a.json.guest.id)
+    // Someone else typing the same number gets a record of their own, never this guest's session.
+    const stranger = await call(`/v1/public/events/${TESSERA}/register`, { body: { name: 'Stranger', phone: '9845055012' } })
+    expect(stranger.json.guest.id).not.toBe(a.json.guest.id)
     expectProblem(await call(`/v1/public/events/${TESSERA}/register`, { body: { name: 'Nobody' } }), 422, 'validation_failed')
   })
 

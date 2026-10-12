@@ -1,13 +1,13 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { and, eq, isNull, max, sql } from 'drizzle-orm'
+import { and, eq, isNull, max, or, sql } from 'drizzle-orm'
 import type { Context } from 'hono'
 import { hash, tone } from '@frameline/shared'
 import type { AppEnv, PhotoJob } from '../env'
 import { getDb, schema } from '../db/client'
 import type { UploadFileRecord, UploadSessionOptions } from '../db/schema'
-import { photoOut } from '../db/mappers'
 import { AppError, Conflict, NotFound, Unauthorized, ValidationFailed } from '../lib/errors'
 import { newId, nowIso } from '../lib/ids'
+import { guestCanSee, studioPhotosOut, verifyMediaSig } from '../lib/media-sign'
 import { signJwt, verifyJwt } from '../lib/jwt'
 import { IdempotencyHeader, body, createRouter, json, problems, security } from '../lib/openapi'
 import { membershipOf, requireStudio, userOf } from '../middleware/auth'
@@ -136,7 +136,7 @@ export async function completeUploadSession(c: Context<AppEnv>, a: {
   const created = rows.length ? await db.select().from(p).where(sql`${p.id} IN (SELECT value FROM json_each(${JSON.stringify(rows.map((r) => r.id))}))`) : []
   const position = new Map(rows.map((r, i) => [r.id, i]))
   created.sort((a, b) => position.get(a.id)! - position.get(b.id)!)
-  return created.map((r) => photoOut(r, c.env.PUBLIC_MEDIA_BASE))
+  return studioPhotosOut(c.env, created)
 }
 
 const MAX_FILE_BYTES = 200 * 1024 * 1024
@@ -248,16 +248,36 @@ uploadRoutes.openapi(createRoute({
   return c.json({ items }, 201)
 })
 
-/** Serves R2 objects in dev (production serves media from an R2 custom domain via PUBLIC_MEDIA_BASE). */
+const PHOTO_KEY = /^studios\/[^/]+\/events\/([^/]+)\/originals\/([^/]+)\//
+
+/**
+ * Serves R2 objects. A photo's file (original or rendition) is public only while a guest could see the photo
+ * -- some copy of it visible, in an event that isn't in the trash. Otherwise it needs the signature the studio
+ * API adds (lib/media-sign.ts). Public files are cached for an hour, not a year, so hiding a photo takes hold
+ * in caches within the hour. Studio assets (logos, covers) stay public.
+ */
 uploadRoutes.get('/media/:key{.+}', async (c) => {
   const key = decodeURIComponent(c.req.param('key'))
   if (!key.startsWith('studios/')) throw new NotFound('File')
+  let cache = 'public, max-age=31536000, immutable'
+  const photo = PHOTO_KEY.exec(key)
+  if (photo) {
+    const [, eventId, photoId] = photo
+    const p = schema.photos
+    const rows = await getDb(c.env.DB).select({ hidden: p.hidden, deletedAt: p.deletedAt, reviewStatus: p.reviewStatus, status: p.status, eventDeleted: schema.events.deletedAt })
+      .from(p).innerJoin(schema.events, eq(schema.events.id, p.eventId))
+      .where(and(eq(p.eventId, eventId), or(eq(p.id, photoId), eq(p.copiedFrom, photoId)))).limit(50)
+    const publicNow = rows.some((r) => !r.eventDeleted && guestCanSee(r))
+    if (publicNow) cache = 'public, max-age=3600'
+    else if (rows.length && await verifyMediaSig(c.env.JWT_SECRET, key, c.req.query('exp'), c.req.query('sig'))) cache = 'private, max-age=3600'
+    else throw new NotFound('File')
+  }
   const obj = await c.env.MEDIA.get(key, { range: c.req.raw.headers, onlyIf: c.req.raw.headers })
   if (!obj) throw new NotFound('File')
   const headers = new Headers()
   obj.writeHttpMetadata(headers)
   headers.set('ETag', obj.httpEtag)
-  headers.set('Cache-Control', 'public, max-age=31536000, immutable')
+  headers.set('Cache-Control', cache)
   if (!('body' in obj) || !obj.body) return new Response(null, { status: 304, headers })
   return new Response(obj.body, { status: c.req.header('range') ? 206 : 200, headers })
 })

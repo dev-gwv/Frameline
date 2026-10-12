@@ -2,11 +2,12 @@ import { createRoute, z } from '@hono/zod-openapi'
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, sql, type SQL } from 'drizzle-orm'
 import { ENHANCE_COST, hash, tone } from '@frameline/shared'
 import { getDb, schema, type DB } from '../db/client'
-import { albumOut, downloadEventOut, photoOut, zipOut } from '../db/mappers'
+import { albumOut, downloadEventOut, zipOut } from '../db/mappers'
 import { toMinor } from '../lib/money'
 import { debitWallet } from '../services/billing'
 import { BadRequest, Conflict, NotFound, ValidationFailed } from '../lib/errors'
 import { newId, nowIso } from '../lib/ids'
+import { studioPhotoOut, studioPhotosOut } from '../lib/media-sign'
 import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, problems, security } from '../lib/openapi'
 import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
 import { membershipOf, requireStudio } from '../middleware/auth'
@@ -193,8 +194,9 @@ photoRoutes.openapi(createRoute({
   let query = db.select().from(p).where(and(base, afterCursor(sortCol, p.id, dir, q.cursor))).orderBy(...order).limit(q.limit + 1)
   if (q.offset !== undefined && !q.cursor) query = query.offset(q.offset) as typeof query
   const rows = await query
-  const page = toPage(rows, q.limit, keyOf, (r) => photoOut(r, c.env.PUBLIC_MEDIA_BASE))
-  return c.json({ ...page, total }, 200)
+  const page = toPage(rows, q.limit, keyOf, (r) => r)
+  const signed = { ...page, items: await studioPhotosOut(c.env, page.items) }
+  return c.json({ ...signed, total }, 200)
 })
 
 photoRoutes.openapi(createRoute({
@@ -208,7 +210,7 @@ photoRoutes.openapi(createRoute({
   const [row] = await getDb(c.env.DB).select().from(schema.photos).where(and(eq(schema.photos.id, id), eq(schema.photos.studioId, m.studioId), isNull(schema.photos.deletedAt))).limit(1)
   if (!row) throw new NotFound('Photo', id)
   assertEventVisible(m, row.eventId)
-  return c.json(photoOut(row, c.env.PUBLIC_MEDIA_BASE), 200)
+  return c.json(await studioPhotoOut(c.env, row), 200)
 })
 
 const Ids = z.array(z.string().min(1).max(128)).min(1).max(500)
@@ -383,7 +385,7 @@ photoRoutes.openapi(createRoute({
     await db.batch([...copies.map((r) => db.insert(p).values(r)), ...faceRows.map((f) => db.insert(schema.faces).values(f)), first, ...rest] as unknown as [typeof first])
   }
   emit(c, m.studioId, 'photos', 'albums', 'events')
-  return c.json({ items: copies.map((r) => photoOut(r, c.env.PUBLIC_MEDIA_BASE)) }, 201)
+  return c.json({ items: await studioPhotosOut(c.env, copies) }, 201)
 })
 
 photoRoutes.openapi(createRoute({
@@ -440,7 +442,7 @@ photoRoutes.openapi(createRoute({
   audit(c, 'photos.enhance', { type: 'photo', id }, { saveAs: o.saveAs, label })
   emit(c, m.studioId, 'photos', 'albums', 'usage', 'misc')
   const [out] = await db.select().from(p).where(eq(p.id, resultId)).limit(1)
-  return c.json(photoOut(out, c.env.PUBLIC_MEDIA_BASE), 200)
+  return c.json(await studioPhotoOut(c.env, out), 200)
 })
 
 photoRoutes.openapi(createRoute({
