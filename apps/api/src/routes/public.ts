@@ -10,6 +10,7 @@ import { AppError, Forbidden, NotConfigured, NotFound, RateLimited, Unauthorized
 import { background, clientIp } from '../lib/http'
 import { newId, nowIso } from '../lib/ids'
 import { signJwt } from '../lib/jwt'
+import { ZipWriter } from '../lib/zip'
 import { toMajor } from '../lib/money'
 import { IdempotencyHeader, NoContent, body, createRouter, json, problems } from '../lib/openapi'
 import { afterCursor, encodeCursor } from '../lib/pagination'
@@ -496,15 +497,26 @@ publicRoutes.openapi(createRoute({
   return c.json({ remaining: Math.max(0, DOWNLOAD_ALL_LIMIT - (row?.n ?? 1)), limit: DOWNLOAD_ALL_LIMIT }, 200)
 })
 
+/**
+ * Whether a guest's download must carry the studio watermark — the gallery's own rule (DownloadSheet's
+ * applyWatermark): on unless the event turns it off; a studio with no saved watermark gets its name.
+ * Server-made files (renditions, ZIPs) are never watermarked, so they're only handed out when this is false.
+ */
+async function downloadNeedsWatermark(c: Context<AppEnv>, e: EventRow, size: '2048' | '3072'): Promise<boolean> {
+  if (e.settings.watermarkOff) return false
+  const [wm] = await getDb(c.env.DB).select({ s: schema.watermarks.settings }).from(schema.watermarks).where(eq(schema.watermarks.studioId, e.studioId)).limit(1)
+  return !wm || (size === '3072' ? wm.s.applyTo.originals : wm.s.applyTo.downloads)
+}
+
 publicRoutes.openapi(createRoute({
   method: 'post', path: '/events/{shortId}/zips', tags: ['Public gallery'], summary: 'Email a ZIP of photos (follows the download policy)',
-  description: '`downloads: none` → 403. `own` → only `photoIds` that show `personId`. `all` → an album, a selection, or everything visible (face privacy needs a "see all" session or a `personId`).',
+  description: '`downloads: none` → 403. `own` → only `photoIds` that show `personId`. `all` → an album, a selection, or everything visible (face privacy needs a "see all" session or a `personId`). 409 `watermark_required` when downloads carry the studio watermark: a ZIP can’t, so the gallery saves those photos one by one.',
   middleware: [idempotent] as const,
   request: {
     params: ShortIdParam, headers: IdempotencyHeader,
     body: body(z.object({ email: z.email().max(254), photoIds: z.array(z.string().max(128)).max(500).optional(), albumId: z.string().max(128).optional(), personId: z.string().max(128).optional() })),
   },
-  responses: { 202: json(ZipRequest, 'Queued'), ...problems(401, 403, 404, 422) },
+  responses: { 202: json(ZipRequest, 'Queued'), ...problems(401, 403, 404, 409, 422) },
 }), async (c) => {
   const { e } = await openEvent(c, c.req.valid('param').shortId)
   const g = await guestAccess(c, e)
@@ -533,9 +545,12 @@ publicRoutes.openapi(createRoute({
       input.albumId ? eq(p.albumId, input.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${e.id} AND kind = 'album' AND deleted_at IS NULL)`))
     photoCount = n
   }
+  if (await downloadNeedsWatermark(c, e, st.originalDownloads ? '3072' : '2048')) {
+    throw new AppError(409, 'watermark_required', 'Save one by one', 'This gallery adds the studio’s watermark to downloads, so the photos save one by one instead of in a ZIP.')
+  }
   const row = {
     id: newId('zip'), studioId: e.studioId, eventId: e.id, albumId: input.albumId ?? null, photoIds: ids ?? null, email: input.email,
-    photoCount, status: 'queued' as const, requestedAt: nowIso(), readyAt: null, url: null, guestId: g?.guestId ?? null,
+    photoCount, status: 'queued' as const, requestedAt: nowIso(), readyAt: null, url: null, guestId: g?.guestId ?? null, requestedBy: 'guest' as const,
   }
   await db.insert(schema.zipRequests).values(row).run()
   await c.env.PHOTO_QUEUE.send({ kind: 'build-zip', zipId: row.id, studioId: e.studioId })
@@ -566,9 +581,7 @@ publicRoutes.openapi(createRoute({
   if (size === '3072' && !e.settings.originalDownloads) throw new Forbidden('High-resolution downloads are off for this gallery.', 'originals_disabled')
   // Renditions carry no watermark. When this download needs one, answer 404 so the gallery renders the file
   // itself with the watermark burned in (apps/gallery/src/lib/download.ts) instead of saving a clean copy.
-  const [wm] = e.settings.watermarkOff ? [] : await getDb(c.env.DB).select({ s: schema.watermarks.settings }).from(schema.watermarks).where(eq(schema.watermarks.studioId, e.studioId)).limit(1)
-  // No watermark saved yet: the gallery falls back to the studio's name, so that needs one too.
-  const needsWatermark = !e.settings.watermarkOff && (!wm || (size === '3072' ? wm.s.applyTo.originals : wm.s.applyTo.downloads))
+  const needsWatermark = await downloadNeedsWatermark(c, e, size)
   const key = p.r2Key && !needsWatermark ? p.r2Key.replace(/\/[^/]+$/, `/renditions/${size}.jpg`) : null
   const obj = key && c.env.PROCESSOR_URL ? await c.env.MEDIA.get(key) : null
   if (!obj) throw new AppError(404, 'rendition_unavailable', 'Not found', 'No download rendition exists for this photo yet. Use the photo URL instead.')
@@ -1005,20 +1018,77 @@ publicRoutes.openapi(createRoute({
   request: { params: z.object({ id: z.string().max(64).openapi({ param: { name: 'id', in: 'path' } }) }) },
   responses: { 200: json(z.object({ eventName: z.string(), photos: z.array(z.object({ id: z.string(), filename: z.string(), url: z.string().nullable() })) })), ...problems(404) },
 }), async (c) => {
+  const { ev, rows } = await readyZip(c, c.req.valid('param').id)
+  return c.json({ eventName: ev?.name ?? '', photos: rows.map((r) => ({ id: r.id, filename: r.filename, url: photoOut(r, c.env.PUBLIC_MEDIA_BASE).url ?? null })) }, 200)
+})
+
+/** A ready ZIP request (links last 7 days) and the photos it covers right now. */
+async function readyZip(c: Context<AppEnv>, id: string) {
   const db = getDb(c.env.DB)
-  const [z0] = await db.select().from(schema.zipRequests).where(eq(schema.zipRequests.id, c.req.valid('param').id)).limit(1)
+  const [z0] = await db.select().from(schema.zipRequests).where(eq(schema.zipRequests.id, id)).limit(1)
   if (!z0 || z0.status !== 'ready' || Date.parse(z0.readyAt ?? z0.requestedAt) < Date.now() - 7 * 86_400_000) throw new NotFound('Download')
-  const [ev] = await db.select().from(schema.events).where(eq(schema.events.id, z0.eventId)).limit(1)
+  const [ev] = await db.select().from(schema.events).where(and(eq(schema.events.id, z0.eventId), isNull(schema.events.deletedAt))).limit(1)
+  if (!ev) throw new NotFound('Download')
   const p = schema.photos
+  // A guest ZIP follows the gallery: a photo hidden, trashed or unreviewed since the request is left out.
+  // A studio export takes every photo that isn't deleted.
+  const allowed = z0.requestedBy === 'guest' ? visible(p) : and(isNull(p.deletedAt), eq(p.status, 'ready'))
   const rows: (typeof p.$inferSelect)[] = []
   if (z0.photoIds?.length) {
-    // The same rules as the gallery: a photo hidden, trashed or unreviewed since the request is left out.
-    for (const part of chunk(z0.photoIds)) rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), inArray(p.id, part), visible(p))))
+    for (const part of chunk(z0.photoIds)) rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), inArray(p.id, part), allowed)))
   } else {
-    rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), visible(p),
+    rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), allowed,
       z0.albumId ? eq(p.albumId, z0.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${z0.eventId} AND kind = 'album' AND deleted_at IS NULL)`)).orderBy(asc(p.capturedAt)).limit(5000))
   }
-  return c.json({ eventName: ev?.name ?? '', photos: rows.map((r) => ({ id: r.id, filename: r.filename, url: photoOut(r, c.env.PUBLIC_MEDIA_BASE).url ?? null })) }, 200)
+  return { z0, ev, rows }
+}
+
+publicRoutes.openapi(createRoute({
+  method: 'get', path: '/zips/{id}/download', tags: ['Public gallery'], summary: 'Download a ready ZIP (streamed)',
+  description: 'The link in the "your photos are ready" email. Streams a ZIP of the files (stored, not recompressed). A guest ZIP takes the 3072 px rendition or the original when the gallery allows full size, otherwise the 2048 px rendition (or a web-quality upload); photos with neither are left out. 409 `watermark_required` if the gallery started watermarking downloads after the request. Plain ZIP: up to 65,535 files and 4 GiB; anything past that is left out.',
+  request: { params: z.object({ id: z.string().max(64).openapi({ param: { name: 'id', in: 'path' } }) }) },
+  responses: { 200: { description: 'application/zip' }, ...problems(404, 409) },
+}), async (c) => {
+  const { z0, ev, rows } = await readyZip(c, c.req.valid('param').id)
+  const guestZip = z0.requestedBy === 'guest'
+  const full = !guestZip || ev.settings.originalDownloads
+  if (guestZip && await downloadNeedsWatermark(c, ev, full ? '3072' : '2048')) {
+    throw new AppError(409, 'watermark_required', 'Save one by one', 'This gallery now adds the studio’s watermark to downloads. Open the gallery and save the photos there.')
+  }
+  const keyFor = (r: typeof rows[number]): string[] => {
+    if (!r.r2Key) return []
+    const rendition = (size: number) => r.r2Key!.replace(/\/[^/]+$/, `/renditions/${size}.jpg`)
+    if (!guestZip) return [r.r2Key]
+    // Full size: the original. Web size: the 2048 rendition, or the original when it was uploaded at web size.
+    return full ? [r.r2Key] : [rendition(2048), ...(r.quality === 'web' ? [r.r2Key] : [])]
+  }
+
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+  const writer = writable.getWriter()
+  const zip = new ZipWriter((chunk) => writer.write(chunk))
+  const build = (async () => {
+    for (const r of rows) {
+      let obj: R2ObjectBody | null = null
+      for (const key of keyFor(r)) { obj = await c.env.MEDIA.get(key); if (obj) break }
+      if (!obj) continue
+      if (!zip.fits(obj.size)) { await obj.body.cancel(); break }
+      await zip.add(r.filename, obj.body, new Date(r.capturedAt ?? r.createdAt))
+    }
+    await zip.finish()
+    await writer.close()
+  })().catch(async (e) => {
+    console.error(JSON.stringify({ level: 'error', msg: 'zip stream failed', zipId: z0.id, error: String(e) }))
+    await writer.abort(e).catch(() => undefined)
+  })
+  background(c, build)
+  const name = `${ev.name.replace(/[^\p{L}\p{N} _-]+/gu, '').trim().slice(0, 60) || 'photos'}.zip`
+  return new Response(readable, {
+    headers: {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${name.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+      'Cache-Control': 'private, no-store',
+    },
+  })
 })
 
 publicRoutes.openapi(createRoute({

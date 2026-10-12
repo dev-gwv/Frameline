@@ -103,6 +103,10 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
 
   const n = photos.length
   const big = n > DIRECT_DOWNLOAD_LIMIT
+  // A ZIP holds the files as they are, so it can't carry the watermark: watermarked galleries save one by one,
+  // where each photo is rendered with the watermark burned in.
+  const zipAllowed = !opts.applyWatermark
+  const method = zipAllowed ? how : 'one'
   const word = n === 1 ? 'photo' : 'photos'
 
   /** Uses one "Download all" (once per opening of the sheet). Returns false and explains when it can't. */
@@ -169,7 +173,7 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
   const canClose = stage !== 'running'
 
   const footer = stage === 'choose' && !loading ? (
-    big && how === 'zip'
+    big && method === 'zip'
       ? <PrimaryButton icon={<Mail size={16} />} loading={zipBusy} onClick={() => void emailZip()}>{EMAIL.test(email.trim()) ? `Send to ${email.trim()}` : 'Email me the ZIP'}</PrimaryButton>
       : <PrimaryButton icon={<Download size={16} />} onClick={() => void saveHere()}>Save {fmt.count(n)} {word}</PrimaryButton>
   ) : stage === 'running' ? (
@@ -207,11 +211,13 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
           {unlockError && <p role="alert" className="rounded-card bg-bad-soft p-3 text-[13px] font-semibold text-bad">{unlockError}</p>}
           {big ? (
             <>
-              <div role="radiogroup" aria-label="How to download" className="flex flex-col gap-2">
-                <RadioCard checked={how === 'zip'} onSelect={() => setHow('zip')} title="Email me a ZIP" detail="Best for many photos. Arrives in a few minutes." />
-                <RadioCard checked={how === 'one'} onSelect={() => setHow('one')} title="Save one by one" detail="Keeps this page open while they save." />
-              </div>
-              {how === 'zip' && (
+              {zipAllowed && (
+                <div role="radiogroup" aria-label="How to download" className="flex flex-col gap-2">
+                  <RadioCard checked={method === 'zip'} onSelect={() => setHow('zip')} title="Email me a ZIP" detail="Best for many photos. Arrives in a few minutes." />
+                  <RadioCard checked={method === 'one'} onSelect={() => setHow('one')} title="Save one by one" detail="Keeps this page open while they save." />
+                </div>
+              )}
+              {method === 'zip' && (
                 <form onSubmit={(e) => void emailZip(e)} noValidate>
                   <Field label="Send the link to" htmlFor="dl-email" error={emailError}>
                     <Input id="dl-email" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email}
@@ -219,7 +225,7 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
                   </Field>
                 </form>
               )}
-              {how === 'one' && <p className="text-[12.5px] text-ink-3">Your browser may ask to allow several downloads.</p>}
+              {method === 'one' && <p className="text-[12.5px] text-ink-3">{zipAllowed ? '' : `Your ${fmt.count(n)} photos save one after another with the studio’s watermark. Keep this page open. `}Your browser may ask to allow several downloads.</p>}
             </>
           ) : (
             <p className="text-[14px] text-ink-2">{n > 1 ? `Your ${fmt.count(n)} photos save one after another. Your browser may ask to allow several downloads.` : 'The photo saves to your Downloads or Photos.'}</p>

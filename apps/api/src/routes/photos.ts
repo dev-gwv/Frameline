@@ -487,7 +487,7 @@ photoRoutes.openapi(createRoute({
   }
   const row = {
     id: newId('zip'), studioId: m.studioId, eventId: ev.id, albumId: input.albumId ?? null, photoIds: input.photoIds ?? null, email: input.email,
-    photoCount, status: 'queued' as const, requestedAt: nowIso(), readyAt: null, url: null, guestId: null,
+    photoCount, status: 'queued' as const, requestedAt: nowIso(), readyAt: null, url: null, guestId: null, requestedBy: 'studio' as const,
   }
   await db.insert(schema.zipRequests).values(row).run()
   await c.env.PHOTO_QUEUE.send({ kind: 'build-zip', zipId: row.id, studioId: m.studioId })

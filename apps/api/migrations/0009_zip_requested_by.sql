@@ -1,0 +1,1 @@
+ALTER TABLE `zip_requests` ADD `requested_by` text DEFAULT 'guest' NOT NULL;

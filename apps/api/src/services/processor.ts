@@ -164,14 +164,14 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
 }
 
 /**
- * ZIP export. TODO(processor): stream a real ZIP into R2 from the Container. Until then the "ZIP" is a
- * manifest of download links served by GET /v1/public/zips/:id, and the email points there.
+ * ZIP export: marks the request ready and emails the link. The ZIP itself is streamed on demand by
+ * GET /v1/public/zips/:id/download (lib/zip.ts), so nothing large is built or stored ahead of time.
  */
 export async function buildZip(env: Env, job: BuildZipJob): Promise<void> {
   const db = getDb(env.DB)
   const [z] = await db.select().from(schema.zipRequests).where(eq(schema.zipRequests.id, job.zipId)).limit(1)
   if (!z || z.status === 'ready') return
-  const url = `${(env.API_PUBLIC_URL ?? '').replace(/\/$/, '')}/v1/public/zips/${z.id}`
+  const url = `${(env.API_PUBLIC_URL ?? '').replace(/\/$/, '')}/v1/public/zips/${z.id}/download`
   await db.update(schema.zipRequests).set({ status: 'ready', readyAt: new Date().toISOString(), url }).where(eq(schema.zipRequests.id, z.id)).run()
   // One download_events row per photo the ZIP actually covers (an explicit selection, or everything the request
   // matched at build time — an album, or the whole event's regular albums).

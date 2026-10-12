@@ -157,7 +157,11 @@ describe('a project\'s gallery', () => {
     await env.DB.prepare('UPDATE events SET photo_count = 1 WHERE id = ?').bind(made.json.eventId).run()
     const session = await r('/pin', { pin: made.json.pin })
     expect(session.status).toBe(200)
-    const zip = await r('/zips', { email: 'guest@example.com' }, session.json.token ?? session.json.accessToken)
+    const guestToken = session.json.token ?? session.json.accessToken
+    // A ZIP can't carry the studio watermark: watermarked galleries save photos one by one in the gallery.
+    expectProblem(await r('/zips', { email: 'guest@example.com' }, guestToken), 409, 'watermark_required')
+    await env.DB.prepare(`UPDATE events SET settings = json_set(settings, '$.watermarkOff', json('true')) WHERE id = ?`).bind(made.json.eventId).run()
+    const zip = await r('/zips', { email: 'guest@example.com' }, guestToken)
     expect(zip.status).toBe(202)
   })
 

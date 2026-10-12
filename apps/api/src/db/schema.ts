@@ -538,6 +538,8 @@ export const zipRequests = sqliteTable('zip_requests', {
   url: text('url'),
   /** The guest who asked for it (a guest-facing ZIP); null for a studio-initiated export from admin. */
   guestId: text('guest_id'),
+  /** Who asked: a studio export holds originals as they are; a guest ZIP follows the gallery's download rules. */
+  requestedBy: text('requested_by', { enum: ['studio', 'guest'] }).notNull().default('guest'),
 }, (t) => [index('zips_event_idx').on(t.eventId, t.requestedAt)])
 
 /** One row per photo actually downloaded (single click, or one per photo when a ZIP is generated) — the source of

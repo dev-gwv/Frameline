@@ -104,6 +104,8 @@ describe('download policy', () => {
   })
 
   it('queues guest ZIPs only within the download policy', async () => {
+    // A ZIP can't carry the watermark, so these galleries turn it off (see the watermark_required test in links).
+    await env.DB.prepare(`UPDATE events SET settings = json_set(settings, '$.watermarkOff', json('true')) WHERE id IN ('ev_tessera', 'ev_riya')`).run()
     const all = await call(`/v1/public/events/${TESSERA}/zips`, { body: { email: 'g@example.com', albumId: 'ev_tessera_al0' } })
     expect(all.status).toBe(202)
     expect(all.json.photoCount).toBeGreaterThan(0)

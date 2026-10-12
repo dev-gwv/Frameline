@@ -211,6 +211,13 @@ The findings above describe the code as it was on 12 Oct 2026. These are fixed s
 - Downloads use a rendition only when no watermark applies. Otherwise the gallery burns the watermark in itself.
 - Still open here: deploying the processor (needs the owner), EXIF capture time and camera, watermark burn-in, face clustering, selfie embeddings in the browser.
 
+**Batch 7, a real ZIP**
+- `GET /v1/public/zips/:id/download` streams a real ZIP (`lib/zip.ts`): stored entries, CRC computed on the fly, plain ZIP up to 65,535 files and 4 GiB. The "ready" email links there. The JSON list at `/zips/:id` stays.
+- `zip_requests.requested_by` (migration `0009`):
+  - A studio export holds the originals.
+  - A guest ZIP follows the gallery: the 3072 rendition or original when full size is allowed, otherwise the 2048 rendition or a web-quality upload.
+- A ZIP can't carry a watermark. When downloads are watermarked, guest ZIPs are refused (409 `watermark_required`, also re-checked at download), and the gallery offers only "Save one by one", which burns the watermark in. Before this, the "ZIP" handed out clean originals.
+
 **Still open, in order:**
 - Processor work: no silent simulation in production, a `failed` status and dead-letter consumer, EXIF rotation, renditions.
 - Real ZIP, a signed receipt link, guest verification.
