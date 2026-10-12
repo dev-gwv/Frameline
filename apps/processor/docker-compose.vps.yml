@@ -1,0 +1,38 @@
+# The processor on the Hostinger/Coolify VPS, behind Coolify's Traefik (HTTPS via Let's Encrypt).
+# Its own Compose project, so it never touches the other apps on the box:
+#   cd /root/frameline && git pull && docker compose -p frameline-processor -f apps/processor/docker-compose.vps.yml up -d --build
+# Needs apps/processor/.env (PROCESSOR_TOKEN, R2_*) and the models in apps/processor/models
+# (docker run --rm -v $PWD/apps/processor:/p -w /p node:22-bookworm-slim node scripts/download-models.mjs).
+# PROCESSOR_HOST: the public name, e.g. processor.72-61-239-209.sslip.io (no DNS needed) or a real subdomain.
+services:
+  processor:
+    build:
+      context: ../..
+      dockerfile: apps/processor/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./models:/app/apps/processor/models:ro
+    networks: [coolify]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.frameline-processor.rule=Host(`${PROCESSOR_HOST}`)
+      - traefik.http.routers.frameline-processor.entrypoints=https
+      - traefik.http.routers.frameline-processor.tls=true
+      - traefik.http.routers.frameline-processor.tls.certresolver=letsencrypt
+      - traefik.http.routers.frameline-processor-http.rule=Host(`${PROCESSOR_HOST}`)
+      - traefik.http.routers.frameline-processor-http.entrypoints=http
+      - traefik.http.routers.frameline-processor-http.middlewares=frameline-processor-https
+      - traefik.http.middlewares.frameline-processor-https.redirectscheme.scheme=https
+      - traefik.http.services.frameline-processor.loadbalancer.server.port=8788
+    # A shared box: 2 of its 4 cores and 3 GB at most, so the other apps are never starved.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3g
+
+networks:
+  coolify:
+    external: true
