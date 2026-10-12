@@ -88,14 +88,31 @@ async function emailFromBody(c: Context<AppEnv>): Promise<string | null> {
   }
 }
 
+/** The guest behind a gallery call: a short fingerprint of their session token, else their device id, else the IP. */
+const guestKey = (c: Context<AppEnv>): string[] => {
+  const auth = c.req.header('authorization')
+  const token = (auth?.startsWith('Bearer ') ? auth.slice(7) : undefined) ?? c.req.header('x-guest-token') ?? c.req.query('token')
+  if (token && token.length > 20) return [`tok:${token.slice(-24)}`]
+  const device = c.req.header('x-guest-device')
+  if (device && /^[\w-]{8,64}$/.test(device)) return [`dev:${device}`]
+  return ip(c)
+}
+
 const ipAndEmail = async (c: Context<AppEnv>) => {
   const e = await emailFromBody(c)
   return [...ip(c), ...(e ? [`email:${e}`] : [])]
 }
 
 export const limits = {
-  /** Every request, per IP. */
-  global: rateLimit({ name: 'global', limit: 300, windowSec: 60, binding: 'RL_GLOBAL', keys: ip }),
+  /**
+   * Every request, per IP -- except photo files. A wedding's guests share one venue Wi-Fi address, and a gallery
+   * page loads dozens of images each: counting files against 300 a minute per IP blocked a room of guests in
+   * seconds. Files are static and cached; the API calls around them are what this ceiling is for.
+   */
+  global: rateLimit({
+    name: 'global', limit: 1200, windowSec: 60, binding: 'RL_GLOBAL',
+    keys: (c) => (c.req.method === 'GET' && c.req.path.startsWith('/v1/media/') ? [] : ip(c)),
+  }),
   /** OTP send: 5 per 15 min per email AND per IP. */
   otpRequest: rateLimit({
     name: 'otp-request', limit: 5, windowSec: 900, keys: ipAndEmail,
@@ -113,8 +130,11 @@ export const limits = {
     name: 'write', limit: 120, windowSec: 60, binding: 'RL_WRITE',
     keys: (c) => (['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) ? [] : [`user:${c.get('user')?.id ?? clientIp(c)}`]),
   }),
-  /** Guest gallery endpoints, per IP. */
-  publicGallery: rateLimit({ name: 'public', limit: 120, windowSec: 60, binding: 'RL_PUBLIC', keys: ip }),
+  /**
+   * Guest gallery endpoints, per guest: their gallery session, else their device, else their IP. Per IP alone,
+   * every guest on the venue's Wi-Fi shared one allowance. The global ceiling above still caps an address.
+   */
+  publicGallery: rateLimit({ name: 'public', limit: 300, windowSec: 60, binding: 'RL_PUBLIC', keys: guestKey }),
   /** Gallery PIN attempts: 10 per 15 min per IP per event. */
   pin: rateLimit({
     name: 'pin', limit: 10, windowSec: 900,

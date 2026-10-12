@@ -162,6 +162,42 @@ code behind it.
 9. Real clock, the Razorpay key in CI, guest verification, plan expiry.
 10. The four launch blockers from the docs review above.
 
+### Fix progress
+The findings above describe the code as it was on 12 Oct 2026. These are fixed since then:
+
+**Batch 1, money (`4d1f545`)**
+- Plans, adding money, renewals and packs go through `services/payments.ts`.
+  - With Razorpay keys, they open a `studio_payments` row and return 202 `{ payment }`.
+  - The purchase is granted only by `POST /studio/payments/:id/confirm` (Checkout signature) or the webhook (amount checked). Both use compare-and-set, so each grants once.
+  - Without keys, they're simulated only in development and test; elsewhere they return 503 `payments_not_configured`.
+- International orders need `storeSettings.international.enabled` and start as `pending`. The studio marks them received with `POST /orders/:id/received`; that never touches the payout balance.
+- The gallery shows its card form only in the demo. The admin and gallery production builds refuse to run on sample data without `VITE_ALLOW_SAMPLE_DATA=1`.
+
+**Batch 2, privacy (`6d0542c`)**
+- The PIN is always checked.
+- `/v1/media/*` serves an original publicly only while a guest could see it. Everything else needs a signature, which `lib/media-sign.ts` adds to studio photo URLs and which lasts 24 hours.
+- `/register` reuses a guest only for that guest's own session token, and `/me/orders` matches by guest id.
+- ZIPs and the cover respect visibility. The selfie `minScore` is at least 0.5, and "own" downloads check the `personId`.
+
+**Batch 3, links and settings**
+- Rate limits:
+  - Public gallery routes allow 300 a minute, keyed by guest token, then the `x-guest-device` header, then IP.
+  - The global limit is 1200 a minute and skips `GET /v1/media/*`.
+- `deploy.yml` sets `VITE_GALLERY_URL` for the admin build, from the repo variable `GALLERY_URL` or the Pages URL.
+- `wrangler.jsonc` sets `API_PUBLIC_URL` in production.
+- `DEMO_NOW` is the real clock.
+- `FEATURES.driveImport`, `aiEnhance`, `cameraSync` and `broadcasts` are off. Their admin entry points are hidden, and `POST /photos/:id/enhance` returns 503 `feature_unavailable` before touching the wallet. The code stays in place; turn a flag back on once the feature is real.
+
+**Still open, in order:**
+- QR resolver with globally unique slugs and scan counting.
+- Follow and renewal links.
+- Plan expiry and pack limits.
+- Processor work: no silent simulation in production, a `failed` status and dead-letter consumer, EXIF rotation, renditions.
+- Real ZIP, a signed receipt link, guest verification.
+- The docs contradictions below.
+
+**Needs the owner:** Razorpay keys (`RAZORPAY_*` secrets plus `VITE_RAZORPAY_KEY`), `RESEND_API_KEY`, removing the production sample studio, processor hosting, and a real domain or CDN (`PUBLIC_MEDIA_BASE`).
+
 **Contradictions to fix in the docs**
 - Vector size: 512 in the api README and `processor.ts:14`, versus 128 (correct).
 - Upload mode: "decided: proxy" versus direct-to-R2 being enabled.

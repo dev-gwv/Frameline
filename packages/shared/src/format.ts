@@ -43,5 +43,9 @@ export const daysUntil = (iso: string, now = Date.now()) => Math.ceil((new Date(
 
 export const pct = (n: number, d: number) => (d ? Math.round((n / d) * 100) : 0)
 
-/** Demo "now" so sample data reads naturally (26 Sep 2026, 6 PM IST). */
-export const DEMO_NOW = new Date('2026-09-26T18:00:00+05:30').getTime()
+/**
+ * "Now" for the apps' labels ("2 days ago", "expires in 30 days", a new event's default date). It was fixed at
+ * 26 Sep 2026 so sample data read naturally -- which froze every real studio's dates on that day too. It is the
+ * real clock when the app loads (the name stays so every caller keeps working).
+ */
+export const DEMO_NOW = Date.now()

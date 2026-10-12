@@ -2,6 +2,7 @@ import {
   BarChart3, CalendarDays, Camera, CreditCard, Droplet, House, LayoutGrid, LifeBuoy, Megaphone, QrCode, Settings2, ShoppingBag,
   Smartphone, Trash2, Upload, UserRound, Users, WandSparkles, type LucideIcon,
 } from 'lucide-react'
+import { FEATURES } from '@frameline/shared'
 
 /**
  * Admin navigation (redesign v2). Top bar: PRIMARY_NAV + "More ▾" (MORE_NAV). Avatar menu: ACCOUNT_NAV.
@@ -28,10 +29,10 @@ export const PRIMARY_NAV: NavItem[] = [
 
 export const MORE_NAV: NavItem[] = [
   { to: '/watermark', label: 'Watermark', icon: Droplet, description: 'Your name or logo on photos', keywords: 'logo text copyright' },
-  { to: '/camera-sync', label: 'Camera sync', icon: Camera, description: 'Photos from your camera while you shoot', keywords: 'ftp live tether wifi' },
+  ...(FEATURES.cameraSync ? [{ to: '/camera-sync', label: 'Camera sync', icon: Camera, description: 'Photos from your camera while you shoot', keywords: 'ftp live tether wifi' }] : []),
   { to: '/qr', label: 'Smart QR', icon: QrCode, description: 'One printed QR code for every event', keywords: 'poster print scan' },
-  { to: '/messages', label: 'Messages to guests', icon: Megaphone, description: 'Send news to people who follow you', keywords: 'broadcast push notification announce' },
-  { to: '/enhance', label: 'AI enhance', icon: WandSparkles, description: 'Retouch one photo at a time', keywords: 'retouch edit ai improve', match: ['/enhance'] },
+  ...(FEATURES.broadcasts ? [{ to: '/messages', label: 'Messages to guests', icon: Megaphone, description: 'Send news to people who follow you', keywords: 'broadcast push notification announce' }] : []),
+  ...(FEATURES.aiEnhance ? [{ to: '/enhance', label: 'AI enhance', icon: WandSparkles, description: 'Retouch one photo at a time', keywords: 'retouch edit ai improve', match: ['/enhance'] }] : []),
   { to: '/studio-app', label: 'Your studio app', icon: Smartphone, description: 'Follow code and featured galleries', keywords: 'follow code featured app profile' },
   { to: '/reports', label: 'Reports', icon: BarChart3, description: 'Events, usage and downloads', keywords: 'csv export usage statistics' },
   { to: '/settings/team', label: 'Team', icon: Users, description: 'Invite a second shooter or editor', keywords: 'members invite roles seats' },

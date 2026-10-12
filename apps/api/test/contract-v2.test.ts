@@ -1,5 +1,6 @@
 import { createExecutionContext, createMessageBatch, env, getQueueResult } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
+import { FEATURES } from '@frameline/shared'
 import worker from '../src/index'
 import type { PhotoJob } from '../src/env'
 import { call, expectProblem, freshIp, tokenFor, uniqueEmail } from './helpers'
@@ -144,7 +145,18 @@ describe('photos: ids, copy, enhance, zip, reindex', () => {
     expectProblem(await call('/v1/photos/copy', { token, body: { ids: [src[0].id], albumId: 'ev_riya_al0' } }), 422, 'validation_failed')
   })
 
-  it('enhances a photo for 8 credits and the queue marks it ready', async () => {
+  it.skipIf(FEATURES.aiEnhance)('refuses AI enhance while the feature is off, without charging', async () => {
+    const token = await newStudio()
+    await call('/v1/studio/coupons', { token, body: { code: 'WELCOME500' } })
+    const ev = (await call('/v1/events', { token, body: { name: 'Enhance', date: '2026-11-01', city: 'Goa', type: 'other', preset: 'open-corporate', guestUploadLimit: 0 } })).json
+    const album = (await call(`/v1/events/${ev.id}/albums`, { token, body: { name: 'A' } })).json
+    const up = (await call(`/v1/events/${ev.id}/uploads`, { token, body: { albumId: album.id, files: [{ filename: 'x.jpg', size: 10, external: true }] } })).json
+    const done = (await call(`/v1/events/${ev.id}/uploads/${up.uploadId}/complete`, { token, body: { files: [{ photoId: up.files[0].photoId }] } })).json.items[0]
+    expectProblem(await call(`/v1/photos/${done.id}/enhance`, { token, body: { preset: 'warm', saveAs: 'new' } }), 503, 'feature_unavailable')
+    expect((await call('/v1/studio/usage', { token })).json.walletCredits).toBe(500)
+  })
+
+  it.skipIf(!FEATURES.aiEnhance)('enhances a photo for 8 credits and the queue marks it ready', async () => {
     const token = await newStudio()
     await call('/v1/studio/coupons', { token, body: { code: 'WELCOME500' } })
     const ev = (await call('/v1/events', { token, body: { name: 'Enhance', date: '2026-11-01', city: 'Goa', type: 'other', preset: 'open-corporate', guestUploadLimit: 0 } })).json

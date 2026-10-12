@@ -1,11 +1,11 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, sql, type SQL } from 'drizzle-orm'
-import { ENHANCE_COST, hash, tone } from '@frameline/shared'
+import { ENHANCE_COST, FEATURES, hash, tone } from '@frameline/shared'
 import { getDb, schema, type DB } from '../db/client'
 import { albumOut, downloadEventOut, zipOut } from '../db/mappers'
 import { toMinor } from '../lib/money'
 import { debitWallet } from '../services/billing'
-import { BadRequest, Conflict, NotFound, ValidationFailed } from '../lib/errors'
+import { BadRequest, Conflict, NotFound, ServiceUnavailable, ValidationFailed } from '../lib/errors'
 import { newId, nowIso } from '../lib/ids'
 import { studioPhotoOut, studioPhotosOut } from '../lib/media-sign'
 import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, problems, security } from '../lib/openapi'
@@ -414,8 +414,10 @@ photoRoutes.openapi(createRoute({
     body: body(z.object({ preset: z.string().max(40).optional(), prompt: z.string().max(500).optional(), saveAs: z.enum(['new', 'replace']) })
       .refine((b) => b.preset || b.prompt, { message: 'Pick a preset or describe the edit', path: ['preset'] })),
   },
-  responses: { 200: json(Photo), ...problems(401, 402, 403, 404, 422) },
+  responses: { 200: json(Photo), ...problems(401, 402, 403, 404, 422, 503) },
 }), async (c) => {
+  // The processor has no enhance step yet: refuse before touching the wallet (FEATURES.aiEnhance).
+  if (!FEATURES.aiEnhance) throw new ServiceUnavailable('AI enhance is not available yet.', 'feature_unavailable')
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
   const id = c.req.valid('param').id

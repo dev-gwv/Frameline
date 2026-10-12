@@ -4,7 +4,7 @@ import {
   ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Eye, FolderInput, ImageIcon, Info, MoreHorizontal, Pause, Play,
   Plus, RotateCw, Share2, Trash2, Wand2, X, ZoomIn, ZoomOut,
 } from 'lucide-react'
-import { ENHANCE_COST, fmt, type Album, type Photo } from '@frameline/shared'
+import { ENHANCE_COST, FEATURES, fmt, type Album, type Photo } from '@frameline/shared'
 import { Button, EmptyState, Menu, Modal, PhotoTile, Skeleton, useToast } from '@frameline/ui'
 import { errorMessage, useApi } from '../../lib/api'
 import { useAlbums, useEvent, usePeople, usePhoto, usePhotos, useStudio, useWatermark } from '../../lib/queries'
@@ -230,7 +230,7 @@ export default function PhotoViewer() {
             { label: 'Move to album…', icon: <FolderInput size={15} />, onSelect: () => setMoveOpen(true) },
             { label: 'Rotate', icon: <RotateCw size={15} />, onSelect: rotate },
             { label: photo?.hidden ? 'Show to guests' : 'Hide from guests', icon: photo?.hidden ? <Eye size={15} /> : <EyeOff size={15} />, onSelect: () => void hide() },
-            { label: 'Improve with AI', description: `Uses your wallet: ${fmt.rupees(ENHANCE_COST)} a photo`, icon: <Wand2 size={15} />, onSelect: () => navigate(`/enhance/${photoId}`) },
+            ...(FEATURES.aiEnhance ? [{ label: 'Improve with AI', description: `Uses your wallet: ${fmt.rupees(ENHANCE_COST)} a photo`, icon: <Wand2 size={15} />, onSelect: () => navigate(`/enhance/${photoId}`) }] : []),
             'separator',
             { label: 'Move to trash', description: isEventCover ? 'Pick a new cover first' : 'You can undo', icon: <Trash2 size={15} />, danger: true, onSelect: trash },
           ]} />

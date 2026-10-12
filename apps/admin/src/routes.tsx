@@ -65,11 +65,14 @@ export const router = createBrowserRouter([
         { path: '/support', element: page(() => import('./pages/support/Support')) },
         // ── Tools in More (E) ──
         { path: '/watermark', element: page(() => import('./pages/watermarks/Watermarks')) },
-        { path: '/camera-sync', element: page(() => import('./pages/camera-sync/CameraSync')) },
+        // Camera sync, messages and AI enhance are parked behind FEATURES until they're real (see features.ts).
+        ...(FEATURES.cameraSync ? [{ path: '/camera-sync', element: page(() => import('./pages/camera-sync/CameraSync')) }] : []),
         { path: '/qr', element: page(() => import('./pages/qr/SmartQR')) },
-        { path: '/messages', element: page(() => import('./pages/broadcasts/Broadcasts')) },
-        { path: '/enhance', element: page(() => import('./pages/enhance/Enhance')) },
-        { path: '/enhance/:photoId', element: page(() => import('./pages/enhance/Enhance')) },
+        ...(FEATURES.broadcasts ? [{ path: '/messages', element: page(() => import('./pages/broadcasts/Broadcasts')) }] : []),
+        ...(FEATURES.aiEnhance ? [
+          { path: '/enhance', element: page(() => import('./pages/enhance/Enhance')) },
+          { path: '/enhance/:photoId', element: page(() => import('./pages/enhance/Enhance')) },
+        ] : []),
         { path: '/studio-app', element: page(() => import('./pages/studio-app/StudioApp')) },
         { path: '/reports', element: page(() => import('./pages/reports/Reports')) },
         // Parked behind FEATURES.website; with it off (default), /website falls through to NotFound.

@@ -67,8 +67,8 @@
 
   // Workers Rate Limiting API. Periods can only be 10 or 60 seconds; longer windows use the RateLimiter DO.
   "ratelimits": [
-    { "name": "RL_GLOBAL", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } },
-    { "name": "RL_PUBLIC", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
+    { "name": "RL_GLOBAL", "namespace_id": "1001", "simple": { "limit": 1200, "period": 60 } },
+    { "name": "RL_PUBLIC", "namespace_id": "1002", "simple": { "limit": 300, "period": 60 } },
     { "name": "RL_WRITE", "namespace_id": "1003", "simple": { "limit": 120, "period": 60 } }
   ],
 
@@ -85,6 +85,8 @@
         "CORS_ORIGINS": "https://frameline-admin.pages.dev,https://frameline-gallery.pages.dev",
         "APP_URL": "https://frameline-admin.pages.dev",
         "GALLERY_URL": "https://frameline-gallery.pages.dev",
+        // Absolute links in emails (ZIP downloads) and the OpenAPI server; the Worker's own address until a domain.
+        "API_PUBLIC_URL": "https://frameline-api.dev-d9b.workers.dev",
         "MAIL_FROM": "Frameline <login@frameline.in>",
         "R2_BUCKET_NAME": "frameline-media",
         // Not secret (it's just the account id, already public in our own docs) — enables direct-to-R2
@@ -109,8 +111,8 @@
       },
       "vectorize": [{ "binding": "FACES", "index_name": "frameline-faces" }],
       "ratelimits": [
-        { "name": "RL_GLOBAL", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } },
-        { "name": "RL_PUBLIC", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
+        { "name": "RL_GLOBAL", "namespace_id": "1001", "simple": { "limit": 1200, "period": 60 } },
+        { "name": "RL_PUBLIC", "namespace_id": "1002", "simple": { "limit": 300, "period": 60 } },
         { "name": "RL_WRITE", "namespace_id": "1003", "simple": { "limit": 120, "period": 60 } }
       ]
     }

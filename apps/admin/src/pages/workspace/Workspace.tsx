@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowUpDown, Check, HardDriveDownload, Images, Upload, Camera, X } from 'lucide-react'
-import { fmt, type ID, type Photo } from '@frameline/shared'
+import { FEATURES, fmt, type ID, type Photo } from '@frameline/shared'
 import { Button, EmptyState, Menu, Skeleton, useToast } from '@frameline/ui'
 import { errorMessage } from '../../lib/api'
 import { useAlbums, usePeople } from '../../lib/queries'
@@ -230,12 +230,14 @@ function EmptyEvent({ onChoose, onImport }: { onChoose: () => void; onImport: ()
         <h2 className="text-[22px] font-extrabold leading-tight">Add your first photos</h2>
         <p className="text-[14px] text-ink-2"><span className="hidden sm:inline">Drag a folder here, or choose photos. </span>You can leave this page while they upload.</p>
         <Button variant="primary" size="lg" icon={<Upload size={16} />} onClick={onChoose} className="mt-1 max-sm:w-full">Choose photos</Button>
-        <p className="mt-1 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-[13px] text-ink-3">
-          or
-          <button type="button" onClick={onImport} className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><HardDriveDownload size={14} />Import from Google Drive</button>
-          ·
-          <Link to="/camera-sync" className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><Camera size={14} />Connect your camera</Link>
-        </p>
+        {(FEATURES.driveImport || FEATURES.cameraSync) && (
+          <p className="mt-1 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-[13px] text-ink-3">
+            or
+            {FEATURES.driveImport && <button type="button" onClick={onImport} className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><HardDriveDownload size={14} />Import from Google Drive</button>}
+            {FEATURES.driveImport && FEATURES.cameraSync && '·'}
+            {FEATURES.cameraSync && <Link to="/camera-sync" className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><Camera size={14} />Connect your camera</Link>}
+          </p>
+        )}
       </div>
     </div>
   )

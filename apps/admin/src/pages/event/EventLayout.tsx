@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { NavLink, Outlet, useMatch, useNavigate, useOutletContext, useParams } from 'react-router-dom'
 import { Archive, Eye, Film, HardDriveDownload, MoreHorizontal, ScanFace, Share2, Upload } from 'lucide-react'
-import { fmt, type EventStats, type PhotoEvent } from '@frameline/shared'
+import { FEATURES, fmt, type EventStats, type PhotoEvent } from '@frameline/shared'
 import { Button, CountBadge, EventStatusChip, Menu, Skeleton, cn, useToast } from '@frameline/ui'
 import { errorMessage, useApi } from '../../lib/api'
 import { useEvent, useEventStats, useGuestsAttention } from '../../lib/queries'
@@ -96,7 +96,7 @@ function EventHeader({ event }: { event: PhotoEvent }) {
               width={300}
               items={[
                 { label: 'Preview as a guest', description: 'Opens the gallery in a new tab', icon: <Eye size={16} />, onSelect: () => window.open(galleryUrl(event.shortId), '_blank', 'noopener') },
-                { label: 'Import from Google Drive', description: 'Bring in a finished shoot', icon: <HardDriveDownload size={16} />, onSelect: () => m.open('import') },
+                ...(FEATURES.driveImport ? [{ label: 'Import from Google Drive', description: 'Bring in a finished shoot', icon: <HardDriveDownload size={16} />, onSelect: () => m.open('import') }] : []),
                 { label: 'Films', description: 'Add YouTube videos to the gallery', icon: <Film size={16} />, onSelect: () => m.open('films') },
                 { label: 'Face finding', description: !event.settings.faceSearch ? 'Off for this event' : finding ? finding[0].toUpperCase() + finding.slice(1) : `${fmt.count(stats?.faces.total ?? event.photoCount)} photos done`, icon: <ScanFace size={16} />, onSelect: () => m.open('faces') },
                 'separator',

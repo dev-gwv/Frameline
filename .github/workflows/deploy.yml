@@ -77,6 +77,8 @@ jobs:
         run: pnpm build
         env:
           VITE_API_URL: ${{ vars.API_URL || 'https://frameline-api.dev-d9b.workers.dev' }}
+          # Share links, QR codes and messages point here; without it they pointed at http://localhost:5174.
+          VITE_GALLERY_URL: ${{ vars.GALLERY_URL || 'https://frameline-gallery.pages.dev' }}
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
