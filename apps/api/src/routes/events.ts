@@ -11,10 +11,11 @@ import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
 import { membershipOf, requireStudio } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
 import {
-  AccessRequest, EventPatch, EventSettingsPatch, EventStats, EventStatus, FaceSearchInput, FaceSearchResult, Film, Guest, GuestLinkPayload, NewEventInput, Person, PhotoEvent, Purchase,
+  AccessRequest, EventPatch, PendingPayment, EventSettingsPatch, EventStats, EventStatus, FaceSearchInput, FaceSearchResult, Film, Guest, GuestLinkPayload, NewEventInput, Person, PhotoEvent, Purchase,
 } from '../schemas/domain'
 import { getMailer } from '../services/mailer'
-import { debitWallet, recordPurchase } from '../services/billing'
+import { debitWallet } from '../services/billing'
+import { grantStudioPurchase, openStudioPayment, paymentMode } from '../services/payments'
 import { matchFaces } from '../services/faces'
 import { purchaseOut } from '../db/mappers'
 import { sql } from 'drizzle-orm'
@@ -436,20 +437,26 @@ eventRoutes.openapi(createRoute({
 // ── Renewals & personal links ──────────────────────────────────────────────
 eventRoutes.openapi(createRoute({
   method: 'post', path: '/events/{id}/renew', tags: ['Events'], summary: 'Renew an event for another year — owner', security,
-  description: `Base price ₹${BASE_RENEWAL}. Paying from the wallet (\`payWith: credits\`) costs half. Card capture is simulated until Razorpay keys are configured.`,
+  description: `Base price ₹${BASE_RENEWAL}. Paying from the wallet (\`payWith: credits\`) costs half. \`card\` with Razorpay keys answers 202 with a pending \`payment\`; the event is renewed only when POST /v1/studio/payments/:id/confirm (or the webhook) proves it. Without keys: 503 \`payments_not_configured\` in production, simulated in development/test.`,
   middleware: [requireStudio('owner', 'renew events'), idempotent] as const,
   request: { params: IdParam, headers: IdempotencyHeader, body: body(z.object({ payWith: z.enum(['credits', 'card']) })) },
-  responses: { 200: json(z.object({ event: PhotoEvent, charged: z.number(), payWith: z.enum(['credits', 'card']) })), ...problems(401, 402, 403, 404, 422) },
+  responses: {
+    200: json(z.object({ event: PhotoEvent, charged: z.number(), payWith: z.enum(['credits', 'card']) })),
+    202: json(z.object({ payment: PendingPayment }), 'Pay to finish'),
+    ...problems(401, 402, 403, 404, 422, 503),
+  },
 }), async (c) => {
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
   const ev = await eventForMember(db, m, c.req.valid('param').id)
   const { payWith } = c.req.valid('json')
   const charged = payWith === 'credits' ? BASE_RENEWAL * (1 - RENEWAL_CREDIT_DISCOUNT) : BASE_RENEWAL
+  const renewal = { kind: 'renewal' as const, eventId: ev.id, eventName: ev.name, chargedPaise: toMinor(charged) }
+  if (payWith === 'card' && paymentMode(c.env) === 'razorpay') {
+    return c.json({ payment: await openStudioPayment(c.env, db, m.studioId, c.get('user')?.id, renewal, 'card') }, 202)
+  }
   if (payWith === 'credits') await debitWallet(db, m.studioId, toMinor(charged), `Renewal · ${ev.name} (+1 year)`)
-  await recordPurchase(db, m.studioId, { description: `Event renewal · ${ev.name}`, kind: 'renewal', amountPaise: toMinor(charged), method: payWith === 'credits' ? 'credits' : 'card' })
-  const expiresAt = new Date(Math.max(Date.now(), Date.parse(ev.expiresAt)) + 365 * 86_400_000).toISOString()
-  await db.update(schema.events).set({ expiresAt, ...(ev.status === 'expiring' || ev.status === 'archived' ? { status: 'live' as const } : {}) }).where(eq(schema.events.id, ev.id)).run()
+  await grantStudioPurchase(db, m.studioId, renewal, payWith)
   audit(c, 'event.renewed', { type: 'event', id: ev.id }, { payWith, charged })
   emit(c, m.studioId, 'events', 'usage', 'misc')
   return c.json({ event: eventOut(await eventForMember(db, m, ev.id)), charged, payWith }, 200)
@@ -545,7 +552,11 @@ eventRoutes.openapi(createRoute({
     params: IdParam, headers: IdempotencyHeader,
     body: body(z.object({ photos: z.number().int().refine((n) => PACKS.some((p) => p.photos === n), `Packs come in ${PACKS.map((p) => p.photos).join(', ')} photos`), payWith: z.enum(['credits', 'card']) })),
   },
-  responses: { 200: json(z.object({ event: PhotoEvent, charged: z.number(), purchase: Purchase })), ...problems(401, 402, 403, 404, 422) },
+  responses: {
+    200: json(z.object({ event: PhotoEvent, charged: z.number(), purchase: Purchase })),
+    202: json(z.object({ payment: PendingPayment }), 'Pay to finish'),
+    ...problems(401, 402, 403, 404, 422, 503),
+  },
 }), async (c) => {
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
@@ -553,9 +564,12 @@ eventRoutes.openapi(createRoute({
   const { photos, payWith } = c.req.valid('json')
   const pack = PACKS.find((p) => p.photos === photos)!
   const label = `${pack.photos.toLocaleString('en-IN')}-photo pack · ${ev.name}`
+  const purchased = { kind: 'pack' as const, eventId: ev.id, eventName: ev.name, photos, pricePaise: toMinor(pack.price) }
+  if (payWith === 'card' && paymentMode(c.env) === 'razorpay') {
+    return c.json({ payment: await openStudioPayment(c.env, db, m.studioId, c.get('user')?.id, purchased, 'card') }, 202)
+  }
   if (payWith === 'credits') await debitWallet(db, m.studioId, toMinor(pack.price), label)
-  const purchase = await recordPurchase(db, m.studioId, { description: label, kind: 'pack', amountPaise: toMinor(pack.price), method: payWith === 'credits' ? 'credits' : 'card' })
-  await db.update(schema.events).set({ photoLimit: sql`${schema.events.photoLimit} + ${pack.photos}` }).where(eq(schema.events.id, ev.id)).run()
+  const purchase = (await grantStudioPurchase(db, m.studioId, purchased, payWith))!
   audit(c, 'billing.pack', { type: 'event', id: ev.id }, { photos, payWith })
   emit(c, m.studioId, 'events', 'usage', 'misc')
   return c.json({ event: eventOut(await eventForMember(db, m, ev.id)), charged: pack.price, purchase: purchaseOut(purchase) }, 200)

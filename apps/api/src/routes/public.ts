@@ -6,7 +6,7 @@ import type { AppEnv, GuestClaims } from '../env'
 import { getDb, schema } from '../db/client'
 import { albumOut, enquiryOut, filmOut, hostOut, orderOut, photoOut, priceOut, publicStudioOut, storeSettingsOut, studioOut, watermarkOut, zipOut } from '../db/mappers'
 import { sha256Hex, timingSafeEqual } from '../lib/crypto'
-import { AppError, Forbidden, NotConfigured, NotFound, RateLimited, ServiceUnavailable, Unauthorized, ValidationFailed } from '../lib/errors'
+import { AppError, Forbidden, NotConfigured, NotFound, RateLimited, Unauthorized, ValidationFailed } from '../lib/errors'
 import { background, clientIp } from '../lib/http'
 import { newId, nowIso } from '../lib/ids'
 import { signJwt } from '../lib/jwt'
@@ -27,6 +27,7 @@ import { addLedger } from '../services/billing'
 import { matchFaces, visiblePhotos as visible } from '../services/faces'
 import { resolveLink } from '../services/guest-links'
 import { markOrderPaid, verifyCheckoutSignature } from '../services/orders'
+import { createProviderOrder, paymentMode } from '../services/payments'
 import { emit } from '../services/realtime'
 import { chunk } from './photos'
 import { UploadFileInput, completeUploadSession, createUploadSession } from './uploads'
@@ -664,7 +665,7 @@ publicRoutes.openapi(createRoute({
 
 publicRoutes.openapi(createRoute({
   method: 'post', path: '/events/{shortId}/orders', tags: ['Public gallery'], summary: 'Buy photos or prints',
-  description: 'Prices come from the studio’s price list; print items need `shipping`. With Razorpay keys the order is `pending` and includes `checkout` for Razorpay Checkout — then call POST /v1/public/orders/:id/confirm (or let the webhook confirm it). Without keys payment is simulated and the order is `paid`. Supports `Idempotency-Key`.',
+  description: 'Prices come from the studio’s price list; print items need `shipping`. With Razorpay keys the order is `pending` and includes `checkout` for Razorpay Checkout — then call POST /v1/public/orders/:id/confirm (or let the webhook confirm it). Without keys: 503 `payments_not_configured` in production; simulated as `paid` in development/test. `international` (paid to the studio directly) needs the studio to sell abroad (409 `international_disabled`) and stays `pending` until the studio marks it received. Supports `Idempotency-Key`.',
   middleware: [idempotent] as const,
   request: {
     params: ShortIdParam, headers: IdempotencyHeader,
@@ -708,18 +709,19 @@ publicRoutes.openapi(createRoute({
   const number = Number(top) + 1
   const sharePaise = Math.round(paidPaise * (1 - STORE_COMMISSION))
   const id = newId('ord')
-  let status: 'paid' | 'pending' | 'paid-direct' = input.method === 'international' ? 'paid-direct' : 'paid'
+  let status: 'paid' | 'pending' = 'paid'
   let checkout: z.infer<typeof Order>['checkout']
-  if (c.env.RAZORPAY_KEY_ID && c.env.RAZORPAY_KEY_SECRET && input.method !== 'international') {
-    const res = await fetch('https://api.razorpay.com/v1/orders', {
-      method: 'POST',
-      headers: { Authorization: `Basic ${btoa(`${c.env.RAZORPAY_KEY_ID}:${c.env.RAZORPAY_KEY_SECRET}`)}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: paidPaise, currency: 'INR', receipt: id, notes: { eventId: e.id, studioId: e.studioId } }),
-    })
-    if (!res.ok) throw new ServiceUnavailable('Payments are unavailable right now. Try again in a minute.', 'payment_provider_error')
-    const rz = (await res.json()) as { id: string }
+  if (input.method === 'international') {
+    // Paid to the studio directly (its PayPal/Stripe link or UPI QR), outside Frameline. Only when the studio
+    // sells abroad, and never as paid here: the order waits until the studio says the money arrived
+    // (POST /v1/orders/:id/received), and even then it never enters the payout balance -- the money
+    // never passed through Frameline.
+    const [st] = await db.select({ store: schema.studios.storeSettings }).from(schema.studios).where(eq(schema.studios.id, e.studioId)).limit(1)
+    if (!st?.store?.international?.enabled) throw new AppError(409, 'international_disabled', 'Not available', 'This studio doesn’t sell abroad. Pay by UPI or card.')
     status = 'pending'
-    checkout = { provider: 'razorpay', orderId: rz.id, keyId: c.env.RAZORPAY_KEY_ID, amount: toMajor(paidPaise), currency: 'INR' }
+  } else if (paymentMode(c.env) === 'razorpay') {
+    checkout = await createProviderOrder(c.env, paidPaise, id, { eventId: e.id, studioId: e.studioId })
+    status = 'pending'
   }
   const row = {
     id, studioId: e.studioId, number, buyer: input.buyer.name, eventId: e.id, eventName: e.name, items: labels.join(', '), paidPaise, currency: 'INR' as const,
@@ -727,7 +729,7 @@ publicRoutes.openapi(createRoute({
     guestId: g?.guestId ?? null, shipping: input.shipping ?? null, remindedAt: null, reminderCount: 0, refundedAt: null, refundReason: null, trackingNumber: null, linkSentAt: null,
   }
   await db.insert(schema.orders).values(row).run()
-  if (status !== 'pending') {
+  if (status === 'paid') {
     await addLedger(db, e.studioId, 'sale', `Order #${number} · ${e.name}`, sharePaise, true)
     await db.insert(schema.activity).values({ id: newId('act'), studioId: e.studioId, kind: 'order', title: `Order #${number} · ₹${toMajor(paidPaise).toLocaleString('en-IN')}`, detail: e.name, at: row.at }).run()
   }

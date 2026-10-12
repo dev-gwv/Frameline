@@ -24,6 +24,10 @@ export function OrderModal({ order, onClose }: { order: Order | null; onClose: (
   const saveTracking = useAction((v: { id: string; trackingNumber: string }) => api.updateOrder(v.id, { trackingNumber: v.trackingNumber }), {
     success: (o) => (o.trackingNumber ? 'Tracking saved' : 'Tracking number removed'),
   })
+  const received = useAction((id: string) => api.markOrderReceived(id), {
+    success: (o) => `Order #${o.number} marked paid`,
+    error: 'Couldn’t mark it paid',
+  })
   const resend = useAction((id: string) => api.resendDownloadLink(id), {
     onSuccess: (r) => { setResent(true); toast.success('Download link sent', `${first(r.order.buyer)} gets a fresh link at ${r.sentTo}.`) },
     error: 'Couldn’t send the link',
@@ -53,6 +57,11 @@ export function OrderModal({ order, onClose }: { order: Order | null; onClose: (
         description={`${st.label} · ${fmt.dateTime(o.at)} · ${o.eventName}`}
         footer={<>
           {refundable(o) && <Button variant="ghost" className="mr-auto text-bad hover:bg-bad-soft hover:text-bad" onClick={() => setAsking(true)}>Refund</Button>}
+          {o.method === 'international' && o.status === 'pending' && (
+            <Button variant="primary" loading={received.isPending} title="The buyer paid you directly: unlock their photos" onClick={() => received.mutate(o.id)}>
+              Payment received
+            </Button>
+          )}
           {canResend && (
             <Button icon={<Send size={14} />} disabled={resent || !email} loading={resend.isPending} title={email ? undefined : 'No email on this order'} onClick={() => resend.mutate(o.id)}>
               {resent ? 'Link sent' : 'Resend download link'}

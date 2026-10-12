@@ -50,6 +50,13 @@
       "when": 1791805564891,
       "tag": "0006_partner_links",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791810983917,
+      "tag": "0007_studio_payments",
+      "breakpoints": true
     }
   ]
 }

@@ -2,17 +2,19 @@ import { createRoute, z } from '@hono/zod-openapi'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { COUPONS, GST_RATE, PERIOD_DAYS, PLANS, planPrice } from '@frameline/shared'
 import { getDb, schema } from '../db/client'
-import { defaultNotificationPrefs, purchaseOut, usageOut } from '../db/mappers'
-import { AppError, Conflict, NotFound } from '../lib/errors'
+import { defaultNotificationPrefs, eventOut, purchaseOut, usageOut } from '../db/mappers'
+import { AppError, Conflict, NotConfigured, NotFound, Unauthorized } from '../lib/errors'
 import { newId, nowIso } from '../lib/ids'
 import { toMajor, toMinor } from '../lib/money'
 import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, problems, security } from '../lib/openapi'
 import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
 import { membershipOf, requireStudio, userOf } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
-import { LedgerEntry, NotificationPrefs, Purchase, Role, TeamMember, Usage, UsageBreakdown, UsageReport } from '../schemas/domain'
+import { LedgerEntry, NotificationPrefs, PendingPayment, Purchase, Role, TeamMember, Usage, UsageBreakdown, UsageReport } from '../schemas/domain'
 import { audit } from '../services/audit'
 import { creditWallet, debitWallet, recordPurchase } from '../services/billing'
+import { verifyCheckoutSignature } from '../services/orders'
+import { grantStudioPurchase, openStudioPayment, paymentMode, settleStudioPayment } from '../services/payments'
 import { emit } from '../services/realtime'
 import { accessLabel } from './studio'
 
@@ -91,7 +93,7 @@ const PayWith = z.enum(['wallet', 'card', 'upi'])
 
 accountRoutes.openapi(createRoute({
   method: 'post', path: '/studio/plan', tags: ['Billing'], summary: 'Change plan (prorated, with GST) — owner', security,
-  description: `Unused time on the current plan is taken off the new plan’s price (\`credit\`); GST ${GST_RATE * 100}% is added on top (\`gst\`, \`total\`). \`payWith: wallet\` takes \`total\` from the wallet in the same call (added money first, then sales; 402 \`insufficient_credits\` when short, and the plan doesn’t change). \`card\` / \`upi\` capture is simulated until Razorpay keys are configured. \`billing\` is the period (\`period\` is accepted as an older name).`,
+  description: `Unused time on the current plan is taken off the new plan’s price (\`credit\`); GST ${GST_RATE * 100}% is added on top (\`gst\`, \`total\`). \`payWith: wallet\` takes \`total\` from the wallet in the same call (added money first, then sales; 402 \`insufficient_credits\` when short, and the plan doesn’t change). \`card\` / \`upi\` with Razorpay keys answers 202 with a pending \`payment\`: the plan changes only when POST /v1/studio/payments/:id/confirm (or the webhook) proves it. Without keys: 503 \`payments_not_configured\` in production, simulated in development/test. \`billing\` is the period (\`period\` is accepted as an older name).`,
   middleware: [requireStudio('owner', 'change the plan'), idempotent] as const,
   request: {
     headers: IdempotencyHeader,
@@ -100,7 +102,8 @@ accountRoutes.openapi(createRoute({
   },
   responses: {
     200: json(z.object({ usage: Usage, charged: z.number(), credit: z.number(), gst: z.number(), total: z.number(), payWith: PayWith, purchase: Purchase.nullable() })),
-    ...problems(401, 402, 403, 409, 422),
+    202: json(z.object({ payment: PendingPayment }), 'Pay to finish'),
+    ...problems(401, 402, 403, 409, 422, 503),
   },
 }), async (c) => {
   const m = membershipOf(c)
@@ -119,20 +122,72 @@ accountRoutes.openapi(createRoute({
   const gstPaise = Math.round(toMinor(charged) * GST_RATE)
   const totalPaise = toMinor(charged) + gstPaise
   const label = `${next.name} plan · ${period}`
+  const plan = {
+    kind: 'plan' as const, planId, period, totalPaise, charged, credit, gstPaise,
+    label: `${label}${credit ? ` (₹${credit} off for unused time)` : ''}`,
+  }
+  // Card/UPI with something to pay: nothing changes until the payment is proven (confirm or webhook).
+  if (payWith !== 'wallet' && totalPaise > 0 && paymentMode(c.env) === 'razorpay') {
+    return c.json({ payment: await openStudioPayment(c.env, db, m.studioId, c.get('user')?.id, plan, payWith) }, 202)
+  }
   // Take the money first: a short wallet (402) leaves the plan as it was.
   if (payWith === 'wallet' && totalPaise > 0) await debitWallet(db, m.studioId, totalPaise, label)
-  await db.update(schema.studios).set({ planId, planPeriod: period, photosLimit: next.photos, validTill: new Date(Date.now() + PERIOD_DAYS[period] * DAY).toISOString() }).where(eq(schema.studios.id, m.studioId)).run()
-  // Nothing to pay (unused time covered it): no purchase and no invoice.
-  const purchase = totalPaise > 0 ? await recordPurchase(db, m.studioId, {
-    description: `${label}${credit ? ` (₹${credit} off for unused time)` : ''}`, kind: 'plan', amountPaise: totalPaise,
-    method: payWith === 'wallet' ? 'credits' : payWith,
-  }) : null
+  // Nothing to pay (unused time covered it) records no purchase and no invoice.
+  const purchase = await grantStudioPurchase(db, m.studioId, plan, payWith === 'wallet' ? 'credits' : payWith)
   audit(c, 'billing.plan_changed', { type: 'studio', id: m.studioId }, { from: st.planId, to: planId, period, charged, payWith })
   emit(c, m.studioId, 'usage', 'misc')
   return c.json({
     usage: usageOut(await studioRow(db, m.studioId)), charged, credit, gst: toMajor(gstPaise), total: toMajor(totalPaise), payWith, purchase: purchase ? purchaseOut(purchase) : null,
   }, 200)
 })
+
+accountRoutes.openapi(createRoute({
+  method: 'post', path: '/studio/payments/{id}/confirm', tags: ['Billing'], summary: 'Finish a card/UPI purchase after Razorpay Checkout — owner', security,
+  description: 'Verifies Checkout’s signature (HMAC-SHA256 of `order_id|payment_id` with RAZORPAY_KEY_SECRET), then applies the purchase exactly once and answers with what the original call would have (`result`). Idempotent; the webhook does the same server to server.',
+  middleware: [requireStudio('owner', 'pay')] as const,
+  request: { params: IdParam, body: body(z.object({ providerOrderId: z.string().max(128), paymentId: z.string().max(128), signature: z.string().max(256) })) },
+  responses: { 200: json(z.object({ id: z.string(), kind: z.enum(['credits', 'plan', 'renewal', 'pack']), status: z.literal('paid'), result: z.unknown() })), ...problems(401, 403, 404, 409, 501) },
+}), async (c) => {
+  if (!c.env.RAZORPAY_KEY_SECRET) throw new NotConfigured('Payments', 'Online payments are not configured (RAZORPAY_KEY_SECRET).')
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const sp = schema.studioPayments
+  const [row] = await db.select().from(sp).where(and(eq(sp.id, c.req.valid('param').id), eq(sp.studioId, m.studioId))).limit(1)
+  if (!row) throw new NotFound('Payment', c.req.valid('param').id)
+  const input = c.req.valid('json')
+  if (row.providerOrderId !== input.providerOrderId) throw new AppError(409, 'payment_mismatch', 'Conflict', 'This payment belongs to a different purchase.')
+  if (!(await verifyCheckoutSignature(c.env.RAZORPAY_KEY_SECRET, input.providerOrderId, input.paymentId, input.signature))) {
+    throw new Unauthorized('The payment signature is invalid.', 'invalid_signature')
+  }
+  const { changed } = await settleStudioPayment(db, row, input.paymentId)
+  if (changed) {
+    audit(c, 'billing.payment_settled', { type: 'studio', id: m.studioId }, { paymentId: row.id, kind: row.kind, amountPaise: row.amountPaise })
+    emit(c, m.studioId, 'usage', 'misc', 'events')
+  }
+  return c.json({ id: row.id, kind: row.kind, status: 'paid' as const, result: await purchaseResult(db, m.studioId, row) }, 200)
+})
+
+/** What the original purchase call answers once it is paid, so the client's promise resolves with the same shape. */
+async function purchaseResult(db: ReturnType<typeof getDb>, studioId: string, paid: typeof schema.studioPayments.$inferSelect) {
+  // Re-read: settling writes which purchase it made into the payload.
+  const [row] = await db.select().from(schema.studioPayments).where(eq(schema.studioPayments.id, paid.id)).limit(1)
+  const p = row.payload as Record<string, unknown>
+  const [purchase] = typeof p.purchaseId === 'string'
+    ? await db.select().from(schema.purchases).where(and(eq(schema.purchases.id, p.purchaseId), eq(schema.purchases.studioId, studioId))).limit(1)
+    : []
+  if (row.kind === 'credits') return { walletCredits: toMajor((await studioRow(db, studioId)).walletPaise) }
+  if (row.kind === 'plan') {
+    return {
+      usage: usageOut(await studioRow(db, studioId)), charged: p.charged, credit: p.credit, gst: toMajor(Number(p.gstPaise)),
+      total: toMajor(row.amountPaise), payWith: row.method, purchase: purchase ? purchaseOut(purchase) : null,
+    }
+  }
+  const [ev] = await db.select().from(schema.events).where(and(eq(schema.events.id, String(p.eventId)), eq(schema.events.studioId, studioId))).limit(1)
+  const event = ev ? eventOut(ev) : null
+  return row.kind === 'renewal'
+    ? { event, charged: toMajor(row.amountPaise), payWith: 'card' }
+    : { event, charged: toMajor(row.amountPaise), purchase: purchase ? purchaseOut(purchase) : null }
+}
 
 accountRoutes.openapi(createRoute({
   method: 'put', path: '/studio/renewal-multiplier', tags: ['Billing'], summary: 'Set the client renewal price multiplier — owner', security,

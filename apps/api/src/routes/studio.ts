@@ -3,7 +3,8 @@ import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm'
 import { handleProblem } from '@frameline/shared'
 import { getDb, schema } from '../db/client'
 import { appConfig, studioOut, usageOut, watermarkOut, websiteOut } from '../db/mappers'
-import { creditWallet, recordPurchase } from '../services/billing'
+import { grantStudioPurchase, openStudioPayment, paymentMode } from '../services/payments'
+import { PendingPayment } from '../schemas/domain'
 import { Conflict, NotFound } from '../lib/errors'
 import { newId, nowIso } from '../lib/ids'
 import { toMinor, toMajor } from '../lib/money'
@@ -121,16 +122,19 @@ studioRoutes.openapi(createRoute({
 
 studioRoutes.openapi(createRoute({
   method: 'post', path: '/studio/credits', tags: ['Billing'], summary: 'Add money to the wallet (owner)', security,
-  description: 'Records a top-up (in rupees) and returns the new wallet balance. Supports `Idempotency-Key`. In production this is called after a Razorpay payment is captured (see README).',
+  description: 'Pays by card or UPI. With Razorpay keys: 202 with a pending `payment` whose `checkout` opens Razorpay Checkout; the money is added only by POST /v1/studio/payments/:id/confirm (or the webhook). Without keys: 503 `payments_not_configured` in production, simulated in development/test. Supports `Idempotency-Key`.',
   middleware: [requireStudio('owner', 'manage billing'), idempotent] as const,
-  request: { headers: IdempotencyHeader, body: body(z.object({ amount: z.number().positive().max(1_000_000).multipleOf(0.01) })) },
-  responses: { 200: json(z.object({ walletCredits: z.number() })), ...problems(401, 403, 409, 422) },
+  request: { headers: IdempotencyHeader, body: body(z.object({ amount: z.number().positive().max(1_000_000).multipleOf(0.01), method: z.enum(['card', 'upi']).default('card') })) },
+  responses: { 200: json(z.object({ walletCredits: z.number() })), 202: json(z.object({ payment: PendingPayment }), 'Pay to finish'), ...problems(401, 403, 409, 422, 503) },
 }), async (c) => {
   const m = membershipOf(c)
-  const { amount } = c.req.valid('json')
+  const { amount, method } = c.req.valid('json')
   const db = getDb(c.env.DB)
-  await creditWallet(db, m.studioId, toMinor(amount), `Wallet top-up · ₹${amount}`)
-  await recordPurchase(db, m.studioId, { description: `Money added to wallet · ₹${amount}`, kind: 'credits', amountPaise: toMinor(amount), method: 'card' })
+  const purchase = { kind: 'credits' as const, amountPaise: toMinor(amount) }
+  if (paymentMode(c.env) === 'razorpay') {
+    return c.json({ payment: await openStudioPayment(c.env, db, m.studioId, c.get('user')?.id, purchase, method) }, 202)
+  }
+  await grantStudioPurchase(db, m.studioId, purchase, method)
   const row = await loadStudio(db, m.studioId)
   audit(c, 'billing.credits_added', { type: 'studio', id: m.studioId }, { amountPaise: toMinor(amount) })
   emit(c, m.studioId, 'usage', 'misc')

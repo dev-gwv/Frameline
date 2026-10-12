@@ -722,6 +722,29 @@ businessRoutes.openapi(createRoute({
   return c.json({ sentTo: o.buyerEmail, order: orderOut({ ...o, linkSentAt: at }) }, 200)
 })
 
+businessRoutes.openapi(createRoute({
+  method: 'post', path: '/orders/{id}/received', tags: ['Business'], summary: 'Mark an order paid to you directly as received (owner)', security,
+  description: 'For `international` orders the buyer pays the studio directly (its own link or UPI QR). Once the money is in, this marks the order `paid-direct` and unlocks the photos. It never enters the payout balance: the money never passed through Frameline. 409 `order_not_direct` for any other order.',
+  middleware: [requireStudio('owner', 'manage orders')] as const,
+  request: { params: IdParam },
+  responses: { 200: json(Order), ...problems(401, 403, 404, 409) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const o = await orderFor(db, m.studioId, c.req.valid('param').id)
+  if (o.method !== 'international' || o.status !== 'pending') {
+    throw new Conflict(`Order #${o.number} isn’t waiting for a direct payment.`, 'order_not_direct', { orderStatus: o.status })
+  }
+  const res = await db.update(schema.orders).set({ status: 'paid-direct' })
+    .where(and(eq(schema.orders.id, o.id), eq(schema.orders.status, 'pending'))).run()
+  if (res.meta.changes > 0) {
+    await db.insert(schema.activity).values({ id: newId('act'), studioId: m.studioId, kind: 'order', title: `Order #${o.number} · paid to you directly`, detail: o.eventName, at: nowIso() }).run()
+    audit(c, 'store.direct_received', { type: 'order', id: o.id })
+    emit(c, m.studioId, 'misc', 'activity')
+  }
+  return c.json(orderOut({ ...o, status: 'paid-direct' }), 200)
+})
+
 // ── Studio stats (Reports) ──────────────────────────────────────────────────
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
 const monthStart = (month: string, offset = 0) => { const [y, mo] = month.split('-').map(Number); return new Date(Date.UTC(y, mo - 1 + offset, 1)) }

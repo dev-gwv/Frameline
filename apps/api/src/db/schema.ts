@@ -136,6 +136,27 @@ export const partnerLinks = sqliteTable('partner_links', {
   createdAt: ts('created_at').notNull(),
 }, (t) => [primaryKey({ columns: [t.provider, t.kind, t.externalId] }), index('partner_links_local_idx').on(t.provider, t.kind, t.localId)])
 
+/**
+ * A studio's own purchase paid by card or UPI (wallet top-up, plan, renewal, photo pack), waiting for Razorpay.
+ * Nothing is granted when the row is made: the purchase is applied once, when the checkout signature or the
+ * webhook proves the payment (status pending → paid, compare-and-set). `payload` holds what was priced when the
+ * checkout was opened, so the price cannot change between paying and applying.
+ */
+export const studioPayments = sqliteTable('studio_payments', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull().references(() => studios.id, { onDelete: 'cascade' }),
+  kind: text('kind', { enum: ['credits', 'plan', 'renewal', 'pack'] }).notNull(),
+  method: text('method', { enum: ['card', 'upi'] }).notNull(),
+  amountPaise: integer('amount_paise').notNull(),
+  payload: json<Record<string, unknown>>('payload').notNull(),
+  status: text('status', { enum: ['pending', 'paid'] }).notNull().default('pending'),
+  providerOrderId: text('provider_order_id').notNull(),
+  providerPaymentId: text('provider_payment_id'),
+  createdBy: text('created_by'),
+  createdAt: ts('created_at').notNull(),
+  paidAt: ts('paid_at'),
+}, (t) => [uniqueIndex('studio_payments_provider_uq').on(t.providerOrderId), index('studio_payments_studio_idx').on(t.studioId, t.createdAt)])
+
 // ── Events, albums, photos ──────────────────────────────────────────────────
 export const events = sqliteTable('events', {
   id: text('id').primaryKey(),

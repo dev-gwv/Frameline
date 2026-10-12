@@ -4,8 +4,15 @@ import { Field, Input, PhotoTile, Skeleton } from '@frameline/ui'
 import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { fmt, type Order, type OrderItemInput, type Photo, type PublicEvent, type PublicStudio, type ShippingAddress } from '@frameline/shared'
-import { payWithRazorpay, RAZORPAY_KEY } from '../lib/razorpay'
+import { payWithRazorpay } from '../lib/razorpay'
 import { isLiveApi, useApi } from '../lib/api'
+
+/**
+ * Real money goes through Razorpay whenever the gallery talks to the real API: the order carries its own
+ * checkout (with the public key), so no build-time key is needed. The card and UPI fields below are the
+ * offline demo's only -- the live site never asks a buyer for a card number itself.
+ */
+const REAL_CHECKOUT = isLiveApi
 import { usePrices } from '../lib/queries'
 import { guest, useGuest, type EventSession } from '../lib/guest'
 import { friendlyError } from '../lib/errors'
@@ -25,9 +32,9 @@ const isSlowUpi = (method: 'upi' | 'card', upi: string) => method === 'upi' && /
 /**
  * Buy: Choose (this photo / a print with quantity / all your photos) → Pay (name, email, address for prints,
  * UPI or card) → processing → Payment done, or Payment pending. A failed payment keeps the sheet open on Pay with
- * the reason and "Try again". Prices come from api.listPublicPrices; api.createOrder places the order. With
- * VITE_RAZORPAY_KEY set and an order that has `checkout`, Razorpay Checkout collects the payment and
- * api.confirmOrder completes it; otherwise the API's simulated payment is used.
+ * the reason and "Try again". Prices come from api.listPublicPrices; api.createOrder places the order. On the live
+ * API the order has `checkout` and Razorpay Checkout collects the payment, then api.confirmOrder completes it;
+ * the offline demo simulates it.
  */
 export function BuySheet({ open, onOpenChange, photos, mode, event, studio, session, allMine, onDownload }: {
   open: boolean; onOpenChange: (v: boolean) => void; photos: Photo[]; mode: 'photo' | 'mine'
@@ -95,8 +102,8 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
     const errs: Record<string, string> = {}
     if (form.name.trim().length < 2) errs.name = 'Enter your name.'
     if (!EMAIL.test(form.email.trim())) errs.email = 'Enter an email for the receipt, like name@example.com.'
-    if (!RAZORPAY_KEY && method === 'upi' && !/^[\w.-]{2,}@[a-z]{2,}$/i.test(form.upi.trim())) errs.upi = 'Enter a UPI ID like name@okhdfc.'
-    if (!RAZORPAY_KEY && method === 'card') {
+    if (!REAL_CHECKOUT && method === 'upi' && !/^[\w.-]{2,}@[a-z]{2,}$/i.test(form.upi.trim())) errs.upi = 'Enter a UPI ID like name@okhdfc.'
+    if (!REAL_CHECKOUT && method === 'card') {
       if (form.card.replace(/\s/g, '').length < 15) errs.card = 'Enter the 16-digit card number.'
       if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(form.exp.trim())) errs.exp = 'Use MM/YY.'
       if (!/^\d{3,4}$/.test(form.cvc.trim())) errs.cvc = '3 digits on the back.'
@@ -118,7 +125,7 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
     setErrors(errs); setPayError(null)
     if (Object.keys(errs).length) { document.getElementById(`buy-${Object.keys(errs)[0]}`)?.focus(); return }
     setStage('processing')
-    if (!RAZORPAY_KEY && isDecline(method, form.upi, form.card)) {
+    if (!REAL_CHECKOUT && isDecline(method, form.upi, form.card)) {
       await new Promise((r) => setTimeout(r, 1500))
       setPayError(method === 'upi' ? 'Your UPI app declined the payment. No money was taken.' : 'Your bank declined this card. No money was taken. Try another card or UPI.')
       setStage('pay')
@@ -139,8 +146,8 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
         new Promise((r) => setTimeout(r, 900)),
       ])
       guest.setProfile({ name: buyer.name, email: buyer.email, ...(buyer.phone ? { phone: buyer.phone } : {}) })
-      if (RAZORPAY_KEY && placed.checkout) return finish(placed, 'checkout')
-      finish(placed, placed.status === 'pending' || (!RAZORPAY_KEY && isSlowUpi(method, form.upi)) ? 'pending' : 'done')
+      if (REAL_CHECKOUT && placed.checkout) return finish(placed, 'checkout')
+      finish(placed, placed.status === 'pending' || (!REAL_CHECKOUT && isSlowUpi(method, form.upi)) ? 'pending' : 'done')
     } catch (err) {
       const f = friendlyError(err, 'Payment didn’t go through')
       setPayError(`${f.title}. ${f.body}`)
@@ -197,7 +204,7 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
     <PrimaryButton key="continue" onClick={() => setStage('pay')}>Continue · {amount}</PrimaryButton>
   ) : stage === 'pay' && selected ? (
     <>
-      <PrimaryButton key="pay" type="submit" form="buy-form">{payError ? `Try again · ${amount}` : RAZORPAY_KEY ? `Continue to pay ${amount}` : `Pay ${amount}`}</PrimaryButton>
+      <PrimaryButton key="pay" type="submit" form="buy-form">{payError ? `Try again · ${amount}` : REAL_CHECKOUT ? `Continue to pay ${amount}` : `Pay ${amount}`}</PrimaryButton>
       {secured}
     </>
   ) : stage === 'checkout' && order ? (
@@ -263,7 +270,7 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
               <Field label="PIN code" htmlFor="buy-postal" error={errors.postal}><Input id="buy-postal" inputMode="numeric" autoComplete="postal-code" maxLength={6} value={form.postal} onChange={set('postal')} className="h-11 text-[15px]" /></Field>
             </fieldset>
           )}
-          {!RAZORPAY_KEY && (
+          {!REAL_CHECKOUT && (
             <>
               <div className="text-[12.5px] font-bold text-ink-2">Pay with</div>
               <div role="radiogroup" aria-label="Pay with" className="flex flex-col gap-2">
@@ -281,16 +288,16 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
                   <Field label="CVC" htmlFor="buy-cvc" error={errors.cvc}><Input id="buy-cvc" inputMode="numeric" autoComplete="cc-csc" placeholder="123" value={form.cvc} onChange={set('cvc')} className="h-11" /></Field>
                 </div>
               )}
-              <p className="text-[12px] text-ink-3">{isLiveApi ? 'Test payments: no money is taken yet.' : 'Demo checkout: no money is taken.'}</p>
+              <p className="text-[12px] text-ink-3">Demo checkout: no money is taken.</p>
             </>
           )}
-          {RAZORPAY_KEY && <p className="text-[13px] text-ink-2">You’ll choose UPI, card or netbanking on Razorpay’s secure page next.</p>}
+          {REAL_CHECKOUT && <p className="text-[13px] text-ink-2">You’ll choose UPI, card or netbanking on Razorpay’s secure page next.</p>}
         </form>
       )}
       {stage === 'processing' && (
         <div className="flex flex-col items-center gap-3 py-10 text-center" role="status" aria-live="polite">
           <span className="size-9 animate-spin rounded-full border-[3px] border-accent border-r-transparent" aria-hidden />
-          <b className="text-[15px]">{RAZORPAY_KEY ? 'Saving your order…' : method === 'upi' ? 'Waiting for your UPI app…' : 'Confirming with your bank…'}</b>
+          <b className="text-[15px]">{REAL_CHECKOUT ? 'Saving your order…' : method === 'upi' ? 'Waiting for your UPI app…' : 'Confirming with your bank…'}</b>
           <p className="text-[13px] text-ink-2">Don’t close this page.</p>
         </div>
       )}

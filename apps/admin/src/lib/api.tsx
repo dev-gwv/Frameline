@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { ApiError, createHttpApi, createMockApi, localStoragePersistence, storageGuestTokenStore, storageTokenStore, type ChangeTopic, type FramelineApi, type FramelineHttpApi } from '@frameline/shared'
+import { payStudioCheckout } from './razorpay'
 
 const STORAGE_KEY = 'frameline.mock.v1'
 /** Set to the API origin (e.g. http://localhost:8787) to use the real backend instead of sample data. */
@@ -19,11 +20,19 @@ function mockApi(): FramelineApi {
  * keeps the app fully usable offline.
  */
 export function createApi(): FramelineApi {
-  if (!API_URL) return mockApi()
+  if (!API_URL) {
+    // A production build without VITE_API_URL would quietly run on sample data -- a demo studio a real
+    // photographer could "sign in" to. Refuse instead, unless a demo build asks for it.
+    if (import.meta.env.PROD && import.meta.env.VITE_ALLOW_SAMPLE_DATA !== '1') {
+      throw new Error('This build has no VITE_API_URL. Set it, or build a demo with VITE_ALLOW_SAMPLE_DATA=1.')
+    }
+    return mockApi()
+  }
   return createHttpApi({
     baseUrl: API_URL,
     tokens: tokenStore,
     guestTokens: storageGuestTokenStore(),
+    payCheckout: payStudioCheckout,
     onUnauthorized: () => {
       if (!location.pathname.startsWith('/login')) location.assign(`/login?expired=1&from=${encodeURIComponent(location.pathname + location.search)}`)
     },

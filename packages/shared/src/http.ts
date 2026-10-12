@@ -1,5 +1,5 @@
 import type {
-  AssetFile, PackPurchase,
+  AssetFile, OrderPayment, PackPurchase,
   ChangeTopic, FramelineApi, GuestLinkResult, ListPhotosQuery, PlanChange, RenewalLink, RenewalResult, ResolvedGuestLink, UploadFile, UploadOptions,
 } from './api'
 import type {
@@ -134,11 +134,23 @@ export interface SocketLike {
 }
 type WebSocketCtor = new (url: string, protocols?: string | string[]) => SocketLike
 
+/** What Razorpay Checkout needs to take a studio's own payment (see HttpApiOptions.payCheckout). */
+export interface StudioCheckout { provider: 'razorpay'; orderId: string; keyId: string; amount: number; currency: 'INR' }
+
+interface PendingPaymentWire { id: string; kind: 'credits' | 'plan' | 'renewal' | 'pack'; status: 'pending'; amount: number; checkout: StudioCheckout }
+
 export interface HttpApiOptions {
   baseUrl: string
   tokens: TokenStore
   /** Called once refresh fails (session over): send the user to sign-in. */
   onUnauthorized?: () => void
+  /**
+   * Opens the payment page (Razorpay Checkout) for a studio purchase paid by card or UPI and resolves with the
+   * signed payment. When the API answers a purchase with 202 + a pending payment, the client calls this, then
+   * confirms, so addCredits / changePlan / renewEvent / buyPack still resolve with their usual result. Without it,
+   * such a purchase fails with a clear message (pay from the wallet instead).
+   */
+  payCheckout?: (checkout: StudioCheckout, info: { description: string; amount: number }) => Promise<OrderPayment>
   /** Studio to act on (X-Studio-Id). Defaults to the user's first studio. */
   studioId?: string | (() => string | undefined)
   fetch?: typeof fetch
@@ -314,6 +326,19 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     if (!query) return u
     const qs = Object.entries(query).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => `${enc(k)}=${enc(String(v))}`).join('&')
     return qs ? `${u}?${qs}` : u
+  }
+
+  /**
+   * A studio purchase the API answered with a pending card/UPI payment (202): open the checkout, confirm the
+   * signed payment, and resolve with what the purchase call would have returned. Anything else passes through.
+   */
+  async function paid<T>(res: T | { payment: PendingPaymentWire }, description: string): Promise<T> {
+    const pending = (res as { payment?: PendingPaymentWire } | null)?.payment
+    if (!pending || pending.status !== 'pending' || !pending.checkout) return res as T
+    if (!options.payCheckout) throw new Error('Card and UPI payments need the payment page, which this app can’t open. Pay from your wallet instead.')
+    const payment = await options.payCheckout(pending.checkout, { description, amount: pending.amount })
+    const done = await request<{ result: T }>('POST', `/v1/studio/payments/${enc(pending.id)}/confirm`, { body: payment })
+    return done.result
   }
 
   async function request<T>(method: HttpMethod, path: string, opts: RequestOptions = {}): Promise<T> {
@@ -633,7 +658,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     getWebsite: () => get<Website>('/v1/website'),
     updateWebsite: (patch) => request<Website>('PATCH', '/v1/website', { body: pick(patch, WEBSITE_KEYS) }),
     listEnquiries: () => listAll('/v1/enquiries'),
-    addCredits: async (amount) => (await request<{ walletCredits: number }>('POST', '/v1/studio/credits', { body: { amount }, idempotent: true })).walletCredits,
+    addCredits: async (amount) => (await paid(await request<{ walletCredits: number } | { payment: PendingPaymentWire }>('POST', '/v1/studio/credits', { body: { amount }, idempotent: true }), 'Add money to your wallet')).walletCredits,
 
     // ── Studio: usage, billing ──────────────────────────────────────────────
     getUsageBreakdown: () => get<UsageBreakdown>('/v1/studio/usage/breakdown'),
@@ -644,13 +669,13 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     updateStoreSettings: (patch) => request<StoreSettings>('PATCH', '/v1/store/settings', { body: patch }),
     requestPayout: (amount) => request<LedgerEntry>('POST', '/v1/payouts', { body: { amount }, idempotent: true }),
     listPurchases: () => listAll<Purchase>('/v1/purchases'),
-    changePlan: (planId, o) => request<PlanChange>('POST', '/v1/studio/plan', { body: { planId, billing: o.billing, payWith: o.payWith ?? 'card' }, idempotent: true }),
+    changePlan: async (planId, o) => paid(await request<PlanChange | { payment: PendingPaymentWire }>('POST', '/v1/studio/plan', { body: { planId, billing: o.billing, payWith: o.payWith ?? 'card' }, idempotent: true }), 'Plan change'),
     setRenewalMultiplier: (multiplier) => request<Usage>('PUT', '/v1/studio/renewal-multiplier', { body: { multiplier } }),
     redeemCoupon: (code) => request<{ credits: number; walletCredits: number }>('POST', '/v1/studio/coupons', { body: { code }, idempotent: true }),
     spendCredits: (amount, description) => request<{ walletCredits: number; entry: LedgerEntry }>('POST', '/v1/studio/credits/spend', { body: { amount, description }, idempotent: true }),
 
     // ── Events: renewals, links ────────────────────────────────────────────
-    renewEvent: (eventId, opts) => request<RenewalResult>('POST', `/v1/events/${enc(eventId)}/renew`, { body: { payWith: opts.payWith }, idempotent: true }),
+    renewEvent: async (eventId, opts) => paid(await request<RenewalResult | { payment: PendingPaymentWire }>('POST', `/v1/events/${enc(eventId)}/renew`, { body: { payWith: opts.payWith }, idempotent: true }), 'Event renewal'),
     createRenewalLink: (eventId) => request<RenewalLink>('POST', `/v1/events/${enc(eventId)}/renewal-link`, { idempotent: true }),
     createGuestLink: (eventId, payload) => request<GuestLinkResult>('POST', `/v1/events/${enc(eventId)}/guest-links`, { body: payload, idempotent: true }),
 
@@ -737,7 +762,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     // ── Contract v3 ─────────────────────────────────────────────────────────
     listDeletedEvents: () => listAll<PhotoEvent>('/v1/trash/events'),
     restoreEvent: (id) => request<PhotoEvent>('POST', `/v1/events/${enc(id)}/restore`, { idempotent: true }),
-    buyPack: (eventId, photos, opts) => request<PackPurchase>('POST', `/v1/events/${enc(eventId)}/packs`, { body: { photos, payWith: opts.payWith }, idempotent: true }),
+    buyPack: async (eventId, photos, opts) => paid(await request<PackPurchase | { payment: PendingPaymentWire }>('POST', `/v1/events/${enc(eventId)}/packs`, { body: { photos, payWith: opts.payWith }, idempotent: true }), 'Photo pack'),
     matchFaceForLink: (eventId, selfie) => request('POST', `/v1/events/${enc(eventId)}/faces/match`, { body: selfie }),
     async uploadAsset(kind, file: AssetFile) {
       const blob = file.blob ?? (file.uri ? await (await fetchImpl(file.uri)).blob() : null)
@@ -809,6 +834,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     getStudioStats: (o = {}) => get<StudioStats>('/v1/studio/stats', { month: o.month }),
     updateOrder: (orderId, patch) => request<Order>('PATCH', `/v1/orders/${enc(orderId)}`, { body: pick(patch, ['trackingNumber'] as const) }),
     resendDownloadLink: (orderId) => request<{ sentTo: string; order: Order }>('POST', `/v1/orders/${enc(orderId)}/resend-link`, { idempotent: true }),
+    markOrderReceived: (orderId) => request<Order>('POST', `/v1/orders/${enc(orderId)}/received`),
     verifyPayoutAccount: () => request<PayoutCheck>('POST', '/v1/store/payout/verify', { idempotent: true }),
     checkHandle: (handle) => get<HandleCheck>('/v1/studio/handle-check', { handle }),
     async recordPhotoViews(photoIds, shortId) {

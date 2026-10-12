@@ -206,6 +206,13 @@ export const ActivityItem = z.object({
   id: Id, kind: z.enum(['face', 'order', 'camera', 'guest-upload', 'registration', 'enquiry']), title: z.string(), detail: z.string(), at: z.string(),
 }).openapi('ActivityItem')
 
+export const CheckoutInfo = z.object({ provider: z.literal('razorpay'), orderId: z.string(), keyId: z.string(), amount: z.number(), currency: z.literal('INR') }).openapi('Checkout')
+
+/** A studio purchase opened for card/UPI and not yet paid: open `checkout` in Razorpay, then confirm. */
+export const PendingPayment = z.object({
+  id: Id, kind: z.enum(['credits', 'plan', 'renewal', 'pack']), status: z.literal('pending'), amount: z.number(), checkout: CheckoutInfo,
+}).openapi('PendingPayment')
+
 export const Order = z.object({
   id: Id, number: z.number().int(), buyer: z.string(), eventId: Id, eventName: z.string(), items: z.string(),
   paid: z.number().openapi({ description: 'Major units (rupees); stored as paise.' }), currency: z.enum(['INR', 'USD']),

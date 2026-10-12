@@ -348,6 +348,8 @@ export interface FramelineApi {
   updateOrder(orderId: ID, patch: { trackingNumber?: string }): Promise<Order>
   /** Emails the buyer a fresh download link (owner). 409 `order_not_deliverable` unless paid / printing / paid-direct; 422 when the order has no email. */
   resendDownloadLink(orderId: ID): Promise<{ sentTo: string; order: Order }>
+  /** An order paid to the studio directly (buyer abroad) arrived: `paid-direct`, photos unlocked, never in the payout balance (owner). 409 `order_not_direct` otherwise. */
+  markOrderReceived(orderId: ID): Promise<Order>
   /** Runs the ₹1 bank check again (owner) and stores the result in StoreSettings.payout.check. */
   verifyPayoutAccount(): Promise<PayoutCheck>
   /** Is `<handle>.frameline.in` free? Checks format, reserved words and other studios. */
@@ -1484,7 +1486,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       const at = new Date().toISOString()
       const order: Order = {
         id: uid('o'), number, buyer: input.buyer.name, eventId: e.id, eventName: e.name, items: labels.join(', '), paid: round2(paid),
-        currency: 'INR', share, status: input.method === 'international' ? 'paid-direct' : 'paid', at,
+        currency: 'INR', share, status: input.method === 'international' ? 'pending' : 'paid', at,
         photoIds: [...photoIds], buyerEmail: input.buyer.email, method: input.method, ...(input.shipping ? { shipping: input.shipping } : {}),
       }
       s().orders.unshift(order)
@@ -1880,6 +1882,14 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       console.info(`[frameline mock] Email to ${o.buyerEmail}: your photos from ${o.eventName}`)
       emit('misc')
       return { sentTo: o.buyerEmail!, order: clone(o) }
+    },
+    async markOrderReceived(orderId) {
+      await wait(latency)
+      const o = byId(s().orders, orderId, 'Order')
+      if (o.method !== 'international' || o.status !== 'pending') fail(409, 'order_not_direct', `Order #${o.number} isn’t waiting for a direct payment.`, { orderStatus: o.status })
+      o.status = 'paid-direct'
+      emit('misc', 'activity')
+      return clone(o)
     },
     async checkHandle(handle) {
       await wait(latency / 2)

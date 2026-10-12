@@ -25,6 +25,10 @@ export function createApi(): FramelineApi {
       baseUrl: API_URL, tokens: memoryTokenStore(), guestTokens: storageGuestTokenStore(GUEST_TOKENS_KEY), guestDeviceId: deviceId,
     })
   }
+  // A production build without VITE_API_URL would quietly serve sample galleries with a fake checkout.
+  if (import.meta.env.PROD && import.meta.env.VITE_ALLOW_SAMPLE_DATA !== '1') {
+    throw new Error('This build has no VITE_API_URL. Set it, or build a demo with VITE_ALLOW_SAMPLE_DATA=1.')
+  }
   // Persisted to localStorage and kept in sync across tabs (the storage event).
   return createMockApi(localStoragePersistence(STORAGE_KEY))
 }
