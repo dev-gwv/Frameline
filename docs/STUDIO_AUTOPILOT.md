@@ -52,5 +52,55 @@ Known when the integration shipped:
   in `wrangler.jsonc` and `DEPLOYMENT.md`. 128 (SFace) is correct.
 - **The mobile app is paused.** CI typechecks it as advisory only.
 
-A full docs-against-code review was started on 12 Oct. Add its findings here
-when it is redone.
+### Docs-against-code review (12 Oct 2026)
+
+**Launch blockers**
+- **The admin's production build has no `VITE_GALLERY_URL`.** Share links, QR codes
+  and messages made inside Frameline's admin point to `http://localhost:5174`
+  (`apps/admin/src/lib/url.tsx:6`, `pages/workspace/lib.ts:6`; `deploy.yml` sets only
+  `VITE_API_URL`). Links made through Studio AutoPilot are fine: they come from
+  the API's `GALLERY_URL`.
+- **Email sign-in needs `RESEND_API_KEY`.** Without it, OTP, team and host
+  invites, ZIP and order emails fail with 503 (`services/mailer.ts:38-49`), and
+  seeded users have no password. Sign-in through Studio AutoPilot and Google
+  (configured) still works. Check whether the key is set in Cloudflare.
+- **Studio purchases are never charged:** plans, adding money, renewals and packs
+  by card or UPI are recorded as paid without Razorpay (`routes/account.ts:94`,
+  `routes/studio.ts:133`, `routes/events.ts:439,450,557`). Guest checkout also
+  needs `VITE_RAZORPAY_KEY` in the gallery build (`deploy.yml` doesn't set it).
+- **The sample studio is still seeded in production** (DEPLOYMENT.md "Going to
+  real data").
+
+**Links that lead nowhere**
+- Smart QR `frameline.in/q/<slug>` has no redirect route.
+- `GALLERY_URL/renew/<id>` has no page or checkout.
+- The follow link `/follow/<code>` doesn't match the gallery's `/studio/:followCode`,
+  and `/app?code=` has no route.
+- No real domain yet, but `frameline.in` is hard-coded in QR posters, the FTP
+  host, follow links, terms and `MAIL_FROM`.
+- Production sets no `API_PUBLIC_URL` / `PUBLIC_MEDIA_BASE`, so ZIP emails carry a
+  relative link.
+
+**Face pipeline**, in the order `apps/processor/README.md` gives:
+1. Clustering into people. Real faces have no `personId`, so People, face
+   privacy and "own" downloads can't work.
+2. Selfie matching in the browser. The gallery sends no embedding.
+3. Renditions (2048/3072), watermark burn-in and AI enhance. Download renditions
+   404, and AI enhance still takes ₹8 from the wallet.
+4. EXIF and capture time.
+
+Also: the processor isn't deployed, nothing in CI builds it, and the Cloudflare
+Container plan in `services/processor.ts` is stale.
+
+**Never sent:** broadcasts (the cron only stamps `sent_at`). SMS/WhatsApp are log
+lines. The "payment and invoice emails always go out" setting has no email
+code behind it.
+
+**Contradictions to fix in the docs**
+- Vector size: 512 in the api README and `processor.ts:14`, versus 128 (correct).
+- Upload mode: "decided: proxy" versus direct-to-R2 being enabled.
+- The api README calls the Razorpay webhook a TODO, but it is built.
+- The processor README says selfie search works. It doesn't.
+- Node version: 25 in BUILD_BRIEF, 22 in the README and CI.
+- The root README omits `apps/processor` and `packages/faces`.
+- `STUDIOAUTOPILOT_SECRET` is missing from DEPLOYMENT.md's secrets table.
