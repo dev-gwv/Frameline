@@ -196,8 +196,11 @@ The findings above describe the code as it was on 12 Oct 2026. These are fixed s
 - Renewal links: `GET /v1/public/renewals/:id`, `POST …/pay` (202 with a Razorpay checkout, or simulated in development and test) and `POST …/confirm`. The webhook settles them too, since they ride on `studio_payments` with `payload.linkId`. The gallery's `/renew/:id` page takes the payment. The studio's purchase list shows "(paid by your client)".
 - The gallery now has `/follow/:code`, `/f/:code` and `/app?code=`. The admin's follow and app links use `GALLERY_URL` instead of `frameline.in`.
 
+**Batch 5, limits**
+- Studio uploads stop at the event's `photoLimit` (402 `event_limit_reached`); photo packs raise it.
+- A lapsed plan or trial blocks new uploads (402 `plan_expired`) only while Razorpay is live. Without payments a studio couldn't renew, so nothing is enforced. Galleries stay open either way.
+
 **Still open, in order:**
-- Plan expiry and pack limits.
 - Processor work: no silent simulation in production, a `failed` status and dead-letter consumer, EXIF rotation, renditions.
 - Real ZIP, a signed receipt link, guest verification.
 - The docs contradictions below.

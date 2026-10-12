@@ -15,6 +15,7 @@ import { idempotent } from '../middleware/idempotency'
 import { Photo } from '../schemas/domain'
 import { assertEventVisible } from '../services/access'
 import { audit } from '../services/audit'
+import { paymentsLive } from '../services/payments'
 import { eventForMember, recountStatements } from '../services/events'
 import { emit } from '../services/realtime'
 import {
@@ -192,8 +193,18 @@ uploadRoutes.openapi(createRoute({
   const [studio] = await db.select().from(schema.studios).where(eq(schema.studios.id, m.studioId)).limit(1)
   const guestUpload = (input.source ?? (album.kind === 'guest' ? 'guest' : 'web')) === 'guest'
   const cost = guestUpload ? 0 : input.files.length * (input.quality === 'original' ? 2 : 1)
+  // A lapsed plan or trial stops new uploads (galleries stay open). Only while card/UPI payments are switched on:
+  // without them a studio would have no way to renew, so nothing is enforced that can't be paid for.
+  if (!guestUpload && paymentsLive(c.env) && Date.parse(studio.validTill) < Date.now()) {
+    throw new AppError(402, 'plan_expired', 'Plan expired', 'Your plan has ended. Renew it on the Plan page to upload more photos. Your galleries stay open.')
+  }
   if (cost && studio.photosUsed + cost > studio.photosLimit) {
     throw new AppError(402, 'quota_exceeded', 'Photo quota exceeded', `This upload needs room for ${cost} photos but your plan has ${Math.max(0, studio.photosLimit - studio.photosUsed)} left. Add a photo pack or upgrade.`)
+  }
+  // Each event has its own photo limit, which photo packs raise.
+  if (!guestUpload && ev.photoCount + input.files.length > ev.photoLimit) {
+    const left = Math.max(0, ev.photoLimit - ev.photoCount)
+    throw new AppError(402, 'event_limit_reached', 'Event photo limit reached', `${ev.name} has room for ${left} more ${left === 1 ? 'photo' : 'photos'}. Add a photo pack to this event to upload more.`)
   }
 
   const session = await createUploadSession(c, {
