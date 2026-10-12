@@ -1,4 +1,6 @@
-import { Link } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { guest } from '../lib/guest'
 import { Package, ShoppingBag } from 'lucide-react'
 import { cn } from '@frameline/ui'
 import { fmt, type Order } from '@frameline/shared'
@@ -15,9 +17,17 @@ const STATUS: Record<Order['status'], { label: string; tone: string }> = {
   refunded: { label: 'Refunded', tone: 'bg-sunk text-ink-2' },
 }
 
-/** Orders from api.listMyOrders: placed on this device, or by this registered guest's email. */
+/** Orders placed with this guest session, plus orders opened from a receipt email link (`?receipt=`). */
 export function MyOrders() {
   const { event, studio, base, seeAll, session, forceOffline } = useEventCtx()
+  const [params, setParams] = useSearchParams()
+  const receipt = params.get('receipt')
+  useEffect(() => {
+    if (!receipt) return
+    // Remember the receipt on this device, then drop it from the address bar so it isn't shared by accident.
+    guest.patchSession(event.shortId, (s) => ({ receipts: [...new Set([...(s.receipts ?? []), receipt])] }))
+    setParams((p) => { const n = new URLSearchParams(p); n.delete('receipt'); return n }, { replace: true })
+  }, [receipt, event.shortId, setParams])
   const q = useMyOrders(event.shortId)
   const orders = q.data ?? []
   const browse = seeAll ? `${base}/a/all` : session.match ? `${base}/me` : base

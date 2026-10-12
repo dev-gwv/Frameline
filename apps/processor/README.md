@@ -63,8 +63,9 @@ runs identically in this Node service and (later) in the gallery's on-device sel
 ## What's NOT built yet (fast-follows, in rough priority order)
 
 1. **Face clustering within an event** (`faces[].personId`). Right now every detected face comes back with no
-   `personId`, which `applyResult()` already handles fine (stores `null`) — guest selfie search still works via
-   direct Vectorize nearest-neighbour search (see `matchFaces` in `apps/api/src/services/faces.ts`), it just
+   `personId`, which `applyResult()` already handles fine (stores `null`). Selfie search does **not** work end to end
+   yet: the API side can do a direct Vectorize nearest-neighbour search, but only once the gallery sends an
+   embedding (item 2) (see `matchFaces` in `apps/api/src/services/faces.ts`), it just
    doesn't yet benefit from "found one photo of this person → also surface every other photo of them". Natural
    next step: on each new face, compare its embedding against recent faces in the same event and reuse a
    `personId` above some cosine threshold, else start a new one.

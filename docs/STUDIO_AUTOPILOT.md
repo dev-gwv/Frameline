@@ -218,18 +218,28 @@ The findings above describe the code as it was on 12 Oct 2026. These are fixed s
   - A guest ZIP follows the gallery: the 3072 rendition or original when full size is allowed, otherwise the 2048 rendition or a web-quality upload.
 - A ZIP can't carry a watermark. When downloads are watermarked, guest ZIPs are refused (409 `watermark_required`, also re-checked at download), and the gallery offers only "Save one by one", which burns the watermark in. Before this, the "ZIP" handed out clean originals.
 
-**Still open, in order:**
-- Processor work: no silent simulation in production, a `failed` status and dead-letter consumer, EXIF rotation, renditions.
-- Real ZIP, a signed receipt link, guest verification.
-- The docs contradictions below.
+**Batch 8, receipts and docs**
+- Paid orders email the buyer a signed receipt link: `GALLERY_URL/<code>/orders?receipt=<orderId>.<hmac>`.
+  - Sent on every path to paid: simulated, confirm, webhook, and a direct payment marked received.
+  - `GET /v1/public/receipts/:token` returns the order.
+  - The gallery remembers the receipt on that device, lists the order under "Your orders" and unlocks its photos.
+- Docs contradictions fixed:
+  - 128-dimension vectors;
+  - the webhook is built;
+  - selfie search doesn't work yet;
+  - Node 22;
+  - the root README lists `processor` and `faces`;
+  - DEPLOYMENT.md lists `STUDIOAUTOPILOT_SECRET` and `PROCESSOR_URL`;
+  - the upload mode reads as optional.
 
-**Needs the owner:** Razorpay keys (`RAZORPAY_*` secrets plus `VITE_RAZORPAY_KEY`), `RESEND_API_KEY`, removing the production sample studio, processor hosting, and a real domain or CDN (`PUBLIC_MEDIA_BASE`).
+**Still open:**
+- Guest email verification for "registered" galleries. Batch 2 already removed the session takeover, so a typed email can't reach anyone else's photos or orders; what's left is that the email isn't proven.
+- From batch 6: EXIF capture time and camera, watermark burn-in, face clustering, browser selfie embeddings.
+- KYC review, and support tickets nobody can answer.
 
-**Contradictions to fix in the docs**
-- Vector size: 512 in the api README and `processor.ts:14`, versus 128 (correct).
-- Upload mode: "decided: proxy" versus direct-to-R2 being enabled.
-- The api README calls the Razorpay webhook a TODO, but it is built.
-- The processor README says selfie search works. It doesn't.
-- Node version: 25 in BUILD_BRIEF, 22 in the README and CI.
-- The root README omits `apps/processor` and `packages/faces`.
-- `STUDIOAUTOPILOT_SECRET` is missing from DEPLOYMENT.md's secrets table.
+**Needs the owner:**
+- Razorpay keys (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`). The browser gets the key from each checkout, so `VITE_RAZORPAY_KEY` isn't needed.
+- `RESEND_API_KEY`: sign-in codes, ZIP and receipt emails.
+- Removing the production sample studio.
+- Hosting the processor (`PROCESSOR_URL` / `PROCESSOR_TOKEN`).
+- A real domain or CDN (`PUBLIC_MEDIA_BASE`, plus a repo variable `GALLERY_URL` once the gallery has its own domain).

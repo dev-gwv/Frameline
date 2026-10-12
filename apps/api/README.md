@@ -71,7 +71,7 @@ Seeded users: `aarav@northlight.in` (owner), `meera@northlight.in` (editor), `ku
 Before the first deploy, create the resources and paste their ids into `wrangler.jsonc`:
 `wrangler d1 create frameline`, `wrangler r2 bucket create frameline-media`, `wrangler kv namespace create KV`,
 `wrangler queues create frameline-photos` (+ `frameline-photos-dlq`),
-`wrangler vectorize create frameline-faces --dimensions=512 --metric=cosine`, then
+`wrangler vectorize create frameline-faces --dimensions=128 --metric=cosine` (SFace embeddings), then
 `pnpm db:migrate:remote`. For browser uploads straight to R2, add a bucket CORS rule allowing `PUT` from the app
 origins and **exposing `ETag`**.
 
@@ -237,8 +237,10 @@ applied. The Workers binding only supports 10 s or 60 s periods, so longer windo
   development and test fall back to a deterministic match on `key` (same rule as the mock and the gallery:
   unnamed people in the event, `hash(key) % n`). Production without Vectorize returns 503.
 - **Orders** are priced from the studio's price list. With `RAZORPAY_KEY_ID/SECRET`, the order is created `pending`
-  with `checkout` for Razorpay Checkout; the capture webhook is a TODO. Without keys, payment is simulated: the order
-  is `paid` and the studio's share (after the 10% commission) is added to the ledger.
+  with `checkout` for Razorpay Checkout, then settled by `POST /v1/public/orders/:id/confirm` or the webhook
+  (`POST /v1/webhooks/razorpay`, amount checked). Without keys, payment is simulated in development and test only;
+  production answers 503 `payments_not_configured`. Paid orders email the buyer a signed receipt link
+  (`GET /v1/public/receipts/:token`).
 - **Personal links:** `POST /v1/events/:id/guest-links` stores the payload and returns a signed 14-character code
   (`<id:8><hmac:6>`) for `/s/<code>` or `/v/<code>`. Unsigned tokens in the gallery README format still resolve, but
   their VIP flags are ignored because anyone could forge them.
@@ -342,7 +344,7 @@ Everything is stored in paise and returned in rupees.
   accounts ending 0000 → `failed`) until a payout provider's fund-account validation is wired.
 - **Guest messages:** "Notify me", host invites without an email and download-link emails in dev are log lines
   (`guest notify (simulated …)`); there's no SMS/WhatsApp provider yet.
-- **QR short links:** there is no public short-link redirect route yet; trashed QR codes are excluded from lists.
+- **QR short links:** `GET /v1/public/q/:slug` resolves a QR (slugs are unique across studios) and counts the scan; trashed QR codes stop resolving and are excluded from lists.
 - **ZIPs:** the queue marks a ZIP ready and emails a link to a download manifest (`/v1/public/zips/:id`). Building a
   real ZIP in the Container is TODO.
 - **Processing:** AI enhance, face re-index and watermark burn-in are sent to the processor as flags on the queue job.

@@ -792,6 +792,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     listMyFavourites: async (shortId) => (await request<{ items: Photo[] }>('GET', `/v1/public/events/${enc(shortId)}/me/favourites`, { guest: g(shortId) })).items,
     listMyOrders: async (shortId) => (await request<{ items: Order[] }>('GET', `/v1/public/events/${enc(shortId)}/me/orders`, { guest: g(shortId) })).items,
     confirmOrder: (orderId, payment) => request<Order>('POST', `/v1/public/orders/${enc(orderId)}/confirm`, { body: payment, guest: lastGallery ?? '' }),
+    getReceipt: (token) => request<{ shortId: string; order: Order }>('GET', `/v1/public/receipts/${enc(token)}`, { auth: false }),
     resolveQr: (slug) => request<{ shortId: string; target: SmartQR['target'] }>('GET', `/v1/public/q/${enc(slug)}`, { auth: false }),
     getRenewal: (id) => request<PublicRenewal>('GET', `/v1/public/renewals/${enc(id)}`, { auth: false }),
     payRenewal: async (id) => {

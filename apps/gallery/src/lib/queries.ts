@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery, type QueryClient } from '@tanstack/react-query'
 import type { Album, FramelineApi, Photo, PublicEvent, PublicStudio, PublicWatermark, WatermarkSettings } from '@frameline/shared'
 import { useApi } from './api'
-import { guest, snapshot, type FaceMatch } from './guest'
+import { guest, snapshot, useSession, type FaceMatch } from './guest'
 
 const up = (shortId: string | undefined) => (shortId ?? '').toUpperCase()
 
@@ -58,15 +58,22 @@ export function useMyFavourites(shortId: string, enabled: boolean) {
   })
 }
 
-/** Orders placed from this device / by this registered guest. Paid digital orders (no shipping) unlock their photos for download. */
+/**
+ * Orders placed with this guest session, plus any opened from a receipt email link on this device.
+ * Paid digital orders (no shipping) unlock their photos for download.
+ */
 export function useMyOrders(shortId: string, enabled = true) {
   const api = useApi()
+  const receipts = useSession(shortId).receipts ?? []
   return useQuery({
-    queryKey: ['orders', up(shortId)],
+    queryKey: ['orders', up(shortId), receipts.join(',')],
     enabled,
     retry: false,
     queryFn: async () => {
-      const orders = await api.listMyOrders(shortId)
+      const own = await api.listMyOrders(shortId)
+      const linked = (await Promise.all(receipts.map((t) => api.getReceipt(t).catch(() => null))))
+        .filter((r) => !!r && up(r.shortId) === up(shortId)).map((r) => r!.order)
+      const orders = [...own, ...linked.filter((o) => !own.some((x) => x.id === o.id))]
       const paid = orders.filter((o) => !o.shipping && (o.status === 'paid' || o.status === 'paid-direct')).flatMap((o) => o.photoIds ?? [])
       if (paid.length) guest.patchSession(shortId, (s) => ({ purchased: [...new Set([...s.purchased, ...paid])] }))
       return orders

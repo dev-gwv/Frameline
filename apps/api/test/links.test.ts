@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { getDb, schema } from '../src/db/client'
+import { receiptToken } from '../src/services/orders'
 import { call, expectProblem, freshIp, uniqueEmail } from './helpers'
 
 /** Printed and shared links that used to lead nowhere: smart QR short links and client renewal links. */
@@ -40,6 +41,18 @@ describe('smart QR short links', () => {
     const qb = (await call('/v1/qrs', { token: b, body: { name, eventId: (await newEvent(b, 'B')).id } })).json
     expect(qb.slug).not.toBe(qa.slug)
     expectProblem(await call(`/v1/qrs/${qb.id}`, { token: b, method: 'PATCH', body: { slug: qa.slug } }), 409, 'slug_taken')
+  })
+})
+
+describe('receipt links', () => {
+  it('open one order on any device, and only with the right signature', async () => {
+    const [o] = (await env.DB.prepare(`SELECT id FROM orders WHERE studio_id = 'st_northlight' LIMIT 1`).all<{ id: string }>()).results
+    const token = await receiptToken(env.JWT_SECRET, o!.id)
+    const r = await call(`/v1/public/receipts/${token}`)
+    expect(r.status).toBe(200)
+    expect(r.json.order.id).toBe(o!.id)
+    expect(r.json.shortId).toMatch(/^[0-9A-Z]{7}$/)
+    expectProblem(await call(`/v1/public/receipts/${o!.id}.forgedsignature`), 404)
   })
 })
 

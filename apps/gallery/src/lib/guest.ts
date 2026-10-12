@@ -49,6 +49,8 @@ export interface EventSession {
   /** Last "Download all" uses left reported by api.verifyDownloadPin (display only; the API counts). */
   downloadsLeft?: number
   purchased: ID[]
+  /** Receipt links opened on this device (`?receipt=` from the receipt email): their orders show under "Your orders". */
+  receipts?: string[]
   uploads: number
   /** "Notify me" on a gallery with no photos yet: the number sent to api.requestNotify (cache of the server's request). */
   notify?: string

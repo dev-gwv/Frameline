@@ -27,7 +27,7 @@ import { PhotoSortEnum } from './photos'
 import { addLedger } from '../services/billing'
 import { matchFaces, visiblePhotos as visible } from '../services/faces'
 import { resolveLink } from '../services/guest-links'
-import { markOrderPaid, verifyCheckoutSignature } from '../services/orders'
+import { markOrderPaid, sendReceipt, verifyCheckoutSignature, verifyReceiptToken } from '../services/orders'
 import { createProviderOrder, grantStudioPurchase, openStudioPayment, paymentMode, settleStudioPayment } from '../services/payments'
 import { emit } from '../services/realtime'
 import { chunk } from './photos'
@@ -768,6 +768,7 @@ publicRoutes.openapi(createRoute({
   if (status === 'paid') {
     await addLedger(db, e.studioId, 'sale', `Order #${number} · ${e.name}`, sharePaise, true)
     await db.insert(schema.activity).values({ id: newId('act'), studioId: e.studioId, kind: 'order', title: `Order #${number} · ₹${toMajor(paidPaise).toLocaleString('en-IN')}`, detail: e.name, at: row.at }).run()
+    background(c, sendReceipt(c.env, row))
   }
   emit(c, e.studioId, 'misc', 'activity')
   return c.json({ ...orderOut(row), ...(checkout ? { checkout } : {}) }, 201)
@@ -792,8 +793,26 @@ publicRoutes.openapi(createRoute({
     throw new Unauthorized('The payment signature is invalid.', 'invalid_signature')
   }
   const { order: paid, changed } = await markOrderPaid(db, order)
-  if (changed) emit(c, order.studioId, 'misc', 'activity')
+  if (changed) {
+    emit(c, order.studioId, 'misc', 'activity')
+    background(c, sendReceipt(c.env, paid))
+  }
   return c.json(orderOut(paid), 200)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'get', path: '/receipts/{token}', tags: ['Public gallery'], summary: 'Open an order from the receipt email link, on any device',
+  description: '`token` is `<orderId>.<signature>` from the receipt email. Answers the order and its gallery code; the gallery shows it under "Your orders" and unlocks a paid digital order’s photos.',
+  request: { params: z.object({ token: z.string().regex(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/).max(160).openapi({ param: { name: 'token', in: 'path' } }) }) },
+  responses: { 200: json(z.object({ shortId: z.string(), order: Order })), ...problems(404) },
+}), async (c) => {
+  const orderId = await verifyReceiptToken(c.env.JWT_SECRET, c.req.valid('param').token)
+  if (!orderId) throw new NotFound('Receipt')
+  const db = getDb(c.env.DB)
+  const [row] = await db.select({ o: schema.orders, shortId: schema.events.shortId }).from(schema.orders)
+    .innerJoin(schema.events, eq(schema.events.id, schema.orders.eventId)).where(eq(schema.orders.id, orderId)).limit(1)
+  if (!row) throw new NotFound('Receipt')
+  return c.json({ shortId: row.shortId, order: orderOut(row.o) }, 200)
 })
 
 // ── Smart QR short links and client renewal links ─────────────────────────

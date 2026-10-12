@@ -22,6 +22,8 @@ import { audit } from '../services/audit'
 import { eventForMember } from '../services/events'
 import { AppError } from '../lib/errors'
 import { emit } from '../services/realtime'
+import { background } from '../lib/http'
+import { sendReceipt } from '../services/orders'
 
 export const businessRoutes = createRouter()
 
@@ -744,6 +746,7 @@ businessRoutes.openapi(createRoute({
     await db.insert(schema.activity).values({ id: newId('act'), studioId: m.studioId, kind: 'order', title: `Order #${o.number} · paid to you directly`, detail: o.eventName, at: nowIso() }).run()
     audit(c, 'store.direct_received', { type: 'order', id: o.id })
     emit(c, m.studioId, 'misc', 'activity')
+    background(c, sendReceipt(c.env, { ...o, status: 'paid-direct' }))
   }
   return c.json(orderOut({ ...o, status: 'paid-direct' }), 200)
 })

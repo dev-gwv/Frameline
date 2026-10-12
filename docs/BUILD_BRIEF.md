@@ -7,7 +7,7 @@ UX decisions and `notes.r` lists reference-app features that MUST exist. The `F`
 feature and the screen it belongs to — every row pointing at your screens must work. Also read `docs/KAMERO_ANALYSIS.md`.
 
 ## Monorepo
-- pnpm workspace (`node-linker=hoisted`), Turborepo. Node 25, pnpm 8. Do NOT run `pnpm install` unless you add
+- pnpm workspace (`node-linker=hoisted`), Turborepo. Node 22 (as in CI), pnpm 8. Do NOT run `pnpm install` unless you add
   dependencies to your own app; if you must, run it at the repo root and say so in your report.
 - `packages/shared` — pure TS: `types.ts` (domain model), `seed.ts` (sample data), `api.ts` (`FramelineApi`
   contract + `createMockApi`), `format.ts` (`fmt.*` helpers, `DEMO_NOW`), `tokens.ts` (design tokens).

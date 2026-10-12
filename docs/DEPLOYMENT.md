@@ -43,7 +43,9 @@ Nothing below is required for the app to run; each feature just simulates until 
 | `RESEND_API_KEY` | Real sign-in emails (without it, `production` returns a clear "email sign-in isn't configured" error — there's no dev fallback outside `development`/`test`) | resend.com (has a free tier) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in | Google Cloud Console → OAuth consent screen + credentials |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | Real payments (without them, orders simulate as paid) | razorpay.com |
-| ~~`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`~~ | **Decided: not setting these.** Uploads proxy through the Worker (`storage.ts`'s `'proxy'` mode) rather than going direct-to-R2 with presigned URLs. Fine at our current scale; revisit only if upload throughput becomes a real bottleneck. | — |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | **Optional, not set today.** Without them uploads proxy through the Worker (`storage.ts`'s `'proxy'` mode); setting them switches browser uploads to direct-to-R2 presigned URLs (needs the bucket CORS rule below). Fine at our current scale. | Cloudflare R2 API tokens |
+| `STUDIOAUTOPILOT_SECRET` | Studio AutoPilot single sign-on and gallery API (`docs/STUDIO_AUTOPILOT.md`); must equal `FRAMELINE_SECRET` on Studio AutoPilot's server | shared with Studio AutoPilot |
+| `PROCESSOR_URL` / `PROCESSOR_TOKEN` | The image processor (`apps/processor`): face finding, EXIF rotation, download renditions. Without it photos go live with none of those (`GET /health` shows `processor: simulated`) | your processor deployment |
 
 **This is the first step toward doing all of the above for real** — none of it is wired up yet, so sign-in by
 email/Google, real payments and direct-to-R2 uploads still need those secrets added before they work outside
@@ -67,7 +69,7 @@ Created under the `dev@gratefulworldventures.in` account (id `d9b73b5a2afa368996
 - Queues `frameline-photos` + `frameline-photos-dlq`
 - Vectorize index `frameline-faces` — **128 dimensions**, chosen to match the SFace face-embedding model
   planned for the VPS photo processor (see the project memory / `REDESIGN_BRIEF.md`). If that later moves to
-  ArcFace (512-dim), the index must be recreated — Vectorize can't change dimensions in place, and every
+  ArcFace (512-dim) instead of today's SFace (128-dim), the index must be recreated — Vectorize can't change dimensions in place, and every
   stored face vector would need reprocessing.
 - Durable Objects `EventHub`, `RateLimiter` (deployed with the Worker)
 - Pages projects `frameline-admin`, `frameline-gallery` (production branch `master`)

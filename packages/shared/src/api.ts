@@ -310,6 +310,8 @@ export interface FramelineApi {
   listMyOrders(shortId: string): Promise<Order[]>
   /** Completes a pending order after Razorpay Checkout succeeds. */
   confirmOrder(orderId: ID, payment: OrderPayment): Promise<Order>
+  /** The order a receipt email link opens (`?receipt=<token>` on the gallery's orders page), on any device. */
+  getReceipt(token: string): Promise<{ shortId: string; order: Order }>
   /** Where a smart QR short link (GALLERY_URL/q/<slug>) points; counts the scan. */
   resolveQr(slug: string): Promise<{ shortId: string; target: SmartQR['target'] }>
   getRenewal(id: string): Promise<PublicRenewal>
@@ -1704,6 +1706,13 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
         emit('misc', 'activity')
       }
       return clone(o)
+    },
+    async getReceipt(token) {
+      await wait(latency)
+      // The sample data has no signatures: the token's order id part opens the order.
+      const o = s().orders.find((x) => x.id === token.slice(0, token.lastIndexOf('.')))
+      if (!o) return fail(404, 'not_found', 'Receipt was not found.')
+      return { shortId: findEvent(o.eventId).shortId, order: clone(o) }
     },
     async resolveQr(slug) {
       await wait(latency)

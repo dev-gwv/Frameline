@@ -20,9 +20,11 @@ apps/
   gallery/   Guest web gallery (installable PWA) opened from share links and QR codes          :5174
   mobile/    Expo (React Native) app — guest mode and photographer mode
   api/       Backend — Hono on Cloudflare Workers, D1, R2, Queues, Durable Objects, Vectorize   :8787
+  processor/ Image processor (Node, sharp + YuNet/SFace ONNX): faces, EXIF rotation, renditions   :8788
 packages/
   shared/    Domain types, design tokens, sample data, FramelineApi contract, mock + HTTP clients
   ui/        "Gilt" web design system (Radix + Tailwind): buttons, fields, modals, photo tiles…
+  faces/     Face detection/embedding math shared by the processor and (later) the browser
 docs/        Design, analysis, build brief
 ```
 

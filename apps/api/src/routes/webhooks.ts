@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import type { AppEnv } from '../env'
 import { getDb, schema } from '../db/client'
 import { NotConfigured, Unauthorized } from '../lib/errors'
-import { markOrderPaid, verifyWebhookSignature } from '../services/orders'
+import { markOrderPaid, sendReceipt, verifyWebhookSignature } from '../services/orders'
 import { settleStudioPayment } from '../services/payments'
 import { publishTopics } from '../services/realtime'
 
@@ -50,7 +50,10 @@ webhookRoutes.post('/webhooks/razorpay', async (c) => {
   if (!order) return c.json({ ok: true, ignored: 'unknown order' }, 200)
   // Paid less than the order's price (or in another currency's units): never mark it paid.
   if (typeof paidAmount === 'number' && paidAmount !== order.paidPaise) return c.json({ ok: true, ignored: 'amount mismatch' }, 200)
-  const { changed } = await markOrderPaid(db, order)
-  if (changed) c.executionCtx.waitUntil(publishTopics(c.env, order.studioId, ['misc', 'activity']).catch(() => undefined))
+  const { order: paid, changed } = await markOrderPaid(db, order)
+  if (changed) {
+    c.executionCtx.waitUntil(publishTopics(c.env, order.studioId, ['misc', 'activity']).catch(() => undefined))
+    c.executionCtx.waitUntil(sendReceipt(c.env, paid))
+  }
   return c.json({ ok: true, orderId: order.id, changed }, 200)
 })
