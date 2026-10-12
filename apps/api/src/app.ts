@@ -16,6 +16,7 @@ import { apiVersionHeader } from './middleware/versioning'
 import { accountRoutes } from './routes/account'
 import { assetRoutes } from './routes/assets'
 import { webhookRoutes } from './routes/webhooks'
+import { integrationRoutes } from './routes/integrations'
 import { authRoutes } from './routes/auth'
 import { businessRoutes } from './routes/business'
 import { eventRoutes } from './routes/events'
@@ -116,6 +117,7 @@ export function createApp() {
   v1.route('/', realtimeRoutes)
   v1.route('/', assetRoutes)
   v1.route('/', webhookRoutes)
+  v1.route('/', integrationRoutes)
 
   app.route('/v1', v1)
 

@@ -174,6 +174,11 @@ applied. The Workers binding only supports 10 s or 60 s periods, so longer windo
 
 - **Meta:** `GET /health`, `GET /v1/meta`, `GET /v1/openapi.json`, `GET /v1/docs`
 - **Auth:** `POST /v1/auth/otp/request|otp/verify|password/login|password|password/reset|refresh|logout`, `GET /v1/auth/google/start|callback`
+- **Studio AutoPilot** (partner; tokens signed with `STUDIOAUTOPILOT_SECRET`, at most 5 minutes, single-use):
+  `GET /v1/integrations/studioautopilot/sso?token=` (browser: signs in, then redirects to the admin app's `/auth/callback`
+  like Google; failures go to `/login?error=sa_*`), `POST /v1/integrations/studioautopilot/events` (one gallery per project),
+  `GET /v1/integrations/studioautopilot/events/:projectId`. Ids are joined in `partner_links`; a person is matched by their
+  Studio AutoPilot id, and by email only when Studio AutoPilot has confirmed it. Only the company's owner sets the studio up.
 - **Account:** `GET|PATCH /v1/me`, `GET|PUT /v1/me/notifications`
 - **Studio:** `GET|PATCH /v1/studio` (profile incl. services, testimonials, FAQ, social links, app config), `GET /v1/studio/usage`,
   `GET /v1/studio/usage/breakdown`, `POST|GET /v1/studio/usage/report`, `GET|PATCH /v1/watermark`, `GET|PATCH /v1/website`,

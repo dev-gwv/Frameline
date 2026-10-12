@@ -28,8 +28,14 @@ export function Brand() {
  * One flow for sign-in and sign-up: email + 6-digit code (default), Google, or a password.
  * `onDone` decides where the person goes next; `onView` lets the page switch layouts.
  */
-/** Friendly text for the OAuth `error` codes Google's own redirect can send back (see authHelpers.ts). */
+/**
+ * Friendly text for the `error` codes a redirect can bring back: Google's own OAuth codes (see authHelpers.ts),
+ * and the sa_* codes from opening a gallery in Studio AutoPilot (routes/integrations.ts in the API).
+ */
 function describeGoogleError(code: string): string {
+  if (code === 'sa_link_expired') return 'That link from Studio AutoPilot has expired or was already used. Go back to Studio AutoPilot and press Open gallery again.'
+  if (code === 'sa_studio_not_set_up') return 'Your studio’s owner needs to open the gallery from Studio AutoPilot once first. After that, everyone on the team can.'
+  if (code === 'sa_not_configured') return 'Signing in from Studio AutoPilot isn’t switched on yet. Sign in with your email for now.'
   if (code === 'access_denied') {
     return 'Google didn’t complete the sign-in. If your Google Cloud OAuth app is still in "Testing" mode, add this Google account under OAuth consent screen → Test users, or switch the app to "In production".'
   }

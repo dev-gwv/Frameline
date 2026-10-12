@@ -17,6 +17,7 @@ export default defineConfig(async () => {
             OTP_PEPPER: 'test-otp-pepper',
             RAZORPAY_KEY_SECRET: 'test-razorpay-key-secret',
             RAZORPAY_WEBHOOK_SECRET: 'test-razorpay-webhook-secret',
+            STUDIOAUTOPILOT_SECRET: 'test-studioautopilot-secret-0123456789-abcdef',
             TEST_MIGRATIONS: migrations,
           },
         },

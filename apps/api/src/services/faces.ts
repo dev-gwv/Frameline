@@ -48,7 +48,16 @@ export async function matchFaces(env: Env, eventId: string, key: string, embeddi
   if (personId) {
     const rows = await db.select({ id: p.id }).from(p).where(and(eq(p.eventId, eventId), visiblePhotos(p), albumsSql, sql`${p.id} IN (SELECT photo_id FROM faces WHERE person_id = ${personId})`)).orderBy(asc(p.capturedAt))
     photoIds = rows.map((r) => r.id)
-  } else if (!photoIds.length && dev) {
+  } else if (photoIds.length) {
+    // Vector hits with no person behind them -- every hit, until face clustering exists. These came straight
+    // from the faces table and were returned as they were, so a hidden, trashed or unreviewed photo (or one in
+    // a guest-upload or store album) reached a guest through a selfie. Same rules as a person's photos.
+    const rows: { id: string; at: string }[] = []
+    for (const part of chunk(photoIds)) {
+      rows.push(...await db.select({ id: p.id, at: p.capturedAt }).from(p).where(and(eq(p.eventId, eventId), visiblePhotos(p), albumsSql, inArray(p.id, part))))
+    }
+    photoIds = rows.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)).map((r) => r.id)
+  } else if (dev) {
     const rows = await db.select({ id: p.id }).from(p).where(and(eq(p.eventId, eventId), visiblePhotos(p), albumsSql)).orderBy(asc(p.capturedAt))
     photoIds = rows.filter((r) => hash(`${r.id}:${key}`) % 8 === 0).map((r) => r.id)
   }

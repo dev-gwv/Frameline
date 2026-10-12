@@ -1,11 +1,11 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt } from 'drizzle-orm'
-import { BASE_RENEWAL, PACKS, PRESETS, RENEWAL_CREDIT_DISCOUNT, TRASH_DAYS, defaultSettings, hash, selfieHasNoFace, tone, withSettingsDefaults, type EventHost as Host } from '@frameline/shared'
+import { BASE_RENEWAL, PACKS, RENEWAL_CREDIT_DISCOUNT, TRASH_DAYS, selfieHasNoFace, withSettingsDefaults, type EventHost as Host } from '@frameline/shared'
 import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
 import { accessRequestOut, eventOut, filmOut, guestOut, personOut } from '../db/mappers'
 import { Conflict, NotFound } from '../lib/errors'
-import { newId, newShortId, nowIso } from '../lib/ids'
+import { newId, nowIso } from '../lib/ids'
 import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, problems, security } from '../lib/openapi'
 import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
 import { membershipOf, requireStudio } from '../middleware/auth'
@@ -21,7 +21,7 @@ import { sql } from 'drizzle-orm'
 import { createSignedLink } from '../services/guest-links'
 import { toMinor } from '../lib/money'
 import { audit } from '../services/audit'
-import { eventForMember, newPin } from '../services/events'
+import { createEvent, eventForMember, newPin } from '../services/events'
 import { emit } from '../services/realtime'
 import { vectorIndex } from '../services/vectors'
 
@@ -58,29 +58,7 @@ eventRoutes.openapi(createRoute({
   const m = membershipOf(c)
   const input = c.req.valid('json')
   const db = getDb(c.env.DB)
-  const id = newId('ev')
-  const t = hash(id)
-  const date = new Date(input.date)
-  const now = nowIso()
-  let shortId = newShortId()
-  for (let i = 0; i < 5; i++) {
-    const [taken] = await db.select({ id: schema.events.id }).from(schema.events).where(eq(schema.events.shortId, shortId)).limit(1)
-    if (!taken) break
-    shortId = newShortId()
-  }
-  const row: typeof schema.events.$inferInsert = {
-    id, studioId: m.studioId, shortId, name: input.name, type: input.type, date: date.toISOString(), city: input.city,
-    status: 'draft', photoCount: 0, photoLimit: 2000, visits: { web: 0, android: 0, ios: 0 }, faceMatches: 0,
-    expiresAt: new Date(date.getTime() + 365 * 86_400_000).toISOString(), createdAt: now,
-    coverTones: [tone(t), tone(t + 3), tone(t + 7)],
-    settings: defaultSettings({ ...PRESETS[input.preset].settings, guestUploadLimit: input.guestUploadLimit, pin: newPin() }),
-    hosts: input.host ? [{ id: newId('h'), name: input.host.email.split('@')[0], email: input.host.email, phone: input.host.phone, role: 'client', access: 'full', status: 'invited', invitedAt: now }] : [],
-    highlights: true, plan: 'subscription',
-  }
-  await db.batch([
-    db.insert(schema.events).values(row),
-    db.insert(schema.albums).values({ id: `${id}_guest`, eventId: id, studioId: m.studioId, name: 'Guest uploads', order: 99, photoCount: 0, kind: 'guest', createdAt: now }),
-  ])
+  const id = await createEvent(db, m.studioId, input)
   audit(c, 'event.create', { type: 'event', id }, { name: input.name, preset: input.preset })
   emit(c, m.studioId, 'events', 'albums')
   return c.json(eventOut(await eventForMember(db, m, id)), 201)

@@ -121,6 +121,21 @@ export const teamInvites = sqliteTable('team_invites', {
   acceptedAt: ts('accepted_at'),
 }, (t) => [index('invites_email_idx').on(t.email), index('invites_studio_idx').on(t.studioId)])
 
+/**
+ * What a partner product's ids are here (Studio AutoPilot first). One row per (provider, kind, external id):
+ * - kind 'studio': the partner's company id → our studio id
+ * - kind 'user':   the partner's user id → our user id (never matched by email alone: partner team logins
+ *                  may carry any email, so an email match could hand someone else's account over)
+ * - kind 'event':  `<company id>:<project id>` → our event id, so one project makes one gallery
+ */
+export const partnerLinks = sqliteTable('partner_links', {
+  provider: text('provider').notNull(),
+  kind: text('kind', { enum: ['studio', 'user', 'event'] }).notNull(),
+  externalId: text('external_id').notNull(),
+  localId: text('local_id').notNull(),
+  createdAt: ts('created_at').notNull(),
+}, (t) => [primaryKey({ columns: [t.provider, t.kind, t.externalId] }), index('partner_links_local_idx').on(t.provider, t.kind, t.localId)])
+
 // ── Events, albums, photos ──────────────────────────────────────────────────
 export const events = sqliteTable('events', {
   id: text('id').primaryKey(),

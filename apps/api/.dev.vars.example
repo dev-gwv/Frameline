@@ -34,3 +34,8 @@ VECTORIZE_REMOTE=
 RAZORPAY_KEY_ID=
 RAZORPAY_KEY_SECRET=
 RAZORPAY_WEBHOOK_SECRET=
+
+# ── Studio AutoPilot (optional) ─────────────────────────────────────────────
+# Shared with Studio AutoPilot's server (its FRAMELINE_SECRET): it signs "Open gallery" sign-in links and
+# its project-gallery calls with this. 32+ random characters; the same value on both sides. Empty = off.
+STUDIOAUTOPILOT_SECRET=

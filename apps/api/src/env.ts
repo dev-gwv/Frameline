@@ -47,6 +47,8 @@ export interface Env {
   RAZORPAY_KEY_ID?: string
   RAZORPAY_KEY_SECRET?: string
   RAZORPAY_WEBHOOK_SECRET?: string
+  /** Shared with Studio AutoPilot's server, which signs its sign-in links and gallery calls with it (32+ chars). */
+  STUDIOAUTOPILOT_SECRET?: string
 }
 
 export interface AuthUser { id: string; email: string; name: string; familyId?: string }
