@@ -111,6 +111,16 @@ async function linkedEvent(c: Context<AppEnv>, claims: PartnerClaims, projectId:
   return row ?? null
 }
 
+/**
+ * A Studio AutoPilot gallery: a wedding the couple shares with their guests. The private-family preset with two
+ * changes, both because selfie search is not running in production yet:
+ * - face privacy off: the link and the PIN already keep strangers out, and a typed PIN sees everything anyway;
+ * - downloads 'all': 'own' allows only photos a selfie matched, so nobody -- not even the couple -- could
+ *   download a single photo.
+ * The studio can turn either back on per event once selfie search works.
+ */
+const SA_GALLERY = { facePrivacy: false, downloads: 'all' } as const
+
 const bearerOf = (c: Context<AppEnv>) => /^Bearer\s+(.+)$/i.exec(c.req.header('authorization') ?? '')?.[1]?.trim()
 
 const ProjectParam = z.object({ projectId: z.string().min(1).max(128).openapi({ param: { name: 'projectId', in: 'path' } }) })
@@ -144,7 +154,10 @@ integrationRoutes.openapi(createRoute({
     const l = schema.partnerLinks
     await db.delete(l).where(and(eq(l.provider, STUDIO_AUTOPILOT), eq(l.kind, 'event'), eq(l.externalId, key), eq(l.localId, stale))).run()
   }
-  const made = await createEvent(db, studioId, { name: input.name, date: input.date, city: input.city, type: input.type, preset: 'private-family', guestUploadLimit: 300 })
+  const made = await createEvent(db, studioId, {
+    name: input.name, date: input.date, city: input.city, type: input.type, preset: 'private-family', guestUploadLimit: 300,
+    overrides: SA_GALLERY,
+  })
   const winner = await link(db, 'event', key, made)
   // Two presses at once: the first to link wins, and the loser's empty event is removed again.
   if (winner !== made) await db.delete(schema.events).where(eq(schema.events.id, made)).run()

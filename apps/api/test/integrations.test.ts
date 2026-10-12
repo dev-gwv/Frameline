@@ -145,6 +145,22 @@ describe('a project\'s gallery', () => {
     expect(read.json.eventId).toBe(made.json.eventId)
   })
 
+  it('makes a gallery guests can use today: PIN and registration on, downloads on, no selfie needed', async () => {
+    const made = await api('/events', await mint({ purpose: 'api' }), project)
+    const row = await env.DB.prepare('SELECT settings FROM events WHERE id = ?').bind(made.json.eventId).first<{ settings: string }>()
+    const s = JSON.parse(row!.settings)
+    expect(s).toMatchObject({ access: 'link-pin', requireRegistration: true, facePrivacy: false, downloads: 'all' })
+
+    // Not ready while empty; with a photo, the PIN opens it and a ZIP of everything can be asked for.
+    const r = (path: string, body?: unknown, token?: string) => call(`/v1/public/events/${made.json.shortId}${path}`, { body, ...(token ? { token } : {}) })
+    expectProblem(await r('/pin', { pin: made.json.pin }), 403, 'gallery_empty')
+    await env.DB.prepare('UPDATE events SET photo_count = 1 WHERE id = ?').bind(made.json.eventId).run()
+    const session = await r('/pin', { pin: made.json.pin })
+    expect(session.status).toBe(200)
+    const zip = await r('/zips', { email: 'guest@example.com' }, session.json.token ?? session.json.accessToken)
+    expect(zip.status).toBe(202)
+  })
+
   it('keeps two companies\' projects apart even with the same project id', async () => {
     const a = await api('/events', await mint({ purpose: 'api' }), project)
     const b = await api('/events', await mint({ purpose: 'api' }), project)

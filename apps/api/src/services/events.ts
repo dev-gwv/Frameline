@@ -59,6 +59,8 @@ export interface NewEvent {
   preset: keyof typeof PRESETS
   guestUploadLimit: number
   host?: { email: string; phone?: string }
+  /** Settings that win over the preset's, e.g. a partner's own defaults. */
+  overrides?: Partial<(typeof schema.events.$inferInsert)['settings']>
 }
 
 /**
@@ -81,7 +83,7 @@ export async function createEvent(db: DB, studioId: string, input: NewEvent): Pr
     status: 'draft', photoCount: 0, photoLimit: 2000, visits: { web: 0, android: 0, ios: 0 }, faceMatches: 0,
     expiresAt: new Date(date.getTime() + 365 * 86_400_000).toISOString(), createdAt: now,
     coverTones: [tone(t), tone(t + 3), tone(t + 7)],
-    settings: defaultSettings({ ...PRESETS[input.preset].settings, guestUploadLimit: input.guestUploadLimit, pin: newPin() }),
+    settings: defaultSettings({ ...PRESETS[input.preset].settings, ...input.overrides, guestUploadLimit: input.guestUploadLimit, pin: newPin() }),
     hosts: input.host ? [{ id: newId('h'), name: input.host.email.split('@')[0], email: input.host.email, phone: input.host.phone, role: 'client', access: 'full', status: 'invited', invitedAt: now }] : [],
     highlights: true, plan: 'subscription',
   }
