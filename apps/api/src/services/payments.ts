@@ -53,7 +53,8 @@ export async function createProviderOrder(env: Env, amountPaise: number, receipt
 export type StudioPurchase =
   | { kind: 'credits'; amountPaise: number }
   | { kind: 'plan'; planId: Plan['id']; period: 'yearly' | 'quarterly'; totalPaise: number; label: string; charged: number; credit: number; gstPaise: number }
-  | { kind: 'renewal'; eventId: string; eventName: string; chargedPaise: number }
+  /** `linkId`: paid by the client through a renewal link (GALLERY_URL/renew/<id>), not by the studio. */
+  | { kind: 'renewal'; eventId: string; eventName: string; chargedPaise: number; linkId?: string }
   | { kind: 'pack'; eventId: string; eventName: string; photos: number; pricePaise: number }
 
 type PayMethod = 'card' | 'upi' | 'credits'
@@ -85,7 +86,9 @@ export async function grantStudioPurchase(db: DB, studioId: string, p: StudioPur
       const expiresAt = new Date(Math.max(Date.now(), Date.parse(ev.expiresAt)) + 365 * 86_400_000).toISOString()
       await db.update(schema.events).set({ expiresAt, ...(ev.status === 'expiring' || ev.status === 'archived' ? { status: 'live' as const } : {}) })
         .where(eq(schema.events.id, ev.id)).run()
-      return recordPurchase(db, studioId, { description: `Event renewal · ${p.eventName}`, kind: 'renewal', amountPaise: p.chargedPaise, method })
+      if (p.linkId) await db.update(schema.renewalLinks).set({ paidAt: nowIso() }).where(eq(schema.renewalLinks.id, p.linkId)).run()
+      const by = p.linkId ? ' (paid by your client)' : ''
+      return recordPurchase(db, studioId, { description: `Event renewal · ${p.eventName}${by}`, kind: 'renewal', amountPaise: p.chargedPaise, method })
     }
     case 'pack': {
       const pack = PACKS.find((x) => x.photos === p.photos)!

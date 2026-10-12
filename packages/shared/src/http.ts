@@ -1,5 +1,5 @@
 import type {
-  AssetFile, OrderPayment, PackPurchase,
+  AssetFile, OrderPayment, PackPurchase, PublicRenewal, RenewalPayResult,
   ChangeTopic, FramelineApi, GuestLinkResult, ListPhotosQuery, PlanChange, RenewalLink, RenewalResult, ResolvedGuestLink, UploadFile, UploadOptions,
 } from './api'
 import type {
@@ -792,6 +792,13 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     listMyFavourites: async (shortId) => (await request<{ items: Photo[] }>('GET', `/v1/public/events/${enc(shortId)}/me/favourites`, { guest: g(shortId) })).items,
     listMyOrders: async (shortId) => (await request<{ items: Order[] }>('GET', `/v1/public/events/${enc(shortId)}/me/orders`, { guest: g(shortId) })).items,
     confirmOrder: (orderId, payment) => request<Order>('POST', `/v1/public/orders/${enc(orderId)}/confirm`, { body: payment, guest: lastGallery ?? '' }),
+    resolveQr: (slug) => request<{ shortId: string; target: SmartQR['target'] }>('GET', `/v1/public/q/${enc(slug)}`, { auth: false }),
+    getRenewal: (id) => request<PublicRenewal>('GET', `/v1/public/renewals/${enc(id)}`, { auth: false }),
+    payRenewal: async (id) => {
+      const r = await request<PublicRenewal | Extract<RenewalPayResult, { payment: unknown }>>('POST', `/v1/public/renewals/${enc(id)}/pay`, { auth: false, idempotent: true })
+      return 'payment' in r ? r : { renewal: r }
+    },
+    confirmRenewal: (id, payment) => request<PublicRenewal>('POST', `/v1/public/renewals/${enc(id)}/confirm`, { body: payment, auth: false }),
     requestAccess: (shortId, input) => request<{ received: true }>('POST', `/v1/public/events/${enc(shortId)}/access-requests`, { body: { note: '', ...input }, guest: g(shortId) }),
     unfollowStudio: (followCode) => request<{ followers: number }>('DELETE', `/v1/public/studios/${enc(followCode)}/follow`, { guest: lastGallery ?? '' }),
     listFollowedStudios: async () => (await request<{ items: PublicStudio[] }>('GET', '/v1/public/me/follows', { guest: lastGallery ?? '' })).items,

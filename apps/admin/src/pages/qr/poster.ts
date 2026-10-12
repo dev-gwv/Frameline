@@ -1,6 +1,11 @@
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 
-export const shortUrl = (slug: string) => `frameline.in/q/${slug}`
+import { GALLERY_URL, displayUrl } from '../workspace/lib'
+
+/** The link a smart QR encodes; the gallery resolves /q/<slug> through the API (and counts the scan). */
+export const qrUrl = (slug: string) => `${GALLERY_URL}/q/${slug}`
+/** The same link without its protocol, for printing. */
+export const shortUrl = (slug: string) => displayUrl(qrUrl(slug))
 
 /** A4 (595×842 pt) printable poster with the QR code in the middle. */
 /** `qrSvg` is the rendered QRCode (real encoded URL, logo included). */

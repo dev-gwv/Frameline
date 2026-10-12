@@ -153,14 +153,17 @@ businessRoutes.openapi(createRoute({
   const db = getDb(c.env.DB)
   const { name, eventId } = c.req.valid('json')
   const ev = await eventForMember(db, m, eventId)
+  // Short links (GALLERY_URL/q/<slug>) are shared by every studio, so a slug must be free everywhere.
+  const id = newId('qr')
   const base = slugify(name)
   let slug = base
-  for (let i = 2; i < 50; i++) {
-    const [taken] = await db.select({ id: schema.smartQrs.id }).from(schema.smartQrs).where(and(eq(schema.smartQrs.studioId, m.studioId), eq(schema.smartQrs.slug, slug))).limit(1)
+  for (let i = 2; ; i++) {
+    const [taken] = await db.select({ id: schema.smartQrs.id }).from(schema.smartQrs).where(eq(schema.smartQrs.slug, slug)).limit(1)
     if (!taken) break
-    slug = `${base}-${i}`
+    slug = i < 10 ? `${base}-${i}` : `${base}-${id.slice(-6)}`
+    if (i > 10) throw new Conflict('Couldn’t find a free short link. Try another name.', 'slug_taken')
   }
-  const qr = { id: newId('qr'), studioId: m.studioId, name, slug, eventId: ev.id, target: 'web' as const, scans: 0, color: '#1B1712', createdAt: nowIso(), scheduledEventId: null, scheduledAt: null, dotStyle: null, logoUrl: null, deletedAt: null }
+  const qr = { id, studioId: m.studioId, name, slug, eventId: ev.id, target: 'web' as const, scans: 0, color: '#1B1712', createdAt: nowIso(), scheduledEventId: null, scheduledAt: null, dotStyle: null, logoUrl: null, deletedAt: null }
   await db.insert(schema.smartQrs).values(qr).run()
   emit(c, m.studioId, 'misc')
   return c.json(qrOut(qr), 201)
@@ -191,7 +194,7 @@ businessRoutes.openapi(createRoute({
   if (patch.eventId) patch.eventId = (await eventForMember(db, m, patch.eventId)).id
   if (patch.scheduledEventId) patch.scheduledEventId = (await eventForMember(db, m, patch.scheduledEventId)).id
   if (patch.slug && patch.slug !== qr.slug) {
-    const [taken] = await db.select({ id: t.id }).from(t).where(and(eq(t.studioId, m.studioId), eq(t.slug, patch.slug))).limit(1)
+    const [taken] = await db.select({ id: t.id }).from(t).where(eq(t.slug, patch.slug)).limit(1)
     if (taken) throw new Conflict(`The short link "${patch.slug}" is already used.`, 'slug_taken')
   }
   const set = {

@@ -4,7 +4,7 @@ import { fmt, type PhotoEvent, type SmartQR } from '@frameline/shared'
 import { Button, Card, Menu, QRCode, useToast } from '@frameline/ui'
 import { downloadBlob, downloadBlobFile, svgMarkup, svgToPng, switchTime, useCopy } from './util'
 import { assetAccept, useAssetUpload } from '../watermarks/assetUpload'
-import { buildPoster, shortUrl } from './poster'
+import { buildPoster, qrUrl, shortUrl } from './poster'
 import { scheduleOf } from './modals'
 
 const INK = '#1B1712'
@@ -40,7 +40,7 @@ export function QRCard({ qr, events, studioName, brandColor, onUpdate, onChangeE
   const event = events.find((e) => e.id === qr.eventId)
   const schedule = scheduleOf(qr)
   const next = schedule && events.find((e) => e.id === schedule.eventId)
-  const url = `https://${shortUrl(qr.slug)}`
+  const url = qrUrl(qr.slug)
   const logo = qr.logoUrl || undefined
   // The encoder draws square modules or round dots; 'rounded' and 'dots' both render as dots.
   const rounded = (qr.dotStyle ?? 'square') !== 'square'

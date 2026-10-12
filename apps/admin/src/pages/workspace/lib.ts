@@ -10,7 +10,7 @@ export function galleryLink(ev: Pick<PhotoEvent, 'shortId' | 'name'>, short = tr
   const base = `${GALLERY_URL}/${ev.shortId}`
   return short ? base : `${base}?e=${slug(ev.name)}`
 }
-export const appLink = (ev: Pick<PhotoEvent, 'shortId'>) => `https://frameline.in/app?code=${ev.shortId.toLowerCase()}`
+export const appLink = (ev: Pick<PhotoEvent, 'shortId'>) => `${GALLERY_URL}/app?code=${ev.shortId.toLowerCase()}`
 /** A link without its protocol, for display and printing. */
 export const displayUrl = (u: string) => u.replace(/^https?:\/\//, '')
 export const slug = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)

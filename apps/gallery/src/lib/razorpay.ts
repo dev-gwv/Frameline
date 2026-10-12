@@ -26,6 +26,28 @@ function loadRazorpay(): Promise<RazorpayCtor> {
   return loading
 }
 
+/** Razorpay Checkout for any server-made checkout (e.g. a renewal link); resolves with the signed payment. */
+export async function payCheckout(
+  checkout: { orderId: string; keyId: string; amount: number; currency: 'INR' },
+  opts: { name: string; description: string },
+): Promise<OrderPayment> {
+  const Razorpay = await loadRazorpay()
+  return new Promise<OrderPayment>((resolve, reject) => {
+    const rz = new Razorpay({
+      key: checkout.keyId,
+      order_id: checkout.orderId,
+      amount: Math.round(checkout.amount * 100),
+      currency: checkout.currency,
+      name: opts.name,
+      description: opts.description,
+      handler: (r: RazorpayResponse) => resolve({ providerOrderId: r.razorpay_order_id, paymentId: r.razorpay_payment_id, signature: r.razorpay_signature }),
+      modal: { ondismiss: () => reject(new Error('Payment was cancelled. Nothing was charged.')) },
+    })
+    rz.on('payment.failed', (r) => reject(new Error(r.error?.description ?? 'The payment failed. Try again or use another method.')))
+    rz.open()
+  })
+}
+
 /** Opens Razorpay Checkout for a pending order and resolves with the payment to send to api.confirmOrder. */
 export async function payWithRazorpay(order: Order, opts: { name: string; description: string; buyer: { name: string; email: string; phone?: string }; color?: string }): Promise<OrderPayment> {
   const checkout = order.checkout

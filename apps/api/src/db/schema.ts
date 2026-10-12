@@ -418,7 +418,7 @@ export const smartQrs = sqliteTable('smart_qrs', {
   dotStyle: text('dot_style', { enum: ['square', 'rounded', 'dots'] }),
   logoUrl: text('logo_url'),
   deletedAt: ts('deleted_at'),
-}, (t) => [uniqueIndex('qrs_slug_uq').on(t.studioId, t.slug)])
+}, (t) => [uniqueIndex('qrs_slug_global_uq').on(t.slug)])
 
 export const broadcasts = sqliteTable('broadcasts', {
   id: text('id').primaryKey(),

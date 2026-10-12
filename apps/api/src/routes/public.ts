@@ -27,7 +27,7 @@ import { addLedger } from '../services/billing'
 import { matchFaces, visiblePhotos as visible } from '../services/faces'
 import { resolveLink } from '../services/guest-links'
 import { markOrderPaid, verifyCheckoutSignature } from '../services/orders'
-import { createProviderOrder, paymentMode } from '../services/payments'
+import { createProviderOrder, grantStudioPurchase, openStudioPayment, paymentMode, settleStudioPayment } from '../services/payments'
 import { emit } from '../services/realtime'
 import { chunk } from './photos'
 import { UploadFileInput, completeUploadSession, createUploadSession } from './uploads'
@@ -776,6 +776,98 @@ publicRoutes.openapi(createRoute({
   const { order: paid, changed } = await markOrderPaid(db, order)
   if (changed) emit(c, order.studioId, 'misc', 'activity')
   return c.json(orderOut(paid), 200)
+})
+
+// ── Smart QR short links and client renewal links ─────────────────────────
+publicRoutes.openapi(createRoute({
+  method: 'get', path: '/q/{slug}', tags: ['Public gallery'], summary: 'Resolve a smart QR short link (GALLERY_URL/q/<slug>) and count the scan',
+  request: { params: z.object({ slug: z.string().regex(/^[a-z0-9-]{1,32}$/).openapi({ param: { name: 'slug', in: 'path' }, example: 'riya-kabir' }) }) },
+  responses: { 200: json(z.object({ shortId: z.string(), target: z.enum(['web', 'app', 'smart']) })), ...problems(404) },
+}), async (c) => {
+  const db = getDb(c.env.DB)
+  const q = schema.smartQrs
+  const slug = c.req.valid('param').slug
+  const [row] = await db.select({ id: q.id, target: q.target, shortId: schema.events.shortId }).from(q)
+    .innerJoin(schema.events, eq(schema.events.id, q.eventId))
+    .where(and(eq(q.slug, slug), isNull(q.deletedAt), isNull(schema.events.deletedAt))).limit(1)
+  if (!row) throw new NotFound('QR code', slug)
+  background(c, db.update(q).set({ scans: sql`${q.scans} + 1` }).where(eq(q.id, row.id)).run())
+  return c.json({ shortId: row.shortId, target: row.target }, 200)
+})
+
+const RenewalIdParam = z.object({ id: z.string().regex(/^rl_[0-9a-z]+$/).max(64).openapi({ param: { name: 'id', in: 'path' } }) })
+const RenewalLink = z.object({
+  id: z.string(), eventName: z.string(), studioName: z.string(), price: z.number(),
+  linkExpiresAt: z.string(), eventExpiresAt: z.string(), paid: z.boolean(),
+}).openapi('RenewalLink')
+
+async function renewalLink(c: Context<AppEnv>, id: string) {
+  const db = getDb(c.env.DB)
+  const rl = schema.renewalLinks
+  const [row] = await db.select({ l: rl, e: schema.events, studioName: schema.studios.name }).from(rl)
+    .innerJoin(schema.events, eq(schema.events.id, rl.eventId)).innerJoin(schema.studios, eq(schema.studios.id, rl.studioId))
+    .where(and(eq(rl.id, id), isNull(schema.events.deletedAt))).limit(1)
+  if (!row) throw new NotFound('Renewal link', id)
+  return row
+}
+const renewalOut = (r: Awaited<ReturnType<typeof renewalLink>>): z.infer<typeof RenewalLink> => ({
+  id: r.l.id, eventName: r.e.name, studioName: r.studioName, price: toMajor(r.l.pricePaise),
+  linkExpiresAt: r.l.expiresAt, eventExpiresAt: r.e.expiresAt, paid: !!r.l.paidAt,
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'get', path: '/renewals/{id}', tags: ['Public gallery'], summary: 'A renewal link the studio sent its client',
+  request: { params: RenewalIdParam },
+  responses: { 200: json(RenewalLink), ...problems(404) },
+}), async (c) => c.json(renewalOut(await renewalLink(c, c.req.valid('param').id)), 200))
+
+publicRoutes.openapi(createRoute({
+  method: 'post', path: '/renewals/{id}/pay', tags: ['Public gallery'], summary: 'Pay a renewal link',
+  description: 'With Razorpay keys: 202 with a pending `payment` (its `checkout` opens Razorpay Checkout), then POST /v1/public/renewals/:id/confirm or the webhook renews the event. Without keys: 503 `payments_not_configured` in production, renewed at once in development/test. 409 `already_paid`, 410 `link_expired`.',
+  middleware: [idempotent] as const,
+  request: { params: RenewalIdParam, headers: IdempotencyHeader },
+  responses: {
+    200: json(RenewalLink),
+    202: json(z.object({ payment: z.object({ id: z.string(), amount: z.number(), checkout: z.object({ provider: z.literal('razorpay'), orderId: z.string(), keyId: z.string(), amount: z.number(), currency: z.literal('INR') }) }) }), 'Pay to finish'),
+    ...problems(404, 409, 410, 503),
+  },
+}), async (c) => {
+  const r = await renewalLink(c, c.req.valid('param').id)
+  if (r.l.paidAt) throw new AppError(409, 'already_paid', 'Already paid', 'This renewal is already paid. Thank you!')
+  if (Date.parse(r.l.expiresAt) < Date.now()) throw new AppError(410, 'link_expired', 'Link expired', 'This payment link has expired. Ask your photographer for a new one.')
+  const db = getDb(c.env.DB)
+  const renewal = { kind: 'renewal' as const, eventId: r.e.id, eventName: r.e.name, chargedPaise: r.l.pricePaise, linkId: r.l.id }
+  if (paymentMode(c.env) === 'razorpay') {
+    const p = await openStudioPayment(c.env, db, r.l.studioId, undefined, renewal, 'card')
+    return c.json({ payment: { id: p.id, amount: p.amount, checkout: p.checkout } }, 202)
+  }
+  // Simulated (development/test only): claim the link first so a double tap renews once.
+  const claimed = await db.update(schema.renewalLinks).set({ paidAt: nowIso() }).where(and(eq(schema.renewalLinks.id, r.l.id), isNull(schema.renewalLinks.paidAt))).run()
+  if (!claimed.meta.changes) throw new AppError(409, 'already_paid', 'Already paid', 'This renewal is already paid. Thank you!')
+  await grantStudioPurchase(db, r.l.studioId, renewal, 'card')
+  emit(c, r.l.studioId, 'events', 'usage', 'misc')
+  return c.json(renewalOut(await renewalLink(c, r.l.id)), 200)
+})
+
+publicRoutes.openapi(createRoute({
+  method: 'post', path: '/renewals/{id}/confirm', tags: ['Public gallery'], summary: 'Finish paying a renewal link after Razorpay Checkout',
+  description: 'Verifies Checkout’s signature, then renews the event exactly once. Idempotent; the webhook does the same server to server.',
+  request: { params: RenewalIdParam, body: body(z.object({ providerOrderId: z.string().max(128), paymentId: z.string().max(128), signature: z.string().max(256) })) },
+  responses: { 200: json(RenewalLink), ...problems(401, 404, 409, 501) },
+}), async (c) => {
+  if (!c.env.RAZORPAY_KEY_SECRET) throw new NotConfigured('Payments', 'Online payments are not configured (RAZORPAY_KEY_SECRET).')
+  const r = await renewalLink(c, c.req.valid('param').id)
+  const input = c.req.valid('json')
+  const db = getDb(c.env.DB)
+  const sp = schema.studioPayments
+  const [row] = await db.select().from(sp).where(and(eq(sp.providerOrderId, input.providerOrderId), eq(sp.studioId, r.l.studioId))).limit(1)
+  if (!row || (row.payload as { linkId?: string }).linkId !== r.l.id) throw new AppError(409, 'payment_mismatch', 'Conflict', 'This payment belongs to a different purchase.')
+  if (!(await verifyCheckoutSignature(c.env.RAZORPAY_KEY_SECRET, input.providerOrderId, input.paymentId, input.signature))) {
+    throw new Unauthorized('The payment signature is invalid.', 'invalid_signature')
+  }
+  const { changed } = await settleStudioPayment(db, row, input.paymentId)
+  if (changed) emit(c, r.l.studioId, 'events', 'usage', 'misc')
+  return c.json(renewalOut(await renewalLink(c, r.l.id)), 200)
 })
 
 publicRoutes.openapi(createRoute({

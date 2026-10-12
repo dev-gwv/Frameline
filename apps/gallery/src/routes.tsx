@@ -5,6 +5,7 @@ import { Landing } from './pages/Landing'
 import { EventLayout } from './pages/EventLayout'
 import { EventHome } from './pages/EventHome'
 import { PersonalLink } from './pages/PersonalLink'
+import { AppLink, FollowLink, QrLink } from './pages/ShortLinks'
 import { NotFound } from './pages/NotFound'
 import { linkBtn, PrimaryButton, StatePage } from './components/common'
 
@@ -47,6 +48,12 @@ export const router = createBrowserRouter([
       { path: '/s/:token', element: <PersonalLink /> },
       { path: '/v/:token', element: <PersonalLink /> },
       { path: '/studio/:followCode', element: page(() => import('./pages/StudioProfile'), 'StudioProfile') },
+      // Short links printed or shared elsewhere: smart QR posters, follow links, "open in the app", renewal payments.
+      { path: '/q/:slug', element: <QrLink /> },
+      { path: '/follow/:code', element: <FollowLink /> },
+      { path: '/f/:code', element: <FollowLink /> },
+      { path: '/app', element: <AppLink /> },
+      { path: '/renew/:id', element: page(() => import('./pages/Renew'), 'Renew') },
       {
         path: '/:shortId',
         element: <EventLayout />,

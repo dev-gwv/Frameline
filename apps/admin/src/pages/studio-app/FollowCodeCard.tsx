@@ -4,7 +4,10 @@ import { fmt, type Studio } from '@frameline/shared'
 import { Button, Card, CardHeader, Modal, QRCode } from '@frameline/ui'
 import { downloadBlob, svgMarkup, useCopy } from './util'
 
-export const followLink = (code: string) => `https://frameline.in/follow/${code}`
+import { GALLERY_URL } from '../workspace/lib'
+
+/** Opens the studio's profile on the guest site (the gallery redirects /follow/<code> to /studio/<code>). */
+export const followLink = (code: string) => `${GALLERY_URL}/follow/${code}`
 
 export function FollowCodeCard({ studio }: { studio: Studio }) {
   const copy = useCopy()

@@ -65,6 +65,12 @@ export type PlanPayWith = 'wallet' | 'card' | 'upi'
 export interface PlanChange { usage: Usage; charged: number; credit: number; gst: number; total: number; payWith: PlanPayWith; purchase: Purchase | null }
 export interface RenewalResult { event: PhotoEvent; charged: number; payWith: 'credits' | 'card' }
 export interface RenewalLink { url: string; price: number; expiresAt: string }
+/** A renewal link as the client who pays it sees it (GALLERY_URL/renew/<id>). */
+export interface PublicRenewal { id: string; eventName: string; studioName: string; price: number; linkExpiresAt: string; eventExpiresAt: string; paid: boolean }
+/** Paying a renewal link: done at once (simulated), or a Razorpay checkout to finish with confirmRenewal. */
+export type RenewalPayResult =
+  | { renewal: PublicRenewal }
+  | { payment: { id: string; amount: number; checkout: { provider: 'razorpay'; orderId: string; keyId: string; amount: number; currency: 'INR' } } }
 export interface GuestLinkResult { code: string; kind: GuestLinkKind; path: string; url: string; payload: GuestLinkPayload }
 export interface ResolvedGuestLink {
   kind: GuestLinkKind
@@ -304,6 +310,11 @@ export interface FramelineApi {
   listMyOrders(shortId: string): Promise<Order[]>
   /** Completes a pending order after Razorpay Checkout succeeds. */
   confirmOrder(orderId: ID, payment: OrderPayment): Promise<Order>
+  /** Where a smart QR short link (GALLERY_URL/q/<slug>) points; counts the scan. */
+  resolveQr(slug: string): Promise<{ shortId: string; target: SmartQR['target'] }>
+  getRenewal(id: string): Promise<PublicRenewal>
+  payRenewal(id: string): Promise<RenewalPayResult>
+  confirmRenewal(id: string, payment: OrderPayment): Promise<PublicRenewal>
   requestAccess(shortId: string, input: { name: string; email: string; note?: string }): Promise<{ received: true }>
   unfollowStudio(followCode: string): Promise<{ followers: number }>
   listFollowedStudios(): Promise<PublicStudio[]>
@@ -407,11 +418,13 @@ interface MockExtra {
   /** The download log: one row per photo actually downloaded (see DownloadEvent). Source of truth for every
    * download count (getEventStats' `downloads`, the Guests tab stat) — nothing else increments separately. */
   downloadEvents: DownloadEvent[]
+  /** Renewal links made by createRenewalLink: link id → what the client pays. */
+  renewals: Record<string, { eventId: ID; price: number; expiresAt: string; paid: boolean }>
 }
 
 const EXTRA_DEFAULTS = (): MockExtra => ({
   coupons: [], usageReport: null, guestIds: {}, pinVerified: [], vipPin: [], downloadUses: {}, followed: [], recent: {}, myOrders: [], cartReminders: {}, assets: [],
-  removedGuests: {}, resolvedRequests: {}, notify: [], faceScan: {}, copiedFrom: {}, downloadEvents: [],
+  removedGuests: {}, resolvedRequests: {}, notify: [], faceScan: {}, copiedFrom: {}, downloadEvents: [], renewals: {},
 })
 
 /**
@@ -746,6 +759,12 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
   function session(e: PhotoEvent, seeAll: boolean, guestId?: ID): GuestSession {
     return { token: `mock.${e.id}.${guestId ?? ''}.${seeAll ? 1 : 0}`, expiresIn: 12 * 3600, eventId: e.id, shortId: e.shortId, guestId, seeAll }
   }
+  function mockRenewal(id: string): PublicRenewal {
+    const link = state.extra.renewals[id]
+    if (!link) return fail(404, 'not_found', `Renewal link ${id} was not found.`)
+    const e = findEvent(link.eventId)
+    return { id, eventName: e.name, studioName: s().studio.name, price: link.price, linkExpiresAt: link.expiresAt, eventExpiresAt: e.expiresAt, paid: link.paid }
+  }
   function studioFor(code: string) {
     const st = s().studio
     const c = code.trim().toLowerCase()
@@ -935,7 +954,10 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     async createRenewalLink(eventId) {
       await wait(latency)
       const e = findEvent(eventId)
-      return { url: `${GALLERY_ORIGIN}/renew/${e.shortId.toLowerCase()}-${Math.random().toString(36).slice(2, 8)}`, price: BASE_RENEWAL * s().usage.renewalMultiplier, expiresAt: new Date(Date.now() + 30 * DAY).toISOString() }
+      const id = `rl_${Math.random().toString(36).slice(2, 10)}`
+      const link = { eventId: e.id, price: BASE_RENEWAL * s().usage.renewalMultiplier, expiresAt: new Date(Date.now() + 30 * DAY).toISOString(), paid: false }
+      state.extra.renewals[id] = link
+      return { url: `${GALLERY_ORIGIN}/renew/${id}`, price: link.price, expiresAt: link.expiresAt }
     },
     async createGuestLink(eventId, payload) {
       await wait(latency / 2)
@@ -1682,6 +1704,36 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
         emit('misc', 'activity')
       }
       return clone(o)
+    },
+    async resolveQr(slug) {
+      await wait(latency)
+      const q = s().qrs.find((x) => x.slug === slug.toLowerCase() && !x.deletedAt)
+      if (!q) return fail(404, 'not_found', `QR code ${slug} was not found.`)
+      q.scans += 1
+      emit('misc')
+      return { shortId: findEvent(q.eventId).shortId, target: q.target }
+    },
+    async getRenewal(id) {
+      await wait(latency)
+      return mockRenewal(id)
+    },
+    async payRenewal(id) {
+      await wait(latency)
+      const r = mockRenewal(id)
+      if (r.paid) fail(409, 'already_paid', 'This renewal is already paid. Thank you!')
+      if (Date.parse(r.linkExpiresAt) < Date.now()) fail(410, 'link_expired', 'This payment link has expired. Ask your photographer for a new one.')
+      const link = state.extra.renewals[id]
+      const e = findEvent(link.eventId)
+      link.paid = true
+      purchase({ description: `Event renewal · ${e.name} (paid by your client)`, kind: 'renewal', amount: link.price, method: 'card' })
+      e.expiresAt = new Date(Math.max(Date.now(), Date.parse(e.expiresAt)) + 365 * DAY).toISOString()
+      if (e.status === 'expiring' || e.status === 'archived') e.status = 'live'
+      emit('events', 'usage', 'misc')
+      return { renewal: mockRenewal(id) }
+    },
+    async confirmRenewal(id) {
+      await wait(latency)
+      return mockRenewal(id)
     },
     async requestAccess(shortId, input) {
       await wait(latency)

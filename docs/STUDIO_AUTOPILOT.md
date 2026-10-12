@@ -188,9 +188,15 @@ The findings above describe the code as it was on 12 Oct 2026. These are fixed s
 - `DEMO_NOW` is the real clock.
 - `FEATURES.driveImport`, `aiEnhance`, `cameraSync` and `broadcasts` are off. Their admin entry points are hidden, and `POST /photos/:id/enhance` returns 503 `feature_unavailable` before touching the wallet. The code stays in place; turn a flag back on once the feature is real.
 
+**Batch 4, links that lead nowhere**
+- Smart QR:
+  - `GET /v1/public/q/:slug` resolves a QR to its event and counts the scan.
+  - Slugs are unique across all studios (migration `0008`; slugs already shared by two studios get a suffix).
+  - The admin encodes `GALLERY_URL/q/<slug>`, and the gallery's `/q/:slug` page follows it.
+- Renewal links: `GET /v1/public/renewals/:id`, `POST …/pay` (202 with a Razorpay checkout, or simulated in development and test) and `POST …/confirm`. The webhook settles them too, since they ride on `studio_payments` with `payload.linkId`. The gallery's `/renew/:id` page takes the payment. The studio's purchase list shows "(paid by your client)".
+- The gallery now has `/follow/:code`, `/f/:code` and `/app?code=`. The admin's follow and app links use `GALLERY_URL` instead of `frameline.in`.
+
 **Still open, in order:**
-- QR resolver with globally unique slugs and scan counting.
-- Follow and renewal links.
 - Plan expiry and pack limits.
 - Processor work: no silent simulation in production, a `failed` status and dead-letter consumer, EXIF rotation, renditions.
 - Real ZIP, a signed receipt link, guest verification.
