@@ -8,6 +8,7 @@ import { logDownloadsBatch } from './downloads'
 import { notifyWaitingGuests } from './notify'
 import { publishTopics } from './realtime'
 import { vectorIndex } from './vectors'
+import { assignPeople, recountPeople, type ClusterMemory } from './clustering'
 
 /**
  * Image processing contract. The real implementation is apps/processor (Node + sharp + YuNet/SFace ONNX,
@@ -88,12 +89,19 @@ async function markFailed(env: Env, job: ProcessPhotoJob, error: string) {
 }
 
 /** Applies a processing result: marks the photo ready, stores faces (D1 + Vectorize namespace = event id). */
-export async function applyResult(env: Env, job: ProcessPhotoJob, result: ProcessResult): Promise<boolean> {
+export async function applyResult(env: Env, job: ProcessPhotoJob, result: ProcessResult, memory: ClusterMemory = new Map()): Promise<boolean> {
   const db = getDb(env.DB)
   const [photo] = await db.select().from(schema.photos).where(eq(schema.photos.id, job.photoId)).limit(1)
   if (!photo) return false // deleted while processing
 
   const faceRows = result.faces.map((f) => ({ id: newId('fc'), photoId: photo.id, eventId: photo.eventId, personId: f.personId ?? null, box: f.box, vectorId: null as string | null }))
+  // Faces with an embedding and no person yet are clustered into the event's people (services/clustering.ts).
+  const index = vectorIndex(env)
+  const toCluster = result.faces.map((f, i) => ({ f, i })).filter(({ f }) => !f.personId && f.embedding?.length)
+  if (index && toCluster.length) {
+    const ids = await assignPeople(env, index, photo.eventId, toCluster.map(({ f }) => ({ embedding: f.embedding! })), memory)
+    toCluster.forEach(({ i }, k) => { faceRows[i].personId = ids[k] })
+  }
   const vectors: VectorizeVector[] = []
   result.faces.forEach((f, i) => {
     if (f.embedding?.length) {
@@ -101,7 +109,6 @@ export async function applyResult(env: Env, job: ProcessPhotoJob, result: Proces
       vectors.push({ id: faceRows[i].id, values: f.embedding, namespace: photo.eventId, metadata: { photoId: photo.id, eventId: photo.eventId } })
     }
   })
-  const index = vectorIndex(env)
   // Re-processing (retries, re-index) replaces the photo's faces.
   const old = await db.select({ v: schema.faces.vectorId }).from(schema.faces).where(eq(schema.faces.photoId, photo.id))
   const oldVectors = old.map((o) => o.v).filter((v): v is string => !!v)
@@ -127,6 +134,7 @@ export async function applyResult(env: Env, job: ProcessPhotoJob, result: Proces
 export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env): Promise<void> {
   const processor = getProcessor(env)
   const touched = new Map<string, Set<string>>() // studioId → eventIds
+  const memory: ClusterMemory = new Map()
   for (const msg of batch.messages) {
     const job = msg.body
     try {
@@ -134,7 +142,7 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
       if (job.kind !== 'process-photo') { msg.ack(); continue }
       // Photos registered by URL have no file in R2 for the processor to read.
       const result = await (job.key ? processor : new SimulatedProcessor(env)).process(job)
-      if (await applyResult(env, job, result)) {
+      if (await applyResult(env, job, result, memory)) {
         if (!touched.has(job.studioId)) touched.set(job.studioId, new Set())
         touched.get(job.studioId)!.add(job.eventId)
       }
@@ -152,6 +160,8 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
     }
   }
   const db = getDb(env.DB)
+  // People's photo counts, for the events where faces were clustered in this batch.
+  await recountPeople(env, [...memory.keys()]).catch((e) => console.error(JSON.stringify({ level: 'error', msg: 'people recount failed', error: String(e) })))
   for (const [studioId, eventIds] of touched) {
     for (const eventId of eventIds) {
       await db.run(sql`UPDATE events SET status = 'live' WHERE id = ${eventId} AND status = 'uploading'

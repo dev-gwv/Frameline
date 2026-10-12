@@ -5,6 +5,7 @@ import { z } from 'zod'
 import type { ProcessorEnv } from './env.ts'
 import { r2Client } from './r2.ts'
 import { detectAndEmbed } from './faces.ts'
+import { readExif, type ExifSummary } from './exif.ts'
 
 /**
  * Matches apps/api's `HttpProcessor`/`ProcessResult` contract exactly (apps/api/src/services/processor.ts) —
@@ -54,7 +55,9 @@ export function buildServer(env: ProcessorEnv) {
       // faces lying on their side aren't found. 422 when the file can't be decoded at all (a video, HEIC this
       // build can't read, a corrupt upload): apps/api then marks the photo `failed` instead of retrying.
       let upright: Buffer
+      let exif: ExifSummary = {}
       try {
+        exif = readExif((await sharp(buffer).metadata()).exif)
         upright = await sharp(buffer).rotate().toBuffer()
       } catch (err) {
         return c.json({ error: 'unsupported_file', detail: String(err) }, 422)
@@ -75,6 +78,9 @@ export function buildServer(env: ProcessorEnv) {
         width: result.width,
         height: result.height,
         sizeBytes: buffer.byteLength,
+        ...(exif.capturedAt ? { capturedAt: exif.capturedAt } : {}),
+        // Only fields the file has: applyResult() merges these over what the upload already recorded.
+        exif: Object.fromEntries(Object.entries({ camera: exif.camera, lens: exif.lens, exposure: exif.exposure }).filter(([, v]) => v)),
         faces: result.faces.map((f) => ({ box: f.box, embedding: f.embedding })),
       })
     } catch (err) {
