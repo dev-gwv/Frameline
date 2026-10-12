@@ -6,6 +6,7 @@ import type { ProcessorEnv } from './env.ts'
 import { r2Client } from './r2.ts'
 import { detectAndEmbed } from './faces.ts'
 import { readExif, type ExifSummary } from './exif.ts'
+import { renderDownload } from './render.ts'
 
 /**
  * Matches apps/api's `HttpProcessor`/`ProcessResult` contract exactly (apps/api/src/services/processor.ts) —
@@ -23,6 +24,18 @@ const ProcessJob = z.object({
   bucket: z.string(),
 })
 
+const RenderJob = z.object({
+  bucket: z.string(),
+  key: z.string(),
+  size: z.union([z.literal(2048), z.literal(3072)]),
+  rotation: z.number().int().optional(),
+  watermark: z.object({
+    text: z.string().max(200), subtitle: z.string().max(200).optional(),
+    position: z.enum(['tl', 'tc', 'tr', 'bl', 'bc', 'br']), size: z.enum(['subtle', 'normal', 'bold']),
+    opacity: z.number().min(0).max(100), edgeOffset: z.number().min(0).max(30).optional(),
+  }).optional(),
+})
+
 /** Long-edge sizes of the download renditions (web size, and high resolution when the gallery allows it). */
 const RENDITION_SIZES = [2048, 3072] as const
 
@@ -35,6 +48,24 @@ export function buildServer(env: ProcessorEnv) {
   const app = new Hono()
 
   app.get('/health', (c) => c.json({ ok: true }))
+
+  // A download rendition made now: rotation and watermark as they are today (apps/api streams it to the guest).
+  app.post('/render', async (c) => {
+    const auth = c.req.header('authorization')
+    const token = auth?.match(/^Bearer\s+(.+)$/i)?.[1]
+    if (!token || !safeEqual(token, env.authToken)) return c.json({ error: 'unauthorized' }, 401)
+    const body = RenderJob.safeParse(await c.req.json().catch(() => null))
+    if (!body.success) return c.json({ error: 'invalid_job', issues: body.error.issues }, 400)
+    const job = body.data
+    try {
+      const original = Buffer.from(await r2Client(env.r2).getObject(job.bucket, job.key))
+      const jpeg = await renderDownload(original, { size: job.size, rotation: job.rotation, watermark: job.watermark })
+      return new Response(new Uint8Array(jpeg), { headers: { 'Content-Type': 'image/jpeg', 'Content-Length': String(jpeg.byteLength) } })
+    } catch (err) {
+      console.error(JSON.stringify({ level: 'error', msg: 'render failed', key: job.key, error: String(err) }))
+      return c.json({ error: 'render_failed', detail: String(err) }, 502)
+    }
+  })
 
   app.post('/process', async (c) => {
     const auth = c.req.header('authorization')

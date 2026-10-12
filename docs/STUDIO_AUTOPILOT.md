@@ -232,9 +232,20 @@ The findings above describe the code as it was on 12 Oct 2026. These are fixed s
   - DEPLOYMENT.md lists `STUDIOAUTOPILOT_SECRET` and `PROCESSOR_URL`;
   - the upload mode reads as optional.
 
+**Batch 9, faces and EXIF (`fe9bc9d`)**
+- The processor reads capture time, camera, lens and exposure from EXIF (`apps/processor/src/exif.ts`).
+- Faces are clustered into people (`services/clustering.ts`): a new face joins the closest earlier face's person at cosine ≥ 0.42, checking this queue batch in memory and then Vectorize; otherwise it starts a new unnamed person. Photo counts are recounted per batch.
+
+**Batch 10, watermarks burned in on the server**
+- New processor endpoint `POST /render`: upright, turned by the studio's rotation, resized, watermark burned in (an SVG overlay matching the gallery's canvas layout).
+- `services/renditions.ts`:
+  - `watermarkFor` is the gallery's watermark rule;
+  - `downloadFile` returns the stored rendition when the file is plain and unrotated, otherwise a fresh render from the processor.
+- Single downloads and guest ZIPs use it, so watermarked galleries get ZIPs again whenever a processor is connected. Without one: 409 `watermark_required`, and the gallery switches to saving one by one.
+
 **Still open:**
 - Guest email verification for "registered" galleries. Batch 2 already removed the session takeover, so a typed email can't reach anyone else's photos or orders; what's left is that the email isn't proven.
-- From batch 6: EXIF capture time and camera, watermark burn-in, face clustering, browser selfie embeddings.
+- Browser selfie embeddings (needs the face models hosted somewhere the gallery can load them).
 - KYC review, and support tickets nobody can answer.
 
 **Needs the owner:**

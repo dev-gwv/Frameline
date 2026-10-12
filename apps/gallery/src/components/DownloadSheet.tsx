@@ -103,9 +103,10 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
 
   const n = photos.length
   const big = n > DIRECT_DOWNLOAD_LIMIT
-  // A ZIP holds the files as they are, so it can't carry the watermark: watermarked galleries save one by one,
-  // where each photo is rendered with the watermark burned in.
-  const zipAllowed = !opts.applyWatermark
+  // The server burns the watermark into ZIPs when its image processor is connected. Without one it answers
+  // `watermark_required`; then the photos save one by one here, each rendered with the watermark burned in.
+  const [zipBlocked, setZipBlocked] = useState(false)
+  const zipAllowed = !zipBlocked
   const method = zipAllowed ? how : 'one'
   const word = n === 1 ? 'photo' : 'photos'
 
@@ -163,6 +164,7 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
       guest.setProfile({ email: email.trim() })
       setStage('emailed')
     } catch (err) {
+      if (errorCode(err) === 'watermark_required') { setZipBlocked(true); return }
       const f = friendlyError(err, 'We couldn’t send the ZIP')
       setEmailError(`${f.title}. ${f.body}`)
     } finally { setZipBusy(false) }
