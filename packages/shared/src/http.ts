@@ -403,12 +403,12 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
 
   const get = <T,>(path: string, query?: RequestOptions['query']) => request<T>('GET', path, { query })
 
-  /** Follows `nextCursor` until the last page. */
+  /** Follows `nextCursor` until the last page. Pages of 200 unless `query.limit` asks for fewer. */
   async function listAll<T>(path: string, query: RequestOptions['query'] = {}): Promise<T[]> {
     const out: T[] = []
     let cursor: string | undefined
     for (let guard = 0; guard < 1000; guard++) {
-      const page = await get<Page<T>>(path, { ...query, limit: 200, cursor })
+      const page = await get<Page<T>>(path, { limit: 200, ...query, cursor })
       out.push(...page.items)
       if (!page.nextCursor) break
       cursor = page.nextCursor
@@ -648,7 +648,8 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     createQR: (name, eventId) => request<SmartQR>('POST', '/v1/qrs', { body: { name, eventId }, idempotent: true }),
     listBroadcasts: () => listAll<Broadcast>('/v1/broadcasts'),
     sendBroadcast: (input) => request<Broadcast>('POST', '/v1/broadcasts', { body: pick(input, ['title', 'body', 'audience', 'scheduledAt', 'imageUrl'] as const), idempotent: true }),
-    listTickets: () => listAll<Ticket>('/v1/tickets'),
+    // /v1/tickets caps pages at 90 (D1's bound-parameter limit when loading their messages).
+    listTickets: () => listAll<Ticket>('/v1/tickets', { limit: 90 }),
     createTicket: (input) => request<Ticket>('POST', '/v1/tickets', { body: pick(input, ['subject', 'eventId', 'platform', 'body'] as const), idempotent: true }),
     replyTicket: (id, body) => request<Ticket>('POST', `/v1/tickets/${enc(id)}/messages`, { body: { body }, idempotent: true }),
     listTeam: async () => (await get<Page<TeamMember>>('/v1/team')).items,
