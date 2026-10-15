@@ -12,7 +12,8 @@ async function hmacHex(secret: string, data: string) {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   return hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data)))
 }
-const pin = async (shortId: string) => (await call(`/v1/public/events/${shortId}/pin`, { body: { pin: '5211' } })).json.token as string
+// The full-access PIN: these guests see every photo (the event PIN alone keeps face privacy).
+const pin = async (shortId: string) => (await call(`/v1/public/events/${shortId}/pin`, { body: { pin: '8642' } })).json.token as string
 
 async function newStudio() {
   const email = uniqueEmail('v3')

@@ -167,6 +167,9 @@ export interface FramelineApi {
   updateEvent(id: ID, patch: Partial<Omit<PhotoEvent, 'settings'>>): Promise<PhotoEvent>
   updateEventSettings(id: ID, patch: Partial<EventSettings>): Promise<PhotoEvent>
   resetPin(id: ID): Promise<string>
+  /** Turns on (or changes) the event's full-access PIN and returns it. */
+  setFullAccessPin(id: ID): Promise<string>
+  clearFullAccessPin(id: ID): Promise<void>
   /** Moves the event to the trash (restoreEvent within TRASH_DAYS). `permanent: true` deletes a trashed event for good now ("Delete forever"). */
   deleteEvent(id: ID, opts?: { permanent?: boolean }): Promise<void>
   renewEvent(eventId: ID, opts: { payWith: 'credits' | 'card' }): Promise<RenewalResult>
@@ -395,6 +398,8 @@ interface MockExtra {
   guestIds: Record<ID, ID>
   /** Events whose PIN this device typed (or got from a VIP link). */
   pinVerified: ID[]
+  /** Events this device opened with the full-access PIN or a "see all" VIP link (sees every photo). */
+  fullAccess?: ID[]
   /** Events whose PIN came embedded in a VIP link (Download all needs no PIN). */
   vipPin: ID[]
   downloadUses: Record<ID, number>
@@ -758,6 +763,10 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
   const normHost = (h: EventHost, prev?: EventHost): EventHost => ({
     ...h, access: h.access ?? prev?.access ?? 'full', status: h.status ?? prev?.status ?? 'invited', invitedAt: h.invitedAt ?? prev?.invitedAt ?? new Date().toISOString(),
   })
+  function randomPin(avoid?: string): string {
+    for (;;) { const pin = String(1000 + Math.floor(Math.random() * 9000)); if (pin !== avoid) return pin }
+  }
+
   function session(e: PhotoEvent, seeAll: boolean, guestId?: ID): GuestSession {
     return { token: `mock.${e.id}.${guestId ?? ''}.${seeAll ? 1 : 0}`, expiresIn: 12 * 3600, eventId: e.id, shortId: e.shortId, guestId, seeAll }
   }
@@ -925,7 +934,9 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       emit('events')
       return clone(findEvent(id))
     },
-    async resetPin(id) { await wait(latency); const pin = String(1000 + Math.floor(Math.random() * 9000)); findEvent(id).settings.pin = pin; emit('events'); return pin },
+    async resetPin(id) { await wait(latency); const st = findEvent(id).settings; const pin = randomPin(st.fullAccessPin); st.pin = pin; emit('events'); return pin },
+    async setFullAccessPin(id) { await wait(latency); const st = findEvent(id).settings; const pin = randomPin(st.pin); st.fullAccessPin = pin; emit('events'); return pin },
+    async clearFullAccessPin(id) { await wait(latency); delete findEvent(id).settings.fullAccessPin; emit('events') },
     async deleteEvent(id, o = {}) {
       await wait(latency)
       if (o.permanent) {
@@ -1376,7 +1387,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       const e = findEvent(shortId)
       state.extra.recent[e.id] = new Date().toISOString()
       save()
-      const { pin: _pin, ...settings } = e.settings
+      const { pin: _pin, fullAccessPin: _full, ...settings } = e.settings
       const cover = e.coverPhotoId ? getPhotoMerged(e.coverPhotoId) : undefined
       return clone({
         id: e.id, shortId: e.shortId, name: e.name, type: e.type, date: e.date, endDate: e.endDate, city: e.city, status: e.status,
@@ -1388,10 +1399,10 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     async verifyPin(shortId, pin) {
       await wait(latency)
       const e = findEvent(shortId)
-      if (e.settings.access !== 'link-pin') return session(e, true, state.extra.guestIds[e.id])
       const t = pinTries.get(e.id) ?? { count: 0, lockedUntil: 0 }
       if (t.lockedUntil > Date.now()) fail(429, 'pin_locked', 'Too many wrong PINs. Try again in 15 minutes, or ask the photographer.', { retryAfter: Math.ceil((t.lockedUntil - Date.now()) / 1000) })
-      if (pin.trim() !== e.settings.pin) {
+      const full = !!e.settings.fullAccessPin && pin.trim() === e.settings.fullAccessPin
+      if (!full && pin.trim() !== e.settings.pin) {
         t.count++
         if (t.count >= 5) { t.count = 0; t.lockedUntil = Date.now() + 15 * 60_000 }
         pinTries.set(e.id, t)
@@ -1399,8 +1410,12 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
         fail(401, 'invalid_pin', `That PIN is wrong. ${5 - t.count} ${5 - t.count === 1 ? 'try' : 'tries'} left.`, { attemptsRemaining: 5 - t.count })
       }
       pinTries.delete(e.id)
-      if (!state.extra.pinVerified.includes(e.id)) { state.extra.pinVerified.push(e.id); save() }
-      return session(e, true, state.extra.guestIds[e.id])
+      const fullAccess = (state.extra.fullAccess ??= [])
+      if (!state.extra.pinVerified.includes(e.id)) state.extra.pinVerified.push(e.id)
+      if (full && !fullAccess.includes(e.id)) fullAccess.push(e.id)
+      save()
+      // Same rule as the server: the event PIN opens the gallery; only the full-access PIN lifts face privacy.
+      return session(e, fullAccess.includes(e.id) || !e.settings.facePrivacy || !e.settings.faceSearch, state.extra.guestIds[e.id])
     },
     async registerGuest(shortId, input) {
       await wait(latency)
@@ -1426,8 +1441,8 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       }
       state.extra.guestIds[e.id] = g.id
       emit('guests', 'activity', ...(host ? (['events'] as ChangeTopic[]) : []))
-      // Same rule as the server: a typed PIN keeps "see all"; otherwise only galleries without face privacy.
-      const seeAll = state.extra.pinVerified.includes(e.id) || !e.settings.facePrivacy || !e.settings.faceSearch
+      // Same rule as the server: a typed full-access PIN keeps "see all"; otherwise only galleries without face privacy.
+      const seeAll = !!state.extra.fullAccess?.includes(e.id) || !e.settings.facePrivacy || !e.settings.faceSearch
       return { ...session(e, seeAll, g.id), guest: clone(g) }
     },
     async listPublicPhotos(shortId, q = {}) {
@@ -1567,6 +1582,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
         if (!state.extra.vipPin.includes(e.id)) state.extra.vipPin.push(e.id)
         save()
       }
+      if (vip?.all && !state.extra.fullAccess?.includes(e.id)) { (state.extra.fullAccess ??= []).push(e.id); save() }
       return { kind, payload: payload!, ...(vip?.pin || vip?.all ? { session: session(e, !!vip.all || !e.settings.facePrivacy, state.extra.guestIds[e.id]) } : {}) }
     },
 

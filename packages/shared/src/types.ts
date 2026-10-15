@@ -80,6 +80,8 @@ export interface Usage {
 export interface EventSettings {
   access: AccessMode
   pin: string
+  /** Second PIN for the couple and family: it shows every photo even with face privacy on. Absent = off. */
+  fullAccessPin?: string
   requireRegistration: boolean
   skipAppLanding: boolean
   faceSearch: boolean
@@ -532,7 +534,7 @@ export interface PublicEvent {
   id: ID; shortId: string; name: string; type: EventType; date: string; endDate?: string; city: string
   status: EventStatus; photoCount: number; expiresAt: string; coverTones: [Tone, Tone, Tone]; coverPhotoId?: ID; coverUrl?: string
   highlights: boolean
-  settings: Omit<EventSettings, 'pin'>
+  settings: Omit<EventSettings, 'pin' | 'fullAccessPin'>
   albums: Album[]
   films: Film[]
   studio: PublicStudio

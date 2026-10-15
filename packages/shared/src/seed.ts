@@ -139,8 +139,8 @@ const iso = (s: string) => new Date(s).toISOString()
 
 export function createSeed(): SeedState {
   const events: PhotoEvent[] = [
-    ev('ev_riya', '6402F9F', 'Riya & Kabir Wedding', 'wedding', '2026-09-12', 'Udaipur', 'live', 1248, 2000, [1420, 640, 250], 412, '2027-09-14', [0, 3, 12]),
-    ev('ev_mehta', '7A1C0B2', 'Mehta Sangeet Night', 'wedding', '2026-09-20', 'Jaipur', 'live', 412, 2000, [610, 190, 80], 190, '2027-09-20', [2, 6, 10], { storeEnabled: true }),
+    ev('ev_riya', '6402F9F', 'Riya & Kabir Wedding', 'wedding', '2026-09-12', 'Udaipur', 'live', 1248, 2000, [1420, 640, 250], 412, '2027-09-14', [0, 3, 12], { fullAccessPin: '8642' }),
+    ev('ev_mehta', '7A1C0B2', 'Mehta Sangeet Night', 'wedding', '2026-09-20', 'Jaipur', 'live', 412, 2000, [610, 190, 80], 190, '2027-09-20', [2, 6, 10], { storeEnabled: true, fullAccessPin: '8642' }),
     ev('ev_tessera', '3F9E21D', 'Tessera Labs Offsite', 'corporate', '2026-09-24', 'Goa', 'uploading', 146, 3000, [90, 20, 10], 12, '2027-09-24', [9, 13, 4], { access: 'link', facePrivacy: false, downloads: 'all', requireRegistration: false }),
     ev('ev_greenfield', 'C0DE417', 'Greenfield School Annual Day', 'school', '2026-09-02', 'Pune', 'expiring', 2096, 3000, [3900, 1100, 402], 1210, '2026-10-02', [7, 1, 3], {}, 'pack'),
     ev('ev_marathon', '91B7F3A', 'Coastal Half Marathon', 'sports', '2026-08-17', 'Mumbai', 'live', 5820, 10000, [8800, 2500, 740], 3302, '2027-08-17', [8, 5, 9], { access: 'link', facePrivacy: false, downloads: 'none', storeEnabled: true, requireRegistration: false }),

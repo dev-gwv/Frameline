@@ -198,3 +198,26 @@ describe('studio resources', () => {
     }
   })
 })
+
+describe('full-access PIN', () => {
+  it('turns on, stays apart from the event PIN, never reaches guests, and turns off', async () => {
+    const token = await tokenFor('editor')
+    const ev = (await call('/v1/events', { token, body: { name: 'Family PIN test', date: '2026-12-05', city: 'Pune', type: 'wedding', preset: 'private-family' } })).json
+    expect(ev.settings.fullAccessPin).toBeUndefined()
+
+    const on = await call(`/v1/events/${ev.id}/full-pin`, { token, method: 'POST' })
+    expect(on.status).toBe(200)
+    expect(on.json.pin).toMatch(/^\d{4}$/)
+    expect(on.json.pin).not.toBe(ev.settings.pin)
+    expect((await call(`/v1/events/${ev.id}`, { token })).json.settings.fullAccessPin).toBe(on.json.pin)
+    expect((await call(`/v1/public/events/${ev.shortId}`)).json.settings).not.toHaveProperty('fullAccessPin')
+
+    // Only the dedicated endpoints set it, and the event PIN can't be made equal to it.
+    expectProblem(await call(`/v1/events/${ev.id}/settings`, { token, method: 'PATCH', body: { fullAccessPin: '1234' } }), 422)
+    expectProblem(await call(`/v1/events/${ev.id}/settings`, { token, method: 'PATCH', body: { pin: on.json.pin } }), 422, 'validation_failed')
+
+    expect((await call(`/v1/events/${ev.id}/full-pin`, { token, method: 'DELETE' })).status).toBe(204)
+    expect((await call(`/v1/events/${ev.id}`, { token })).json.settings.fullAccessPin).toBeUndefined()
+    expectProblem(await call(`/v1/events/${ev.id}/full-pin`, { token: await tokenFor('uploader'), method: 'POST' }), 403)
+  })
+})

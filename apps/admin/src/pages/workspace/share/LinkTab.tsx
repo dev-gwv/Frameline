@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react'
-import { ChevronRight, Copy, Eye, Link2, Mail, MessageCircle, RefreshCw } from 'lucide-react'
+import { ChevronRight, Copy, Eye, KeyRound, Link2, Mail, MessageCircle, RefreshCw } from 'lucide-react'
 import type { AccessMode, PhotoEvent, Studio } from '@frameline/shared'
 import { Button, ConfirmDialog, Field, Select, useToast } from '@frameline/ui'
 import { errorMessage, useApi } from '../../../lib/api'
 import { copyText, displayUrl, galleryLink } from '../lib'
+import { fullPinMatters, useFullAccessPin } from './fullAccessPin'
 import { fillTemplate, loadTemplate, mailtoUrl, variableValues, whatsappUrl } from './message'
 
 export const ACCESS_LABEL: Record<AccessMode, string> = {
@@ -27,7 +28,10 @@ export function useLinkTab(event: PhotoEvent, studio: Studio | undefined, onSpec
   const toast = useToast()
   const copy = useCopy()
   const [confirmPin, setConfirmPin] = useState(false)
+  const [confirmFull, setConfirmFull] = useState<'new' | 'off' | null>(null)
+  const full = useFullAccessPin(event)
   const s = event.settings
+  const guests = s.access === 'link-pin' ? `Guests with PIN ${s.pin}` : 'Guests'
   const link = galleryLink(event, s.shortLinks)
   const message = fillTemplate(loadTemplate(), variableValues(event, studio))
 
@@ -67,6 +71,21 @@ export function useLinkTab(event: PhotoEvent, studio: Studio | undefined, onSpec
           <button type="button" onClick={() => setConfirmPin(true)} className="mt-1 inline-flex min-h-[28px] items-center gap-1 text-[12.5px] font-bold text-accent-text hover:underline"><RefreshCw size={12} />New PIN</button>
         </Field>
       </div>
+      {fullPinMatters(event) && (
+        <div className="-mt-1 rounded-control bg-sunk px-3 py-2.5 text-[12.5px] text-ink-2">
+          {s.fullAccessPin ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="inline-flex items-center gap-1.5"><KeyRound size={13} className="text-ink-3" />Full-access PIN <b className="text-[14px] tracking-[.2em] text-ink tnum">{s.fullAccessPin}</b></span>
+              <button type="button" onClick={() => void copy(s.fullAccessPin!, 'Full-access PIN')} className="font-bold text-accent-text hover:underline">Copy</button>
+              <button type="button" onClick={() => setConfirmFull('new')} className="font-bold text-accent-text hover:underline">New</button>
+              <button type="button" onClick={() => setConfirmFull('off')} className="font-bold text-accent-text hover:underline">Turn off</button>
+              <span className="basis-full">Only for the couple and family: it shows every photo. {guests} see only their own.</span>
+            </div>
+          ) : (
+            <span>{guests} see only the photos they’re in. <button type="button" onClick={() => void full.make().catch(() => {})} className="font-bold text-accent-text hover:underline">Add a full-access PIN</button> for the couple and family to see everything.</span>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap gap-2">
         <Button icon={<MessageCircle size={15} />} onClick={() => window.open(whatsappUrl(message), '_blank', 'noopener')}>Send on WhatsApp</Button>
         <Button icon={<Mail size={15} />} onClick={() => { window.location.href = mailtoUrl(`Your photos from ${event.name}`, message) }}>Email</Button>
@@ -82,6 +101,11 @@ export function useLinkTab(event: PhotoEvent, studio: Studio | undefined, onSpec
       <ConfirmDialog open={confirmPin} onOpenChange={setConfirmPin} title="Make a new PIN?" confirmLabel="Make new PIN"
         body={<>PIN <b className="text-ink tnum">{s.pin}</b> stops working straight away, so links and messages you already sent with it won’t open. Guests already inside stay signed in.</>}
         onConfirm={newPin} />
+      <ConfirmDialog open={!!confirmFull} onOpenChange={(v) => { if (!v) setConfirmFull(null) }}
+        title={confirmFull === 'off' ? 'Turn off the full-access PIN?' : 'Make a new full-access PIN?'}
+        confirmLabel={confirmFull === 'off' ? 'Turn off' : 'Make new PIN'}
+        body={<>PIN <b className="text-ink tnum">{s.fullAccessPin}</b> stops working straight away. Family already inside stay signed in{confirmFull === 'off' ? '; anyone new sees only their own photos' : ''}.</>}
+        onConfirm={() => (confirmFull === 'off' ? full.clear() : full.make())} />
     </>
   )
   return { body }

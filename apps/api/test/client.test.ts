@@ -137,7 +137,7 @@ describe('createHttpApi guest side', () => {
     await expect(api.listPublicPhotos('7A1C0B2', { limit: 1 })).rejects.toMatchObject({ status: 401, code: 'pin_required' })
     const err = await api.verifyPin('7A1C0B2', '9999').catch((e) => e)
     expect(err).toMatchObject({ status: 401, code: 'invalid_pin' })
-    const session = await api.verifyPin('7A1C0B2', '5211')
+    const session = await api.verifyPin('7A1C0B2', '8642')
     expect(session.seeAll).toBe(true)
     const reg = await api.registerGuest('7A1C0B2', { name: 'Client Guest', email: uniqueEmail('cg') })
     expect(reg.guest.name).toBe('Client Guest')
@@ -163,7 +163,7 @@ describe('createHttpApi contract v3', () => {
       baseUrl: BASE, tokens, guestDeviceId: () => device,
       fetch: (input, init) => { const req = new Request(input as RequestInfo, init); req.headers.set('cf-connecting-ip', ip); return SELF.fetch(req) },
     })
-    await api.verifyPin('6402F9F', '5211')
+    await api.verifyPin('6402F9F', '8642')
     const file = { filename: 'guest.jpg', size: 64, blob: new Blob([new Uint8Array(64).fill(1)], { type: 'image/jpeg' }) } as HttpUploadFile
     const [p] = await api.uploadGuestPhotos('6402F9F', [file], { uploadedBy: 'Cousin' })
     expect(p).toMatchObject({ source: 'guest', reviewStatus: 'pending', uploadedBy: 'Cousin' })

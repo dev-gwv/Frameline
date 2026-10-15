@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { encodeGuestToken } from '@frameline/shared'
 import { call, expectProblem, freshIp, tokenFor, uniqueEmail } from './helpers'
 
-const RIYA = '6402F9F' // link-pin, face privacy on, PIN 5211
+const RIYA = '6402F9F' // link-pin, face privacy on, PIN 5211, full-access PIN 8642
+const FULL_PIN = '8642'
 const MEHTA = '7A1C0B2' // link-pin, store on
 const TESSERA = '3F9E21D' // open link, no face privacy
 
-async function pinSession(shortId: string, ip = freshIp()) {
-  const r = await call(`/v1/public/events/${shortId}/pin`, { body: { pin: '5211' }, ip })
+async function pinSession(shortId: string, ip = freshIp(), pin = FULL_PIN) {
+  const r = await call(`/v1/public/events/${shortId}/pin`, { body: { pin }, ip })
   expect(r.status).toBe(200)
   return r.json as { token: string; seeAll: boolean; eventId: string }
 }
@@ -38,7 +39,13 @@ describe('public event + PIN', () => {
     expectProblem(locked, 429, 'pin_locked')
     expect(Number(locked.headers.get('retry-after'))).toBeGreaterThan(0)
     expectProblem(await call(`/v1/public/events/${RIYA}/pin`, { body: { pin: '5211' }, ip }), 429, 'pin_locked')
-    // Another device is unaffected, and a typed PIN sees every photo.
+    // Another device is unaffected. The event PIN opens the gallery but keeps face privacy...
+    const guest = await pinSession(RIYA, freshIp(), '5211')
+    expect(guest.seeAll).toBe(false)
+    expectProblem(await call(`/v1/public/events/${RIYA}/photos?limit=3`, { token: guest.token }), 403, 'face_privacy')
+    const reg = await call(`/v1/public/events/${RIYA}/register`, { token: guest.token, body: { name: 'Guest', phone: '9000000001' } })
+    expect(reg.json.seeAll).toBe(false)
+    // ...and only the full-access PIN sees every photo.
     const s = await pinSession(RIYA)
     expect(s.seeAll).toBe(true)
     const photos = await call(`/v1/public/events/${RIYA}/photos?limit=3`, { token: s.token })

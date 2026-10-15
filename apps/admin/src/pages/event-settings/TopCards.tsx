@@ -4,6 +4,7 @@ import { fmt } from '@frameline/shared'
 import { Button, ConfirmDialog, Input, Meter, SettingRow, Toggle, useToast } from '@frameline/ui'
 import { errorMessage, useApi } from '../../lib/api'
 import { useEventStats, useGuests } from '../../lib/queries'
+import { fullPinMatters, useFullAccessPin } from '../workspace/share/fullAccessPin'
 import { MoreOptions, SettingsCard, TextLink, ToggleRow, type CardProps } from './parts'
 
 export function AccessCard({ event, set }: CardProps) {
@@ -60,6 +61,8 @@ export function FacesCard({ event, set }: CardProps) {
   const api = useApi()
   const toast = useToast()
   const s = event.settings
+  const full = useFullAccessPin(event)
+  const [askFull, setAskFull] = useState(false)
   const stats = useEventStats(event.id)
   const faces = stats.data?.faces
   const scanning = !!faces && faces.pending > 0
@@ -81,6 +84,13 @@ export function FacesCard({ event, set }: CardProps) {
         onChange={(v) => set({ facePrivacy: v })}
         description={!s.faceSearch ? 'Needs selfie search to be on' : s.facePrivacy ? 'Turn off to let everyone browse' : 'Everyone can browse every album'}
       />
+      <ToggleRow
+        icon={<KeyRound size={15} />} title="Full-access PIN for family" checked={fullPinMatters(event) && !!s.fullAccessPin} disabled={!fullPinMatters(event)}
+        onChange={(v) => { if (v) void full.make().catch(() => {}); else setAskFull(true) }}
+        description={!fullPinMatters(event) ? 'Everyone already sees every photo'
+          : s.fullAccessPin ? <>PIN <b className="text-ink tnum">{s.fullAccessPin}</b> shows every photo · <TextLink onClick={() => void full.make().catch(() => {})}>New PIN</TextLink></>
+            : 'Off: nobody sees every photo. Turn on for the couple and family'}
+      />
       <MoreOptions>
         <ToggleRow
           icon={<ShieldCheck size={15} />} title="Selfie search without signing up" checked={s.faceSearch && s.anonymousSelfie} disabled={!s.faceSearch}
@@ -88,6 +98,10 @@ export function FacesCard({ event, set }: CardProps) {
           description="Guests find their photos without leaving a name or phone"
         />
       </MoreOptions>
+      <ConfirmDialog
+        open={askFull} onOpenChange={setAskFull} title="Turn off the full-access PIN?" confirmLabel="Turn off" onConfirm={full.clear}
+        body={<>PIN <b className="text-ink tnum">{s.fullAccessPin}</b> stops working straight away. Family already inside stay signed in.</>}
+      />
     </SettingsCard>
   )
 }

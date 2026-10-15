@@ -19,7 +19,8 @@ describe('mock API: contract v2', () => {
     await expect(m.verifyPin('6402f9f', '0000')).rejects.toMatchObject({ status: 429, code: 'pin_locked' })
     await expect(m.verifyPin('6402f9f', '5211')).rejects.toMatchObject({ code: 'pin_locked' })
     const other = api()
-    expect((await other.verifyPin('6402F9F', '5211')).seeAll).toBe(true)
+    expect((await other.verifyPin('6402F9F', '5211')).seeAll).toBe(false)
+    expect((await other.verifyPin('6402F9F', '8642')).seeAll).toBe(true)
     const reg = await other.registerGuest('6402F9F', { name: 'Dadi ji', email: 'dadi@example.com' })
     expect((await other.listGuests('ev_riya')).some((g) => g.id === reg.guest.id)).toBe(true)
     expect((await other.listActivity())[0]).toMatchObject({ kind: 'registration' })
@@ -109,9 +110,9 @@ describe('mock API: contract v2', () => {
 })
 
 describe('mock API: contract v3', () => {
-  it('keeps seeAll after a typed PIN, enforces guest upload rules, counts Download all', async () => {
+  it('keeps seeAll after a typed full-access PIN, enforces guest upload rules, counts Download all', async () => {
     const m = api()
-    await m.verifyPin('6402F9F', '5211')
+    await m.verifyPin('6402F9F', '8642')
     expect((await m.registerGuest('6402F9F', { name: 'A', email: 'a@example.com' })).seeAll).toBe(true)
     expect((await api().registerGuest('6402F9F', { name: 'B', email: 'b@example.com' })).seeAll).toBe(false)
     const [up] = await m.uploadGuestPhotos('6402F9F', [{ filename: 'g.jpg', size: 10 }])

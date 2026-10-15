@@ -87,6 +87,9 @@ export const Usage = z.object({
 export const EventSettings = z.object({
   access: z.enum(['link', 'link-pin', 'registered']),
   pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4–6 digits'),
+  fullAccessPin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4–6 digits').optional().openapi({
+    description: 'A second PIN for the couple and family: it opens the gallery with every photo even when guests only see their own. Absent = off. Set it with POST /events/{id}/full-pin.',
+  }),
   requireRegistration: z.boolean(),
   skipAppLanding: z.boolean(),
   faceSearch: z.boolean(),
@@ -166,7 +169,8 @@ export const EventPatch = z.object({
   plan: z.enum(['subscription', 'pack', 'trial']),
 }).partial().strict().openapi('EventPatch')
 
-export const EventSettingsPatch = EventSettings.partial().strict().openapi('EventSettingsPatch')
+// The full-access PIN is set and cleared only through /events/{id}/full-pin, which keeps it apart from the event PIN.
+export const EventSettingsPatch = EventSettings.omit({ fullAccessPin: true }).partial().strict().openapi('EventSettingsPatch')
 
 export const Album = z.object({
   id: Id, eventId: Id, name: z.string(), order: z.number().int(), photoCount: z.number().int(),
@@ -415,7 +419,7 @@ export const PublicEvent = z.object({
   id: Id, shortId: z.string(), name: z.string(), type: EventType, date: z.string(), endDate: z.string().optional(), city: z.string(),
   status: EventStatus, photoCount: z.number().int(), expiresAt: z.string(), coverTones: z.tuple([Tone, Tone, Tone]),
   coverPhotoId: z.string().optional(), coverUrl: z.string().optional(), highlights: z.boolean(),
-  settings: EventSettings.omit({ pin: true }), albums: z.array(Album), films: z.array(Film), studio: PublicStudio,
+  settings: EventSettings.omit({ pin: true, fullAccessPin: true }), albums: z.array(Album), films: z.array(Film), studio: PublicStudio,
   blocked: z.enum(['disabled', 'archived', 'expired', 'empty']).optional(),
 }).openapi('PublicEvent')
 

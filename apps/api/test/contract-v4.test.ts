@@ -7,7 +7,7 @@ const key = (tag: string) => ({ 'idempotency-key': `${tag}-${crypto.randomUUID()
 
 /** A fresh paid order (no Razorpay keys in tests, so orders are paid immediately). */
 async function paidOrder() {
-  const token = (await call(`/v1/public/events/${MEHTA}/pin`, { body: { pin: '5211' } })).json.token as string
+  const token = (await call(`/v1/public/events/${MEHTA}/pin`, { body: { pin: '8642' } })).json.token as string
   const [ph] = (await call(`/v1/public/events/${MEHTA}/photos?limit=1`, { token })).json.items
   const r = await call(`/v1/public/events/${MEHTA}/orders`, { token, body: { items: [{ priceId: 'single', photoIds: [ph.id] }], method: 'upi', buyer: { name: 'Refund Me', email: 'refund@example.com' } } })
   expect(r.status).toBe(201)

@@ -3,15 +3,15 @@ import { describe, expect, it } from 'vitest'
 import { runDaily, runEveryMinute } from '../src/services/cron'
 import { call, expectProblem, freshIp, tokenFor, uniqueEmail } from './helpers'
 
-const RIYA = '6402F9F' // link-pin 5211, face privacy on, guest uploads with review
-const MEHTA = '7A1C0B2' // link-pin 5211, store on
+const RIYA = '6402F9F' // link-pin 5211 (full-access 8642), face privacy on, guest uploads with review
+const MEHTA = '7A1C0B2' // link-pin 5211 (full-access 8642), store on
 const TESSERA = '3F9E21D' // open link, no face privacy
 const ANAYA = '5D22E80' // draft, no photos
 const key = (tag: string) => ({ 'idempotency-key': `${tag}-${crypto.randomUUID()}` })
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString()
 
 async function pinToken(shortId: string) {
-  const r = await call(`/v1/public/events/${shortId}/pin`, { body: { pin: '5211' } })
+  const r = await call(`/v1/public/events/${shortId}/pin`, { body: { pin: '8642' } }) // full-access PIN: sees every photo
   expect(r.status).toBe(200)
   return r.json.token as string
 }

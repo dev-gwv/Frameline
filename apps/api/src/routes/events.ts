@@ -4,7 +4,7 @@ import { BASE_RENEWAL, PACKS, RENEWAL_CREDIT_DISCOUNT, TRASH_DAYS, selfieHasNoFa
 import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
 import { accessRequestOut, eventOut, filmOut, guestOut, personOut } from '../db/mappers'
-import { Conflict, NotFound } from '../lib/errors'
+import { Conflict, NotFound, ValidationFailed } from '../lib/errors'
 import { newId, nowIso } from '../lib/ids'
 import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, problems, security } from '../lib/openapi'
 import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
@@ -118,6 +118,9 @@ eventRoutes.openapi(createRoute({
   const db = getDb(c.env.DB)
   const ev = await eventForMember(db, m, c.req.valid('param').id)
   const patch = c.req.valid('json')
+  if (patch.pin && patch.pin === ev.settings.fullAccessPin) {
+    throw new ValidationFailed([{ field: 'pin', in: 'body', message: 'Use a different PIN from the full-access PIN', code: 'pin_clash' }])
+  }
   await db.update(schema.events).set({ settings: withSettingsDefaults({ ...withSettingsDefaults(ev.settings), ...patch }) }).where(eq(schema.events.id, ev.id)).run()
   audit(c, 'event.settings', { type: 'event', id: ev.id }, { patch })
   emit(c, m.studioId, 'events')
@@ -133,11 +136,45 @@ eventRoutes.openapi(createRoute({
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
   const ev = await eventForMember(db, m, c.req.valid('param').id)
-  const pin = newPin()
+  const pin = newPin(ev.settings.fullAccessPin)
   await db.update(schema.events).set({ settings: { ...withSettingsDefaults(ev.settings), pin } }).where(eq(schema.events.id, ev.id)).run()
   audit(c, 'event.pin_reset', { type: 'event', id: ev.id })
   emit(c, m.studioId, 'events')
   return c.json({ pin }, 200)
+})
+
+eventRoutes.openapi(createRoute({
+  method: 'post', path: '/events/{id}/full-pin', tags: ['Events'], summary: 'Turn on (or change) the full-access PIN', security,
+  description: 'A second PIN for the couple and family. Guests who type it see every photo, even with face privacy on; the event PIN only opens the gallery. Always differs from the event PIN.',
+  middleware: [requireStudio('editor', 'change the full-access PIN')] as const,
+  request: { params: IdParam },
+  responses: { 200: json(z.object({ pin: z.string() })), ...problems(401, 403, 404) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id)
+  const pin = newPin(ev.settings.pin)
+  await db.update(schema.events).set({ settings: { ...withSettingsDefaults(ev.settings), fullAccessPin: pin } }).where(eq(schema.events.id, ev.id)).run()
+  audit(c, 'event.full_pin_set', { type: 'event', id: ev.id })
+  emit(c, m.studioId, 'events')
+  return c.json({ pin }, 200)
+})
+
+eventRoutes.openapi(createRoute({
+  method: 'delete', path: '/events/{id}/full-pin', tags: ['Events'], summary: 'Turn off the full-access PIN', security,
+  description: 'Guests already signed in with it keep their session until it expires.',
+  middleware: [requireStudio('editor', 'change the full-access PIN')] as const,
+  request: { params: IdParam },
+  responses: { 204: NoContent, ...problems(401, 403, 404) },
+}), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const ev = await eventForMember(db, m, c.req.valid('param').id)
+  const { fullAccessPin: _old, ...settings } = withSettingsDefaults(ev.settings)
+  await db.update(schema.events).set({ settings }).where(eq(schema.events.id, ev.id)).run()
+  audit(c, 'event.full_pin_cleared', { type: 'event', id: ev.id })
+  emit(c, m.studioId, 'events')
+  return c.body(null, 204)
 })
 
 /** Tells new hosts about the event: email when there is one, else a (simulated) SMS/WhatsApp log line. */

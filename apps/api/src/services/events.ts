@@ -94,9 +94,12 @@ export async function createEvent(db: DB, studioId: string, input: NewEvent): Pr
   return id
 }
 
-/** Random 4-digit gallery PIN. */
-export function newPin(): string {
+/** Random 4-digit gallery PIN, never equal to `avoid` (the event's other PIN). */
+export function newPin(avoid?: string): string {
   const buf = new Uint32Array(1)
-  crypto.getRandomValues(buf)
-  return String(1000 + (buf[0] % 9000))
+  for (;;) {
+    crypto.getRandomValues(buf)
+    const pin = String(1000 + (buf[0] % 9000))
+    if (pin !== avoid) return pin
+  }
 }

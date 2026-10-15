@@ -134,7 +134,7 @@ publicRoutes.openapi(createRoute({
     const [cp] = await db.select().from(schema.photos).where(and(eq(schema.photos.id, e.coverPhotoId), visible())).limit(1)
     if (cp) coverUrl = photoOut(cp, c.env.PUBLIC_MEDIA_BASE).url
   }
-  const { pin: _pin, ...settings } = e.settings
+  const { pin: _pin, fullAccessPin: _full, ...settings } = e.settings
   const blocked = blockedReason(e)
   return c.json({
     id: e.id, shortId: e.shortId, name: e.name, type: e.type as z.infer<typeof PublicEvent>['type'], date: e.date, ...(e.endDate ? { endDate: e.endDate } : {}),
@@ -144,31 +144,36 @@ publicRoutes.openapi(createRoute({
   }, 200)
 })
 
-async function checkPin(c: Context<AppEnv>, e: EventRow, pin: string) {
+/** Checks a typed PIN: 'full' for the full-access PIN, 'event' for the event PIN; anything else counts as a wrong try. */
+async function checkPin(c: Context<AppEnv>, e: EventRow, pin: string): Promise<'full' | 'event'> {
   const key = `pin-fail:${clientIp(c)}:${e.id}`
   const lock = await c.env.RATE_LIMITER.get(c.env.RATE_LIMITER.idFromName(key)).peek(PIN_MAX_TRIES, PIN_LOCK_SEC * 1000)
   if (!lock.success) throw new RateLimited(lock.reset, 'Too many wrong PINs. Try again in 15 minutes, or ask the photographer.', 'pin_locked')
+  const full = e.settings.fullAccessPin
+  if (full && timingSafeEqual(pin, full)) return 'full'
   if (!timingSafeEqual(pin, e.settings.pin)) {
     const d = await storeFor(c.env, { windowSec: PIN_LOCK_SEC }).hit(key, PIN_MAX_TRIES, PIN_LOCK_SEC)
     const left = Math.max(0, d.remaining)
     if (left === 0) throw new RateLimited(d.reset, 'Too many wrong PINs. Try again in 15 minutes, or ask the photographer.', 'pin_locked')
     throw new Unauthorized(`That PIN is wrong. ${left} ${left === 1 ? 'try' : 'tries'} left.`, 'invalid_pin', { attemptsRemaining: left })
   }
+  return 'event'
 }
 
 publicRoutes.openapi(createRoute({
   method: 'post', path: '/events/{shortId}/pin', tags: ['Public gallery'], summary: 'Check the gallery PIN and get a guest token',
-  description: `${PIN_MAX_TRIES} wrong PINs lock this gallery for ${PIN_LOCK_SEC / 60} minutes (per device IP). A typed PIN lets the guest browse every photo.`,
+  description: `${PIN_MAX_TRIES} wrong PINs lock this gallery for ${PIN_LOCK_SEC / 60} minutes (per device IP). The event PIN opens the gallery; with face privacy on, guests still see only their own photos. The full-access PIN (when the studio set one) lets the guest browse every photo.`,
   request: { params: ShortIdParam, body: body(z.object({ pin: z.string().trim().min(1).max(10) })) },
   responses: { 200: json(GuestSession), ...problems(401, 403, 404, 422) },
 }), async (c) => {
   const { e } = await openEvent(c, c.req.valid('param').shortId)
   const existing = await readGuest(c).catch(() => null)
-  const guestId = existing?.eventId === e.id ? existing.guestId : undefined
-  // Always the real PIN: on a gallery with no PIN gate this call still hands out a see-all session, which
-  // is what lifts face privacy -- it used to accept any PIN at all there.
-  await checkPin(c, e, c.req.valid('json').pin)
-  return c.json(await issueGuestSession(c, e, { guestId, seeAll: true }), 200)
+  const mine = existing?.eventId === e.id ? existing : undefined
+  // Always a real PIN. The event PIN used to hand every guest a see-all session, which made face privacy
+  // meaningless on PIN galleries; now only the full-access PIN does.
+  const kind = await checkPin(c, e, c.req.valid('json').pin)
+  const seeAll = kind === 'full' || mine?.all === true || !e.settings.facePrivacy || !e.settings.faceSearch
+  return c.json(await issueGuestSession(c, e, { guestId: mine?.guestId, seeAll, vipPin: mine?.vp }), 200)
 })
 
 const GuestOut = z.object({
@@ -178,7 +183,7 @@ const GuestOut = z.object({
 
 publicRoutes.openapi(createRoute({
   method: 'post', path: '/events/{shortId}/register', tags: ['Public gallery'], summary: 'Register as a guest (appears in the studio’s Guests list)',
-  description: 'Name plus an email or a mobile number (at least one). Returning guests are matched by email, else by phone. Signing up with a host’s email or phone marks that host as accepted. Send the PIN session token (if any) so a typed PIN keeps its "see all" right.',
+  description: 'Name plus an email or a mobile number (at least one). Returning guests are matched by email, else by phone. Signing up with a host’s email or phone marks that host as accepted. Send the PIN session token (if any) so a typed full-access PIN keeps its "see all" right.',
   request: {
     params: ShortIdParam,
     body: body(z.object({

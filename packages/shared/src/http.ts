@@ -585,6 +585,8 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     updateEvent: (id, patch) => request<PhotoEvent>('PATCH', `/v1/events/${enc(id)}`, { body: pick(patch, EVENT_KEYS) }),
     updateEventSettings: (id, patch: Partial<EventSettings>) => request<PhotoEvent>('PATCH', `/v1/events/${enc(id)}/settings`, { body: patch }),
     resetPin: async (id) => (await request<{ pin: string }>('POST', `/v1/events/${enc(id)}/pin/reset`, { idempotent: true })).pin,
+    setFullAccessPin: async (id) => (await request<{ pin: string }>('POST', `/v1/events/${enc(id)}/full-pin`, { idempotent: true })).pin,
+    clearFullAccessPin: (id) => request<void>('DELETE', `/v1/events/${enc(id)}/full-pin`),
     deleteEvent: (id, o = {}) => request<void>('DELETE', `/v1/events/${enc(id)}`, { query: o.permanent ? { permanent: 'true' } : undefined }),
 
     listAlbums: (eventId) => listAll<Album>(`/v1/events/${enc(eventId)}/albums`),
