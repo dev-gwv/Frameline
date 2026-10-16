@@ -18,6 +18,7 @@ export default defineConfig(async () => {
             RAZORPAY_KEY_SECRET: 'test-razorpay-key-secret',
             RAZORPAY_WEBHOOK_SECRET: 'test-razorpay-webhook-secret',
             STUDIOAUTOPILOT_SECRET: 'test-studioautopilot-secret-0123456789-abcdef',
+            STUDIOAUTOPILOT_WEBHOOK_URL: 'https://sa.example/webhooks/frameline',
             TEST_MIGRATIONS: migrations,
           },
         },

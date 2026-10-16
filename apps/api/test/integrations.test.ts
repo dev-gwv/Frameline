@@ -217,3 +217,80 @@ describe('selfie search', () => {
     expect(r.photoIds).toEqual([shown!.id])
   })
 })
+
+describe('what Studio AutoPilot reads back', () => {
+  const api = (path: string, token: string, body?: unknown) => call(`/v1/integrations/studioautopilot${path}`, { token, body })
+
+  it('lists the company\'s galleries and its studio, with the PINs and figures the project page shows', async () => {
+    const cid = uid()
+    const sub = uid()
+    const before = await api('/studio', await mint({ cid, sub, purpose: 'api' }))
+    expect(before.json).toMatchObject({ linked: false, galleries: 0 })
+    expect((await api('/events', await mint({ cid, sub, purpose: 'api' }))).json.items).toEqual([])
+
+    const made = await api('/events', await mint({ cid, sub, purpose: 'api' }), { projectId: 'p-a', name: 'Anaya & Dev', date: '2026-12-01T00:00:00.000Z' })
+    await api('/events', await mint({ cid, sub, purpose: 'api' }), { projectId: 'p-b', name: 'Mehra Reception', date: '2026-12-02T00:00:00.000Z' })
+    await api('/events', await mint({ purpose: 'api' }), { projectId: 'p-other', name: 'Someone else', date: '2026-12-03T00:00:00.000Z' })
+
+    const list = await api('/events', await mint({ cid, sub, purpose: 'api' }))
+    expect(list.status).toBe(200)
+    expect(list.json.items.map((g: { projectId: string }) => g.projectId).sort()).toEqual(['p-a', 'p-b'])
+    expect(list.json.items[0]).toMatchObject({ facePrivacy: false, fullAccessPin: null, visits: 0 })
+    expect(list.json.items[0].expiresAt).toBeTruthy()
+
+    const one = await api('/events/p-a', await mint({ cid, sub, purpose: 'api' }))
+    expect(one.json).toMatchObject({ eventId: made.json.eventId, guests: 0, pin: made.json.pin })
+
+    const studio = await api('/studio', await mint({ cid, sub, purpose: 'api' }))
+    expect(studio.json).toMatchObject({ linked: true, studioName: 'Sharma Studio', galleries: 2, adminUrl: env.APP_URL })
+    expect(typeof studio.json.walletRupees).toBe('number')
+  })
+})
+
+describe('telling Studio AutoPilot a gallery changed', () => {
+  const api = (path: string, token: string, body?: unknown) => call(`/v1/integrations/studioautopilot${path}`, { token, body })
+
+  it('sends a PIN change on the next tick, signed, and only for galleries Studio AutoPilot made', async () => {
+    const { queuePartnerNotice, sendPartnerNotices } = await import('../src/services/partner-notify')
+    const cid = uid()
+    const made = await api('/events', await mint({ cid, purpose: 'api' }), { projectId: 'p-pin', name: 'PIN test', date: '2026-12-01T00:00:00.000Z' })
+    await queuePartnerNotice(env, made.json.eventId, 'pin')
+    await queuePartnerNotice(env, 'ev_riya', 'pin') // made in Frameline itself: nobody to tell
+
+    const seen: { url: string; auth: string; body: Record<string, unknown> }[] = []
+    const sent = await sendPartnerNotices(env, (async (url: string, init: RequestInit) => {
+      seen.push({ url, auth: String((init.headers as Record<string, string>).Authorization), body: JSON.parse(String(init.body)) })
+      return new Response(null, { status: 204 })
+    }) as typeof fetch)
+    expect(sent).toBe(1)
+    expect(seen[0].url).toBe('https://sa.example/webhooks/frameline')
+    expect(seen[0].body).toEqual({ type: 'gallery.changed', companyId: cid, projectId: 'p-pin', reasons: ['pin'] })
+
+    const [head, body, sig] = seen[0].auth.replace('Bearer ', '').split('.')
+    const key = await crypto.subtle.importKey('raw', enc.encode(SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
+    const raw = Uint8Array.from(atob(sig.replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0))
+    expect(await crypto.subtle.verify('HMAC', key, raw, enc.encode(`${head}.${body}`))).toBe(true)
+    expect(JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/')))).toMatchObject({ iss: 'frameline', aud: 'studioautopilot', purpose: 'notice', cid })
+
+    // Delivered once: nothing left to send.
+    expect(await sendPartnerNotices(env, (async () => new Response(null, { status: 204 })) as unknown as typeof fetch)).toBe(0)
+  })
+
+  it('waits for uploads to go quiet, and retries when Studio AutoPilot does not answer', async () => {
+    const { queuePartnerNotice, sendPartnerNotices } = await import('../src/services/partner-notify')
+    const made = await api('/events', await mint({ purpose: 'api' }), { projectId: 'p-photos', name: 'Photos test', date: '2026-12-01T00:00:00.000Z' })
+    await queuePartnerNotice(env, made.json.eventId, 'photos')
+    const fail = (async () => new Response(null, { status: 503 })) as unknown as typeof fetch
+    expect(await sendPartnerNotices(env, fail)).toBe(0)
+    const pending = await env.KV.get<{ due: number; reasons: string[] }>(`sa-out:${made.json.eventId}`, 'json')
+    expect(pending!.reasons).toEqual(['photos'])
+    expect(pending!.due).toBeGreaterThan(Math.floor(Date.now() / 1000) + 60)
+
+    // A PIN change while photos wait goes now, carrying both reasons.
+    await queuePartnerNotice(env, made.json.eventId, 'pin')
+    expect(await sendPartnerNotices(env, fail)).toBe(0)
+    const retry = await env.KV.get<{ attempts: number; reasons: string[] }>(`sa-out:${made.json.eventId}`, 'json')
+    expect(retry).toMatchObject({ attempts: 1, reasons: ['photos', 'pin'] })
+    await env.KV.delete(`sa-out:${made.json.eventId}`)
+  })
+})

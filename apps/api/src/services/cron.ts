@@ -3,6 +3,7 @@ import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
 import { purgeTrash } from '../routes/events'
 import { notifyWaitingGuests } from './notify'
+import { sendPartnerNotices } from './partner-notify'
 import { publishTopics } from './realtime'
 import { purgeTrashedItems } from './trash'
 
@@ -11,6 +12,7 @@ import { purgeTrashedItems } from './trash'
  * - Smart QR schedules that are due switch the QR to `scheduledEventId` and clear the schedule.
  * - Scheduled broadcasts that are due (not cancelled, not in the trash) are marked sent (delivery fan-out is TODO).
  * - "Notify me" requests whose gallery now has photos are sent (simulated).
+ * - Gallery-changed notices for Studio AutoPilot that are due are sent (services/partner-notify.ts).
  */
 export async function runEveryMinute(env: Env, now = new Date()): Promise<{ qrs: number; broadcasts: number; notified: number }> {
   const db = getDb(env.DB)
@@ -29,6 +31,7 @@ export async function runEveryMinute(env: Env, now = new Date()): Promise<{ qrs:
   const studios = new Set([...dueQrs, ...dueBroadcasts].map((r) => r.studioId))
   for (const s of studios) await publishTopics(env, s, ['misc']).catch(() => undefined)
   const notified = await notifyWaitingGuests(env).catch(() => 0)
+  await sendPartnerNotices(env).catch((e) => console.error(JSON.stringify({ level: 'error', msg: 'partner notices failed', error: String(e) })))
   return { qrs: dueQrs.length, broadcasts: dueBroadcasts.length, notified }
 }
 

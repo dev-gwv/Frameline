@@ -18,6 +18,8 @@ import { audit } from '../services/audit'
 import { paymentsLive } from '../services/payments'
 import { eventForMember, recountStatements } from '../services/events'
 import { emit } from '../services/realtime'
+import { queuePartnerNotice } from '../services/partner-notify'
+import { background } from '../lib/http'
 import {
   PART_SIZE, PRESIGN_TTL_SEC, abortMultipart, completeMultipart, createMultipart, objectKey, presignPart, uploadMode, type UploadMode,
 } from '../services/storage'
@@ -133,6 +135,7 @@ export async function completeUploadSession(c: Context<AppEnv>, a: {
     await db.update(schema.uploads).set({ status: 'aborted' }).where(eq(schema.uploads.id, up.id)).run()
   }
   audit(c, 'photos.upload', { type: 'event', id: up.eventId }, { count: rows.length, quality: up.quality })
+  if (rows.length) background(c, queuePartnerNotice(c.env, up.eventId, 'photos'))
   emit(c, m.studioId, 'photos', 'albums', 'events', 'usage')
   const created = rows.length ? await db.select().from(p).where(sql`${p.id} IN (SELECT value FROM json_each(${JSON.stringify(rows.map((r) => r.id))}))`) : []
   const position = new Map(rows.map((r, i) => [r.id, i]))

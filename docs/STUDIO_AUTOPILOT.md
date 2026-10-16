@@ -19,6 +19,8 @@ accepted.
 | Sign-in | `GET /v1/integrations/studioautopilot/sso?token=`. Redirects to the admin app's `/auth/callback?from=/events/<id>#tokens` (the same hand-over as Google sign-in). Failures go to `/login?error=sa_*` | **Open gallery** on a project: the browser window is opened at the press, then the link is fetched |
 | Gallery per project | `POST /v1/integrations/studioautopilot/events` (idempotent per project; a trashed event is replaced). `GET .../events/:projectId` | **Create gallery**. Link and PIN kept in `project_galleries` (0261) and shown on the client's tracking page |
 | Id mapping | `partner_links` (0006): company→studio, user→user, `<company>:<project>`→event | Sends user id, company id/name, `isOwner`, `email_verified` |
+| Reads (16 Oct) | `GET .../events` (every gallery of the company), `GET .../studio` (linked?, plan, wallet, photos used), and each gallery carries `fullAccessPin`, `facePrivacy`, `expiresAt`, `visits` (+ `guests` on the single read) | Galleries list under Projects, Settings → Messaging → Gallery, the Gallery tab |
+| Notices (16 Oct) | `services/partner-notify.ts`: uploads, PIN and settings changes are queued in KV (`sa-out:<event>`) and sent by the minute cron to `STUDIOAUTOPILOT_WEBHOOK_URL`, one per gallery (photos wait for 2 quiet minutes, at most 10), HS256 `iss: frameline`, `aud: studioautopilot`, `purpose: notice`; retried with backoff, dropped after 8 | `POST /webhooks/frameline` re-reads the gallery (so a notice is only "go and look"), refreshes the kept PIN and count, and rings the bell when photos arrive |
 
 Rules that matter:
 - **A person is matched by their Studio AutoPilot id**, and by email only when

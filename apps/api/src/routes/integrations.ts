@@ -1,6 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import type { Context } from 'hono'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, count, desc, eq, isNull, like } from 'drizzle-orm'
 import type { AppEnv } from '../env'
 import { getDb, schema } from '../db/client'
 import { AppError, NotConfigured, NotFound, Unauthorized } from '../lib/errors'
@@ -19,6 +19,9 @@ import { issueSession } from '../services/sessions'
  * - GET  /sso        a person pressing "Open gallery": signs them in and lands them in the admin app.
  * - POST /events     a project's "Create gallery": makes (once) the event for that project.
  * - GET  /events/:p  how that gallery is doing, for the project page.
+ * - GET  /events     every gallery made for the company (Studio AutoPilot's Galleries list).
+ * - GET  /studio     the joined Frameline studio: plan, wallet, photos used (Studio AutoPilot's settings).
+ * And one door the other way: services/partner-notify.ts tells Studio AutoPilot when a gallery changed.
  *
  * Billing stays Frameline's: a studio made here starts on the same trial as any other and pays from its wallet.
  */
@@ -88,6 +91,15 @@ const Gallery = z.object({
   photoCount: z.number().int(),
   galleryUrl: z.string(),
   pin: z.string().nullable(),
+  /** The couple-and-family PIN (sees every photo), when the studio set one. */
+  fullAccessPin: z.string().nullable(),
+  /** Guests see only their own photos (selfie); the event PIN then shows nothing else. */
+  facePrivacy: z.boolean(),
+  expiresAt: z.string(),
+  /** Gallery opens, all platforms. */
+  visits: z.number().int(),
+  /** Signed-up guests; only on the single-gallery read. */
+  guests: z.number().int().optional(),
   adminPath: z.string(),
   createdAt: z.string(),
 }).openapi('PartnerGallery')
@@ -97,6 +109,10 @@ const galleryOut = (c: Context<AppEnv>, projectId: string, e: EventRow) => ({
   projectId, eventId: e.id, shortId: e.shortId, name: e.name, status: e.status, photoCount: e.photoCount,
   galleryUrl: `${c.env.GALLERY_URL.replace(/\/$/, '')}/${e.shortId}`,
   pin: e.settings.pin ?? null,
+  fullAccessPin: e.settings.facePrivacy && e.settings.faceSearch ? e.settings.fullAccessPin ?? null : null,
+  facePrivacy: e.settings.facePrivacy && e.settings.faceSearch,
+  expiresAt: e.expiresAt,
+  visits: (e.visits?.web ?? 0) + (e.visits?.android ?? 0) + (e.visits?.ios ?? 0),
   adminPath: `/events/${e.id}`, createdAt: e.createdAt,
 })
 
@@ -114,7 +130,8 @@ async function linkedEvent(c: Context<AppEnv>, claims: PartnerClaims, projectId:
 /**
  * A Studio AutoPilot gallery: a wedding the couple shares with their guests. The private-family preset with two
  * changes, both because selfie search is not running in production yet:
- * - face privacy off: the link and the PIN already keep strangers out, and a typed PIN sees everything anyway;
+ * - face privacy off: the link and the PIN already keep strangers out (with it on, the event PIN would show a
+ *   guest nothing but selfie matches, and only the full-access PIN would show the rest);
  * - downloads 'all': 'own' allows only photos a selfie matched, so nobody -- not even the couple -- could
  *   download a single photo.
  * The studio can turn either back on per event once selfie search works.
@@ -179,5 +196,59 @@ integrationRoutes.openapi(createRoute({
   const { projectId } = c.req.valid('param')
   const ev = await linkedEvent(c, claims, projectId)
   if (!ev) throw new NotFound('Gallery', projectId)
-  return c.json(galleryOut(c, projectId, ev), 200)
+  const g = schema.guests
+  const [{ n }] = await getDb(c.env.DB).select({ n: count() }).from(g).where(and(eq(g.eventId, ev.id), isNull(g.removedAt)))
+  return c.json({ ...galleryOut(c, projectId, ev), guests: n }, 200)
+})
+
+integrationRoutes.openapi(createRoute({
+  method: 'get', path: '/integrations/studioautopilot/events', tags: ['Integrations'], summary: 'Every gallery Studio AutoPilot made for this company',
+  description: 'Newest first; galleries in the trash are left out.',
+  responses: { 200: json(z.object({ items: z.array(Gallery) })), ...problems(401, 501) },
+}), async (c) => {
+  const claims = await claimsFrom(c, bearerOf(c), 'api')
+  const db = getDb(c.env.DB)
+  const studioId = await linkedId(db, 'studio', claims.cid)
+  if (!studioId) return c.json({ items: [] }, 200)
+  const l = schema.partnerLinks
+  const e = schema.events
+  const prefix = projectKey(claims, '')
+  const rows = await db.select({ key: l.externalId, e }).from(l)
+    .innerJoin(e, eq(e.id, l.localId))
+    .where(and(eq(l.provider, STUDIO_AUTOPILOT), eq(l.kind, 'event'), like(l.externalId, `${prefix}%`), eq(e.studioId, studioId), isNull(e.deletedAt)))
+    .orderBy(desc(e.createdAt)).limit(500)
+  return c.json({ items: rows.map((r) => galleryOut(c, r.key.slice(prefix.length), r.e)) }, 200)
+})
+
+const PartnerStudio = z.object({
+  linked: z.boolean(),
+  studioName: z.string().nullable(),
+  plan: z.string().nullable(),
+  validTill: z.string().nullable(),
+  walletRupees: z.number().nullable(),
+  photosUsed: z.number().int().nullable(),
+  photosLimit: z.number().int().nullable(),
+  galleries: z.number().int(),
+  adminUrl: z.string(),
+}).openapi('PartnerStudio')
+
+integrationRoutes.openapi(createRoute({
+  method: 'get', path: '/integrations/studioautopilot/studio', tags: ['Integrations'], summary: 'The Frameline studio joined to this company',
+  description: 'For Studio AutoPilot\'s settings: whether the company is set up here yet, its plan, wallet and photos used. `linked: false` until the owner first opens a gallery.',
+  responses: { 200: json(PartnerStudio), ...problems(401, 501) },
+}), async (c) => {
+  const claims = await claimsFrom(c, bearerOf(c), 'api')
+  const db = getDb(c.env.DB)
+  const adminUrl = c.env.APP_URL.replace(/\/$/, '')
+  const studioId = await linkedId(db, 'studio', claims.cid)
+  const [s] = studioId ? await db.select().from(schema.studios).where(eq(schema.studios.id, studioId)).limit(1) : []
+  if (!s) return c.json({ linked: false, studioName: null, plan: null, validTill: null, walletRupees: null, photosUsed: null, photosLimit: null, galleries: 0, adminUrl }, 200)
+  const l = schema.partnerLinks
+  const e = schema.events
+  const [{ n }] = await db.select({ n: count() }).from(l).innerJoin(e, eq(e.id, l.localId))
+    .where(and(eq(l.provider, STUDIO_AUTOPILOT), eq(l.kind, 'event'), like(l.externalId, `${projectKey(claims, '')}%`), eq(e.studioId, s.id), isNull(e.deletedAt)))
+  return c.json({
+    linked: true, studioName: s.name, plan: s.planId, validTill: s.validTill, walletRupees: s.walletPaise / 100,
+    photosUsed: s.photosUsed, photosLimit: s.photosLimit, galleries: n, adminUrl,
+  }, 200)
 })

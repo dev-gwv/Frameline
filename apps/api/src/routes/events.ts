@@ -24,6 +24,8 @@ import { toMinor } from '../lib/money'
 import { audit } from '../services/audit'
 import { createEvent, eventForMember, newPin } from '../services/events'
 import { emit } from '../services/realtime'
+import { queuePartnerNotice } from '../services/partner-notify'
+import { background } from '../lib/http'
 import { vectorIndex } from '../services/vectors'
 
 export const eventRoutes = createRouter()
@@ -123,6 +125,7 @@ eventRoutes.openapi(createRoute({
   }
   await db.update(schema.events).set({ settings: withSettingsDefaults({ ...withSettingsDefaults(ev.settings), ...patch }) }).where(eq(schema.events.id, ev.id)).run()
   audit(c, 'event.settings', { type: 'event', id: ev.id }, { patch })
+  background(c, queuePartnerNotice(c.env, ev.id, patch.pin ? 'pin' : 'settings'))
   emit(c, m.studioId, 'events')
   return c.json(eventOut(await eventForMember(db, m, ev.id)), 200)
 })
@@ -139,6 +142,7 @@ eventRoutes.openapi(createRoute({
   const pin = newPin(ev.settings.fullAccessPin)
   await db.update(schema.events).set({ settings: { ...withSettingsDefaults(ev.settings), pin } }).where(eq(schema.events.id, ev.id)).run()
   audit(c, 'event.pin_reset', { type: 'event', id: ev.id })
+  background(c, queuePartnerNotice(c.env, ev.id, 'pin'))
   emit(c, m.studioId, 'events')
   return c.json({ pin }, 200)
 })
@@ -156,6 +160,7 @@ eventRoutes.openapi(createRoute({
   const pin = newPin(ev.settings.pin)
   await db.update(schema.events).set({ settings: { ...withSettingsDefaults(ev.settings), fullAccessPin: pin } }).where(eq(schema.events.id, ev.id)).run()
   audit(c, 'event.full_pin_set', { type: 'event', id: ev.id })
+  background(c, queuePartnerNotice(c.env, ev.id, 'pin'))
   emit(c, m.studioId, 'events')
   return c.json({ pin }, 200)
 })
@@ -173,6 +178,7 @@ eventRoutes.openapi(createRoute({
   const { fullAccessPin: _old, ...settings } = withSettingsDefaults(ev.settings)
   await db.update(schema.events).set({ settings }).where(eq(schema.events.id, ev.id)).run()
   audit(c, 'event.full_pin_cleared', { type: 'event', id: ev.id })
+  background(c, queuePartnerNotice(c.env, ev.id, 'pin'))
   emit(c, m.studioId, 'events')
   return c.body(null, 204)
 })

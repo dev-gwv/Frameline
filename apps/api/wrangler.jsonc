@@ -93,7 +93,9 @@
         // presigned uploads (uploadMode() in services/storage.ts) once R2_ACCESS_KEY_ID/SECRET are also set
         // via `wrangler secret put`. Without all three, uploads fall back to proxying through the Worker.
         "R2_ACCOUNT_ID": "d9b73b5a2afa3689965e35065b313604",
-        "GOOGLE_NATIVE_REDIRECTS": "frameline://sign-in"
+        "GOOGLE_NATIVE_REDIRECTS": "frameline://sign-in",
+        // Gallery-changed notices for Studio AutoPilot (services/partner-notify.ts), signed with STUDIOAUTOPILOT_SECRET.
+        "STUDIOAUTOPILOT_WEBHOOK_URL": "https://api.studioautopilot.in/webhooks/frameline"
       },
       "triggers": { "crons": ["* * * * *", "0 3 * * *"] },
       "d1_databases": [{ "binding": "DB", "database_name": "frameline", "database_id": "32bf8f23-7594-4c5f-8e7a-51b5eed336a7", "migrations_dir": "migrations" }],
