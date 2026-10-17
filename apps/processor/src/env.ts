@@ -5,6 +5,10 @@ export interface ProcessorEnv {
   authToken: string
   r2: { accountId: string; accessKeyId: string; secretAccessKey: string }
   modelsDir: string
+  /** Photos processed at once (default 2: one per core the container is given). */
+  maxJobs: number
+  /** Requests that may wait for a turn before the processor answers 503 busy (default 20). */
+  maxWaiting: number
 }
 
 function required(name: string): string {
@@ -22,6 +26,8 @@ export function loadEnv(): ProcessorEnv {
       accessKeyId: required('R2_ACCESS_KEY_ID'),
       secretAccessKey: required('R2_SECRET_ACCESS_KEY'),
     },
+    maxJobs: Math.max(1, Number(process.env.PROCESSOR_MAX_JOBS ?? 2) || 2),
+    maxWaiting: Math.max(0, Number(process.env.PROCESSOR_MAX_WAITING ?? 20) || 20),
     modelsDir: process.env.MODELS_DIR ?? new URL('../models', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'),
   }
 }

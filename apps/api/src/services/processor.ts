@@ -41,17 +41,32 @@ export class ProcessingRejected extends Error {}
 /** Attempts before a photo is given up on and marked `failed` (so it never sits in `processing` forever). */
 export const MAX_PROCESS_ATTEMPTS = 5
 
+const PROCESS_TIMEOUT_MS = 120_000
+
+/** The processor is at capacity: try the photo again later, without counting it as a failed attempt. */
+export class ProcessorBusy extends Error {
+  constructor(readonly retryAfterSec: number) { super('processor busy') }
+}
+
 export class HttpProcessor implements PhotoProcessor {
   readonly name = 'http'
   constructor(private url: string, private token?: string, private bucket?: string) {}
   async process(job: ProcessPhotoJob): Promise<ProcessResult> {
     const res = await fetch(`${this.url.replace(/\/$/, '')}/process`, {
       method: 'POST',
+      // A 24 MP photo takes seconds; a processor that hangs must not hold the queue consumer for 15 minutes.
+      signal: AbortSignal.timeout(PROCESS_TIMEOUT_MS),
       headers: { 'Content-Type': 'application/json', ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) },
       body: JSON.stringify({ ...job, bucket: this.bucket }),
     })
     // 422 = the file itself is the problem (HEIC it can't decode, a video, a corrupt upload, no key).
     if (res.status === 422) throw new ProcessingRejected(`processor rejected the file: ${await res.text().catch(() => '')}`.slice(0, 500))
+    // 503 `busy`: at capacity (apps/processor/src/limiter.ts), not the photo's fault, so it goes back in the queue.
+    // Any other 503 (the proxy in front of a processor that is down) is an outage and counts as an attempt.
+    if (res.status === 503) {
+      const body = (await res.clone().json().catch(() => null)) as { error?: string } | null
+      if (body?.error === 'busy') throw new ProcessorBusy(Number(res.headers.get('retry-after')) || 30)
+    }
     if (!res.ok) throw new Error(`processor responded ${res.status}`)
     return (await res.json()) as ProcessResult
   }
@@ -148,6 +163,12 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
       }
       msg.ack()
     } catch (e) {
+      if (e instanceof ProcessorBusy && job.kind === 'process-photo') {
+        // Re-queued as a fresh message so a busy processor never uses up the photo's retries (max_retries).
+        await env.PHOTO_QUEUE.send(job, { delaySeconds: Math.min(300, Math.max(10, e.retryAfterSec)) })
+        msg.ack()
+        continue
+      }
       console.error(JSON.stringify({ level: 'error', msg: 'queue job failed', job, attempt: msg.attempts, error: String(e) }))
       if (job.kind === 'process-photo' && (e instanceof ProcessingRejected || msg.attempts >= MAX_PROCESS_ATTEMPTS)) {
         await markFailed(env, job, String(e)).catch(() => undefined)

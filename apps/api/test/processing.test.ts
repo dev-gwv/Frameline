@@ -52,4 +52,21 @@ describe('photo processing failures', () => {
     expect(last.retryMessages.length).toBe(0)
     expect(await status(p.id)).toBe('failed')
   })
+
+  it('puts a photo back in the queue when the processor is busy, without spending its attempts', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"busy"}', { status: 503, headers: { 'retry-after': '30', 'content-type': 'application/json' } })))
+    const sent: { body: unknown; delay?: number }[] = []
+    const queue = { send: async (body: unknown, o?: { delaySeconds?: number }) => { sent.push({ body, delay: o?.delaySeconds }) } }
+    const p = await processingPhoto()
+    const job: PhotoJob = { kind: 'process-photo', photoId: p.id, eventId: p.eventId, studioId: p.studioId, key: 'k', quality: 'web' }
+    const batch = createMessageBatch<PhotoJob>('frameline-photos', [{ id: `m${Date.now()}`, timestamp: new Date(), attempts: MAX_PROCESS_ATTEMPTS, body: job }])
+    const ctx = createExecutionContext()
+    await handlePhotoQueue(batch, { ...withProcessor, PHOTO_QUEUE: queue } as never)
+    const result = await getQueueResult(batch, ctx)
+    expect(result.explicitAcks.length).toBe(1)
+    expect(result.retryMessages.length).toBe(0)
+    expect(sent).toEqual([{ body: job, delay: 30 }])
+    // Even on what would have been its last attempt, a busy processor never marks the photo failed.
+    expect(await status(p.id)).toBe('processing')
+  })
 })

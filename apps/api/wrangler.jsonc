@@ -47,6 +47,8 @@
         "queue": "frameline-photos",
         "max_batch_size": 10,
         "max_batch_timeout": 2,
+        // At most 2 batches at once: the processor has 2 cores (apps/processor/docker-compose.vps.yml).
+        "max_concurrency": 2,
         "max_retries": 5,
         "dead_letter_queue": "frameline-photos-dlq"
       }
@@ -106,7 +108,7 @@
       "kv_namespaces": [{ "binding": "KV", "id": "e672b1baa531411a90176fa35a293291" }],
       "queues": {
         "producers": [{ "binding": "PHOTO_QUEUE", "queue": "frameline-photos" }],
-        "consumers": [{ "queue": "frameline-photos", "max_batch_size": 10, "max_batch_timeout": 2, "max_retries": 5, "dead_letter_queue": "frameline-photos-dlq" }]
+        "consumers": [{ "queue": "frameline-photos", "max_batch_size": 10, "max_batch_timeout": 2, "max_concurrency": 2, "max_retries": 5, "dead_letter_queue": "frameline-photos-dlq" }]
       },
       "durable_objects": {
         "bindings": [

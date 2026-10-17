@@ -7,6 +7,7 @@ import { r2Client } from './r2.ts'
 import { detectAndEmbed } from './faces.ts'
 import { readExif, type ExifSummary } from './exif.ts'
 import { renderDownload } from './render.ts'
+import { Limiter } from './limiter.ts'
 
 /**
  * Matches apps/api's `HttpProcessor`/`ProcessResult` contract exactly (apps/api/src/services/processor.ts) —
@@ -46,8 +47,12 @@ function safeEqual(a: string, b: string): boolean {
 
 export function buildServer(env: ProcessorEnv) {
   const app = new Hono()
+  // Photos worked on at once (2 = the container's 2 cores), and how many may wait for a turn (limiter.ts).
+  const limiter = new Limiter(env.maxJobs, env.maxWaiting)
+  const busy = (c: { json: (b: unknown, s: 503, h: Record<string, string>) => Response }) =>
+    c.json({ error: 'busy', detail: 'The processor is at capacity; try again shortly.' }, 503, { 'Retry-After': '30' })
 
-  app.get('/health', (c) => c.json({ ok: true }))
+  app.get('/health', (c) => c.json({ ok: true, ...limiter.stats }))
 
   // A download rendition made now: rotation and watermark as they are today (apps/api streams it to the guest).
   app.post('/render', async (c) => {
@@ -57,14 +62,15 @@ export function buildServer(env: ProcessorEnv) {
     const body = RenderJob.safeParse(await c.req.json().catch(() => null))
     if (!body.success) return c.json({ error: 'invalid_job', issues: body.error.issues }, 400)
     const job = body.data
-    try {
+    const out = await limiter.run(async () => { try {
       const original = Buffer.from(await r2Client(env.r2).getObject(job.bucket, job.key))
       const jpeg = await renderDownload(original, { size: job.size, rotation: job.rotation, watermark: job.watermark })
       return new Response(new Uint8Array(jpeg), { headers: { 'Content-Type': 'image/jpeg', 'Content-Length': String(jpeg.byteLength) } })
     } catch (err) {
       console.error(JSON.stringify({ level: 'error', msg: 'render failed', key: job.key, error: String(err) }))
       return c.json({ error: 'render_failed', detail: String(err) }, 502)
-    }
+    } })
+    return out ?? busy(c)
   })
 
   app.post('/process', async (c) => {
@@ -77,10 +83,11 @@ export function buildServer(env: ProcessorEnv) {
     const job = body.data
 
     if (!job.key) return c.json({ error: 'no_key', detail: 'Job has no R2 key to process' }, 422)
+    const key = job.key
 
-    try {
+    const out = await limiter.run(async () => { try {
       const r2 = r2Client(env.r2)
-      const bytes = await r2.getObject(job.bucket, job.key)
+      const bytes = await r2.getObject(job.bucket, key)
       const buffer = Buffer.from(bytes)
       // Turn the photo upright first: cameras store portrait shots sideways plus an EXIF orientation tag, and
       // faces lying on their side aren't found. 422 when the file can't be decoded at all (a video, HEIC this
@@ -99,7 +106,7 @@ export function buildServer(env: ProcessorEnv) {
       // applies, otherwise the gallery renders the download itself with the watermark burned in.
       // Watermark burn-in and AI enhance are still not built; `previewUrl` stays unset, so the gallery keeps the original.
       if (!job.reindex) {
-        const dir = job.key.replace(/\/[^/]+$/, '')
+        const dir = key.replace(/\/[^/]+$/, '')
         for (const size of RENDITION_SIZES) {
           const jpeg = await sharp(upright).resize(size, size, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85, mozjpeg: true }).toBuffer()
           await r2.putObject(job.bucket, `${dir}/renditions/${size}.jpg`, jpeg, 'image/jpeg')
@@ -117,7 +124,8 @@ export function buildServer(env: ProcessorEnv) {
     } catch (err) {
       console.error(JSON.stringify({ level: 'error', msg: 'process failed', photoId: job.photoId, error: String(err) }))
       return c.json({ error: 'process_failed', detail: String(err) }, 502)
-    }
+    } })
+    return out ?? busy(c)
   })
 
   return app
