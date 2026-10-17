@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { Download, RotateCcw, ScanFace, SearchX, ShoppingBag } from 'lucide-react'
 import { Button } from '@frameline/ui'
 import { fmt } from '@frameline/shared'
@@ -36,6 +36,8 @@ export function MyPhotos() {
   const store = event.settings.storeEnabled
   const retake = <TextButton className="-mr-1 text-[13px]" onClick={() => setSelfie(true)}>Not you? Retake</TextButton>
 
+  // No selfie search here (turned off for this gallery, or the AI switch is off): "My photos" has nothing to show.
+  if (!event.settings.faceSearch) return <Navigate to={base} replace />
   return (
     <EventShell event={event} base={base} tab="me" offline={forceOffline}>
       <PageTop back={base} title="Your photos" right={session.match ? retake : undefined} />
