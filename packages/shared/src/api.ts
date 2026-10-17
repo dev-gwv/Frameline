@@ -11,6 +11,7 @@ import type {
   AccessRequest, EventHost, EventStats, HandleCheck, NotifyRequest, PayoutCheck, ReviewStatus, StatsTotals, StudioStats,
 } from './types'
 import { buildNeedsYou } from './needs-you'
+import { availableArticles } from './help'
 import { cleanGuestLinkPayload, decodeGuestLink, encodeGuestToken, guestLinkKind, type GuestLinkKind, type GuestLinkPayload } from './links'
 import { ApiError } from './http'
 import {
@@ -257,6 +258,10 @@ export interface FramelineApi {
   listTickets(): Promise<Ticket[]>
   createTicket(input: Pick<Ticket, 'subject' | 'eventId' | 'platform'> & { body: string }): Promise<Ticket>
   replyTicket(id: ID, body: string): Promise<Ticket>
+  /** "That solved it": closes the ticket. */
+  resolveTicket(id: ID): Promise<Ticket>
+  /** A screenshot or short screen recording for support (image or video, up to 50 MB, 5 per request). */
+  attachToTicket(id: ID, file: AssetFile): Promise<{ fileName: string; size: number }>
   listTeam(): Promise<TeamMember[]>
   inviteMember(email: string, role: TeamMember['role'], eventIds?: ID[]): Promise<TeamMember>
   updateMember(id: ID, patch: MemberPatch): Promise<TeamMember>
@@ -763,6 +768,23 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
   const normHost = (h: EventHost, prev?: EventHost): EventHost => ({
     ...h, access: h.access ?? prev?.access ?? 'full', status: h.status ?? prev?.status ?? 'invited', invitedAt: h.invitedAt ?? prev?.invitedAt ?? new Date().toISOString(),
   })
+  /** Sample data's assistant: the best-matching guide, else "a person will reply" (the real one is apps/api support-ai.ts). */
+  function sampleAssistant(t: Ticket, text: string) {
+    t.assistant = 'thinking'
+    setTimeout(() => {
+      const words = text.toLowerCase().split(/\W+/).filter((w) => w.length > 3)
+      const best = availableArticles({ ai: true })
+        .map((a) => ({ a, n: words.filter((w) => `${a.title} ${a.tags.join(' ')}`.toLowerCase().includes(w)).length }))
+        .sort((x, y) => y.n - x.n)[0]
+      const found = best && best.n > 0
+      t.messages.push({ from: 'assistant', body: found ? best.a.answer : 'Thanks for writing in. A person on the Frameline team will look at this and reply here, usually within a working day.', at: new Date().toISOString() })
+      t.status = 'answered'
+      if (found) delete t.assistant
+      else t.assistant = 'with-team'
+      save(); emit('misc')
+    }, 1200)
+  }
+
   function randomPin(avoid?: string): string {
     for (;;) { const pin = String(1000 + Math.floor(Math.random() * 9000)); if (pin !== avoid) return pin }
   }
@@ -1334,12 +1356,22 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     async createTicket({ body, ...rest }) {
       await wait(latency)
       const t: Ticket = { ...rest, id: uid('t'), status: 'open', messages: [{ from: 'me', body, at: new Date().toISOString() }] }
-      s().tickets.unshift(t); emit('misc'); return clone(t)
+      s().tickets.unshift(t); emit('misc')
+      sampleAssistant(t, `${rest.subject} ${body}`)
+      return clone(t)
     },
     async replyTicket(id, body) {
       await wait(latency)
       const t = byId(s().tickets, id, 'Ticket')
-      t.messages.push({ from: 'me', body, at: new Date().toISOString() }); t.status = 'waiting'; emit('misc'); return clone(t)
+      t.messages.push({ from: 'me', body, at: new Date().toISOString() }); t.status = 'waiting'; emit('misc')
+      if (t.assistant !== 'with-team') sampleAssistant(t, body)
+      return clone(t)
+    },
+    async attachToTicket(_id, file) { await wait(latency); return { fileName: file.filename, size: file.size ?? 0 } },
+    async resolveTicket(id) {
+      await wait(latency)
+      const t = byId(s().tickets, id, 'Ticket')
+      t.status = 'closed'; delete t.assistant; emit('misc'); return clone(t)
     },
     async listTeam() { await wait(latency); return clone(s().team) },
     async inviteMember(email, role, eventIds = []) {

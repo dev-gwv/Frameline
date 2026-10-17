@@ -368,7 +368,10 @@ export interface Ticket {
   eventId?: ID
   platform: 'web-gallery' | 'app' | 'admin' | 'desktop'
   status: 'open' | 'answered' | 'waiting' | 'closed'
-  messages: { from: 'me' | 'support'; body: string; at: string }[]
+  /** me: the studio; assistant: the AI's answer; support: a person on our team. */
+  messages: { from: 'me' | 'support' | 'assistant'; body: string; at: string }[]
+  /** The assistant is still writing its answer / the ticket is with our team (a person replies). */
+  assistant?: 'thinking' | 'with-team'
 }
 
 export interface TeamMember {

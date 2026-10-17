@@ -30,7 +30,11 @@ export const FEATURES: Readonly<Features> = {
  * `ai`: face finding and selfie search. Off until the image processor is deployed; while off the server already
  * gives every gallery settings that don't need it (withoutAi), and the apps hide the AI controls.
  */
-export interface ServerFeatures { ai: boolean }
+export interface ServerFeatures {
+  ai: boolean
+  /** Support's WhatsApp number (SUPPORT_WHATSAPP), when there is one: the Help page shows a chat link. */
+  supportWhatsapp?: string
+}
 
 /** Sample data (no API URL) shows everything; a server that can't be asked is treated as AI off, the safe side. */
 export async function fetchServerFeatures(apiUrl: string | undefined): Promise<ServerFeatures> {
@@ -38,7 +42,8 @@ export async function fetchServerFeatures(apiUrl: string | undefined): Promise<S
   try {
     const res = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/meta`)
     const body = (await res.json()) as { features?: Partial<ServerFeatures> }
-    return { ai: body.features?.ai === true }
+    const wa = body.features?.supportWhatsapp
+    return { ai: body.features?.ai === true, ...(typeof wa === 'string' && wa ? { supportWhatsapp: wa } : {}) }
   } catch {
     return { ai: false }
   }

@@ -183,7 +183,10 @@ describe('studio resources', () => {
     expect(bc.json.sentAt).toEqual(expect.any(String))
     const t = await call('/v1/tickets', { token, body: { subject: 'Help', platform: 'admin', body: 'Question' } })
     const reply = await call(`/v1/tickets/${t.json.id}/messages`, { token, body: { body: 'More detail' } })
-    expect(reply.json).toMatchObject({ status: 'waiting', messages: [{ body: 'Question' }, { body: 'More detail' }] })
+    // The support assistant may have answered in between (support.test.ts covers it): the studio's two messages bracket the thread.
+    expect(reply.json.status).toBe('waiting')
+    expect(reply.json.messages[0]).toMatchObject({ from: 'me', body: 'Question' })
+    expect(reply.json.messages.at(-1)).toMatchObject({ from: 'me', body: 'More detail' })
     const film = await call('/v1/events/ev_riya/films', { token, body: { name: 'Teaser', url: 'https://youtu.be/abc' } })
     expect((await call(`/v1/films/${film.json.id}`, { token, method: 'DELETE' })).status).toBe(204)
     const reqs = (await call('/v1/events/ev_riya/access-requests', { token })).json.items

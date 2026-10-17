@@ -1,35 +1,39 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, FileImage, FileVideo, MessageCircle, MessageSquare, Paperclip, PlayCircle, Search, Send, Ticket as TicketIcon, X } from 'lucide-react'
-import { fmt, type Ticket } from '@frameline/shared'
-import { Button, Card, Chip, cn, EmptyState, Field, Input, Modal, Page, Segmented, Select, Skeleton, Textarea, type ChipTone } from '@frameline/ui'
-import { useApi } from '../../lib/api'
+import { Bot, CheckCircle2, ChevronDown, FileImage, FileVideo, Loader2, MessageCircle, MessageSquare, Paperclip, PlayCircle, Search, Send, Ticket as TicketIcon, Users, X } from 'lucide-react'
+import { availableArticles, fmt, type Ticket } from '@frameline/shared'
+import { Button, Card, Chip, cn, EmptyState, Field, Input, Modal, Page, Segmented, Select, Skeleton, Textarea, useToast, type ChipTone } from '@frameline/ui'
+import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { useAction, useEvents, useStudio, useTickets } from '../../lib/queries'
 import { useParamState } from '../../lib/url'
 import { QueryError } from '../system'
 import { articleForTopic, searchArticles } from './articles'
 
-const WHATSAPP = '+91 80 4718 2200'
-const WA_LINK = `https://wa.me/${WHATSAPP.replace(/\D/g, '')}`
+/** A chat link to support's WhatsApp, only when the server has a real number (SUPPORT_WHATSAPP). */
+const waLink = (n: string) => { const d = n.replace(/\D/g, ''); return `https://wa.me/${d.length === 10 ? `91${d}` : d}` }
 const STATUS: Record<Ticket['status'], { label: string; tone: ChipTone }> = {
   open: { label: 'Open', tone: 'accent' }, answered: { label: 'Answered', tone: 'ok' }, waiting: { label: 'Waiting', tone: 'warn' }, closed: { label: 'Closed', tone: 'neutral' },
 }
 const PLATFORM_LABEL: Record<Ticket['platform'], string> = { admin: 'This website', 'web-gallery': 'Guest gallery', app: 'Phone app', desktop: 'Desktop uploader' }
 
-/** /support "Help": WhatsApp, Ask the team (new request), Guides and videos; then your requests. ?new=1, ?request=<id>, ?topic=<article>. */
+/**
+ * /support "Help": Ask the team (the assistant answers in about a minute, a person takes over when needed),
+ * Guides and videos, and WhatsApp when support has a number; then your requests. ?new=1, ?request=<id>, ?topic=<article>.
+ */
 export default function Support() {
   const tickets = useTickets()
   const [params, set] = useParamState()
   const topic = params.get('topic')
+  const { supportWhatsapp } = useServerFeatures()
   const cards = [
-    { icon: <MessageCircle size={16} />, title: 'WhatsApp us', body: WHATSAPP, cta: 'Open chat', onClick: () => window.open(WA_LINK, '_blank', 'noopener') },
-    { icon: <TicketIcon size={16} />, title: 'Ask the team', body: 'For anything that needs a screenshot', cta: 'New request', onClick: () => set({ new: '1' }) },
+    { icon: <TicketIcon size={16} />, title: 'Ask the team', body: 'A question, or something not working. Add screenshots.', cta: 'New request', onClick: () => set({ new: '1' }) },
     { icon: <PlayCircle size={16} />, title: 'Guides and videos', body: 'English and हिन्दी', cta: 'Browse', onClick: () => set({ topic: 'all' }) },
+    ...(supportWhatsapp ? [{ icon: <MessageCircle size={16} />, title: 'WhatsApp us', body: supportWhatsapp, cta: 'Open chat', onClick: () => window.open(waLink(supportWhatsapp), '_blank', 'noopener') }] : []),
   ]
   const list = tickets.data ?? []
   const open = list.find((t) => t.id === params.get('request')) ?? null
   return (
-    <Page title="Help" subtitle="We usually reply on WhatsApp within an hour, 9 am to 9 pm.">
-      <div className="mb-5 grid gap-3.5 sm:grid-cols-3">
+    <Page title="Help" subtitle="Our assistant answers in about a minute. When it needs a person, the Frameline team replies here within a working day.">
+      <div className={cn('mb-5 grid gap-3.5', cards.length === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
         {cards.map((c) => (
           <Card key={c.title} className="flex flex-col items-start gap-2">
             <span className="grid size-8 place-items-center rounded-control bg-accent-soft text-accent-text">{c.icon}</span>
@@ -52,7 +56,7 @@ export default function Support() {
                   <button type="button" onClick={() => set({ request: t.id })} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-sunk">
                     <span className="min-w-0 flex-1">
                       <b className="block truncate">{t.subject}</b>
-                      <span className="block truncate text-[12.5px] text-ink-3">#{t.id.toUpperCase()} · {last.from === 'support' ? 'Support replied' : 'You wrote'} {fmt.ago(last.at)}</span>
+                      <span className="block truncate text-[12.5px] text-ink-3">#{t.id.toUpperCase()} · {t.assistant === 'thinking' ? 'The assistant is answering…' : `${last.from === 'support' ? 'The team replied' : last.from === 'assistant' ? 'The assistant replied' : 'You wrote'} ${fmt.ago(last.at)}`}{t.assistant === 'with-team' && t.status !== 'closed' ? ' · with our team' : ''}</span>
                     </span>
                     <Chip tone={STATUS[t.status].tone}>{STATUS[t.status].label}</Chip>
                   </button>
@@ -73,6 +77,7 @@ export default function Support() {
 const MAX_FILES = 5
 function RequestModal({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: (t: Ticket) => void }) {
   const api = useApi()
+  const toast = useToast()
   const events = useEvents()
   const studio = useStudio()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -92,8 +97,7 @@ function RequestModal({ open, onOpenChange, onCreated }: { open: boolean; onOpen
       if (next.length >= MAX_FILES) { problems.push(`Up to ${MAX_FILES} files; ${f.name} was left out.`); continue }
       const img = f.type.startsWith('image/'), vid = f.type.startsWith('video/')
       if (!img && !vid) problems.push(`${f.name} isn’t a screenshot or video.`)
-      else if (img && f.size > 100 * 1048576) problems.push(`${f.name} is over 100 MB.`)
-      else if (vid && f.size > 1024 * 1048576) problems.push(`${f.name} is over 1 GB.`)
+      else if (f.size > 50 * 1048576) problems.push(`${f.name} is over 50 MB. Send a shorter recording.`)
       else next.push(f)
     }
     setFiles(next); setFileError(problems.join(' '))
@@ -107,11 +111,17 @@ function RequestModal({ open, onOpenChange, onCreated }: { open: boolean; onOpen
       ev && `Event: ${ev.name} (${ev.shortId})`,
       files.length && `Screenshots: ${files.map((f) => `${f.name} (${fmt.bytes(f.size)})`).join(', ')}`,
     ].filter(Boolean).join('\n')
-    return api.createTicket({ subject, eventId: eventId || undefined, platform, body: text + (extra ? `\n\n${extra}` : '') })
-  }, { success: 'Sent · we usually reply within an hour', onSuccess: onCreated })
+    return api.createTicket({ subject, eventId: eventId || undefined, platform, body: text + (extra ? `\n\n${extra}` : '') }).then(async (t) => {
+      // The files reach the team with the request (the Sheet row links them); a failed one never loses the request.
+      const failed: string[] = []
+      for (const f of files) await api.attachToTicket(t.id, { filename: f.name, contentType: f.type, size: f.size, blob: f }).catch((e) => { failed.push(`${f.name}: ${errorMessage(e)}`) })
+      if (failed.length) toast.error('Some files didn’t attach', failed.join(' · '))
+      return t
+    })
+  }, { success: 'Sent · the assistant is answering', onSuccess: onCreated })
 
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Ask the team" description="A real person reads this. We reply here and on WhatsApp." width={560}
+    <Modal open={open} onOpenChange={onOpenChange} title="Ask the team" description="Our assistant answers first, in about a minute. Anything it can’t solve goes to a person on the team." width={560}
       footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" loading={send.isPending} onClick={() => { setTried(true); if (!error) send.mutate(undefined) }}>Send request</Button></>}>
       <Field label="What happened?" error={tried ? error : ''} htmlFor="req-what">
         <Textarea id="req-what" rows={4} autoFocus placeholder="Guests say the selfie finds no photos in the Riya & Kabir gallery…" value={what} onChange={(e) => setWhat(e.target.value)} />
@@ -150,21 +160,27 @@ function ThreadModal({ ticket, onClose }: { ticket: Ticket | null; onClose: () =
   const [reply, setReply] = useState('')
   useEffect(() => setReply(''), [ticket?.id])
   const send = useAction((body: string) => api.replyTicket(ticket!.id, body), { success: 'Reply sent', onSuccess: () => setReply('') })
+  const solved = useAction(() => api.resolveTicket(ticket!.id), { success: 'Glad that’s sorted. The request is closed.' })
   if (!ticket) return null
   const submit = () => reply.trim() && send.mutate(reply.trim())
+  const last = ticket.messages[ticket.messages.length - 1]
+  const canSolve = ticket.status !== 'closed' && !ticket.assistant && (last?.from === 'assistant' || last?.from === 'support')
   return (
     <Modal open onOpenChange={(v) => !v && onClose()} width={600} title={ticket.subject}
       description={<span className="inline-flex flex-wrap items-center gap-2">#{ticket.id.toUpperCase()} · {PLATFORM_LABEL[ticket.platform]} <Chip tone={STATUS[ticket.status].tone}>{STATUS[ticket.status].label}</Chip></span>}
-      footer={<><Button variant="ghost" onClick={onClose}>Close</Button><Button variant="primary" icon={<Send size={14} />} disabled={!reply.trim()} loading={send.isPending} onClick={submit}>Send reply</Button></>}>
+      footer={<><Button variant="ghost" onClick={onClose}>Close</Button>{canSolve && <Button icon={<CheckCircle2 size={14} />} loading={solved.isPending} onClick={() => solved.mutate(undefined)}>That solved it</Button>}<Button variant="primary" icon={<Send size={14} />} disabled={!reply.trim()} loading={send.isPending} onClick={submit}>Send reply</Button></>}>
       <div className="flex flex-col gap-2 text-[13.5px]">
         {ticket.messages.map((m, i) => (
-          <div key={i} className={cn('max-w-[85%] whitespace-pre-line rounded-[10px] px-3 py-2', m.from === 'support' ? 'ml-auto bg-accent-soft' : 'bg-sunk')}>
-            {m.from === 'support' && <b className="block text-[12px] text-accent-text">Frameline support</b>}
+          <div key={i} className={cn('max-w-[85%] whitespace-pre-line rounded-[10px] px-3 py-2', m.from === 'me' ? 'bg-sunk' : 'ml-auto bg-accent-soft')}>
+            {m.from === 'support' && <b className="flex items-center gap-1 text-[12px] text-accent-text"><Users size={12} />Frameline team</b>}
+            {m.from === 'assistant' && <b className="flex items-center gap-1 text-[12px] text-accent-text"><Bot size={12} />Frameline assistant</b>}
             {m.body}
             <div className="mt-1 text-[11.5px] text-ink-3">{fmt.dateTime(m.at)}</div>
           </div>
         ))}
       </div>
+      {ticket.assistant === 'thinking' && <p className="inline-flex items-center gap-2 text-[13px] text-ink-2"><Loader2 size={14} className="animate-spin" />The assistant is writing an answer…</p>}
+      {ticket.assistant === 'with-team' && ticket.status !== 'closed' && <p className="rounded-control bg-sunk px-3 py-2 text-[13px] text-ink-2">With the Frameline team: a person replies here within a working day, and by email.</p>}
       {ticket.status === 'closed' && <p className="text-[13px] text-ink-3">This request is closed. Replying opens it again.</p>}
       <Textarea aria-label="Your reply" rows={3} placeholder="Write a reply…" value={reply} onChange={(e) => setReply(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() } }} />
@@ -174,14 +190,18 @@ function ThreadModal({ ticket, onClose }: { ticket: Ticket | null; onClose: () =
 
 /* ---------------- Guides and videos ---------------- */
 function GuidesModal({ topic, onClose }: { topic: string | null; onClose: () => void }) {
-  const linked = articleForTopic(topic)
+  const server = useServerFeatures()
+  // Only guides for features that are switched on.
+  const list = availableArticles(server)
+  const [, set] = useParamState()
+  const linked = articleForTopic(topic, list)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   useEffect(() => { setQuery(''); setExpanded(linked?.id ?? null) }, [topic]) // eslint-disable-line react-hooks/exhaustive-deps
-  const results = linked && !query ? [linked, ...searchArticles('').filter((a) => a.id !== linked.id)] : searchArticles(query)
+  const results = linked && !query ? [linked, ...searchArticles('', list).filter((a) => a.id !== linked.id)] : searchArticles(query, list)
   return (
     <Modal open={!!topic} onOpenChange={(v) => !v && onClose()} title="Guides and videos" description="Short answers, with videos in English and हिन्दी." width={640}
-      footer={<><Button variant="ghost" onClick={onClose}>Close</Button><Button variant="primary" icon={<MessageCircle size={14} />} onClick={() => window.open(WA_LINK, '_blank', 'noopener')}>Still stuck? WhatsApp us</Button></>}>
+      footer={<><Button variant="ghost" onClick={onClose}>Close</Button><Button variant="primary" icon={<TicketIcon size={14} />} onClick={() => set({ topic: undefined, new: '1' })}>Still stuck? Ask the team</Button></>}>
       <Input icon={<Search size={16} />} aria-label="Search guides" placeholder="Search, e.g. “change PIN”" value={query} onChange={(e) => { setQuery(e.target.value); setExpanded(null) }}
         suffix={query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')} className="text-ink-3 hover:text-ink"><X size={15} /></button> : undefined} />
       {!results.length ? <p className="text-[13.5px] text-ink-2">Nothing matches “{query}”. Try fewer words, or ask the team.</p> : (

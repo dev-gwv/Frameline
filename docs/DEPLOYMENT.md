@@ -121,3 +121,40 @@ Until it runs, production sets `AI_FEATURES: "off"` in `apps/api/wrangler.jsonc`
 
 To turn AI on: deploy the processor, set `PROCESSOR_URL`/`PROCESSOR_TOKEN`, change the var to `"on"` and deploy
 the API. No app release is needed; the apps read the switch at run time.
+
+## Email over Gmail SMTP
+
+Frameline sends sign-in codes, ZIP and receipt emails and the support emails through Gmail when these are set
+(they take priority over `RESEND_API_KEY`). In Google: turn on 2-Step Verification for the sending account, then
+Google Account → Security → App passwords → make one for "Frameline".
+
+```
+npx wrangler secret put SMTP_USER --env production   # the Gmail / Workspace address, e.g. support@yourdomain.in
+npx wrangler secret put SMTP_PASS --env production   # the 16-character App Password (not the account password)
+```
+
+Optional: `SMTP_FROM` ("Frameline <alias@...>", a Send-mail-as alias the account owns), `SMTP_HOST` /
+`SMTP_PORT` (default `smtp.gmail.com` / `465`). Limits: about 500 recipients a day on a personal Gmail, 2,000 on
+Workspace. Code: `apps/api/src/services/smtp.ts`.
+
+## The support desk
+
+Help → Ask the team: the assistant answers first (`services/support-ai.ts`), and hands bugs, money, account
+problems and anything it is unsure of to the team: a row in the support Google Sheet plus an email
+(`services/support-desk.ts`). The team replies in the Sheet; the reply lands in the studio's ticket and inbox.
+A morning email (08:30 India) lists what is still open.
+
+1. The Sheet: follow the steps at the top of `docs/support-sheet.gs` (5 minutes). It gives the web app URL.
+2. Secrets:
+   ```
+   npx wrangler secret put SUPPORT_AI_API_KEY --env production            # Groq API key (console.groq.com)
+   npx wrangler secret put SUPPORT_AI_FALLBACK_API_KEY --env production   # optional: NVIDIA NIM key (build.nvidia.com)
+   npx wrangler secret put SUPPORT_SHEET_URL --env production             # the Sheet's web app URL
+   npx wrangler secret put SUPPORT_SHEET_SECRET --env production          # 24+ random characters, same as the Sheet's SECRET
+   npx wrangler secret put SUPPORT_INBOX --env production                 # where team emails and the morning summary go
+   npx wrangler secret put SUPPORT_WHATSAPP --env production              # optional: support's WhatsApp number for Help
+   ```
+   Models default to `llama-3.3-70b-versatile` (Groq) and `meta/llama-3.3-70b-instruct` (NIM); change with
+   `SUPPORT_AI_MODEL` / `SUPPORT_AI_FALLBACK_MODEL`. With no AI key every ticket goes straight to the team.
+3. Screenshots studios attach are kept in R2 under `support/` (never public); the Sheet row links them through a
+   signed page that lasts 90 days.

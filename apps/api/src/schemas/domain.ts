@@ -286,7 +286,8 @@ export const Broadcast = z.object({
 export const TicketPlatform = z.enum(['web-gallery', 'app', 'admin', 'desktop'])
 export const Ticket = z.object({
   id: Id, subject: z.string(), eventId: Id.optional(), platform: TicketPlatform, status: z.enum(['open', 'answered', 'waiting', 'closed']),
-  messages: z.array(z.object({ from: z.enum(['me', 'support']), body: z.string(), at: z.string() })),
+  messages: z.array(z.object({ from: z.enum(['me', 'support', 'assistant']), body: z.string(), at: z.string() })),
+  assistant: z.enum(['thinking', 'with-team']).optional().openapi({ description: 'thinking: the assistant is writing its answer; with-team: a person on our team replies.' }),
 }).openapi('Ticket')
 
 export const TeamMember = z.object({

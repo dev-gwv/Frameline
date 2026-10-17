@@ -147,7 +147,7 @@ export function buildSeedSql(opts: { photoCap?: number; reset?: boolean; seed?: 
     open_rate: b.openRate ?? null, created_at: b.sentAt ?? b.scheduledAt ?? created,
   }))))
   stmts.push(...inserts('tickets', s.tickets.map((t) => ({
-    id: t.id, studio_id: sid, subject: t.subject, event_id: t.eventId ?? null, platform: t.platform, status: t.status, created_by: SEED_USERS.owner,
+    id: t.id, studio_id: sid, subject: t.subject, event_id: t.eventId ?? null, platform: t.platform, status: t.status, created_by: SEED_USERS.owner, ai_state: 'off',
     created_at: t.messages[0]?.at ?? created, updated_at: t.messages[t.messages.length - 1]?.at ?? created,
   }))))
   stmts.push(...inserts('ticket_messages', s.tickets.flatMap((t) => t.messages.map((m, i) => ({ id: `${t.id}_m${i}`, ticket_id: t.id, sender: m.from, body: m.body, at: m.at })))))

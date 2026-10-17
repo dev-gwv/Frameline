@@ -35,7 +35,11 @@ export const usePrices = () => { const api = useApi(); return useQuery({ queryKe
 export const useCameras = () => { const api = useApi(); return useQuery({ queryKey: ['cameras'], queryFn: () => api.listCameras() }) }
 export const useQRs = () => { const api = useApi(); return useQuery({ queryKey: ['qrs'], queryFn: () => api.listQRs() }) }
 export const useBroadcasts = () => { const api = useApi(); return useQuery({ queryKey: ['broadcasts'], queryFn: () => api.listBroadcasts() }) }
-export const useTickets = () => { const api = useApi(); return useQuery({ queryKey: ['tickets'], queryFn: () => api.listTickets() }) }
+export const useTickets = () => {
+  const api = useApi()
+  // While the assistant is writing an answer, look again every few seconds.
+  return useQuery({ queryKey: ['tickets'], queryFn: () => api.listTickets(), refetchInterval: (q) => (q.state.data?.some((t) => t.assistant === 'thinking') ? 3000 : false) })
+}
 export const useTeam = () => { const api = useApi(); return useQuery({ queryKey: ['team'], queryFn: () => api.listTeam() }) }
 export const useWatermark = () => { const api = useApi(); return useQuery({ queryKey: ['watermark'], queryFn: () => api.getWatermark() }) }
 export const useWebsite = () => { const api = useApi(); return useQuery({ queryKey: ['website'], queryFn: () => api.getWebsite() }) }

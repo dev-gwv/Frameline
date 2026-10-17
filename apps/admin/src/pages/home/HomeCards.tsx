@@ -4,9 +4,9 @@ import { Copy, Download, LifeBuoy, MessageCircle, QrCode } from 'lucide-react'
 import { fmt, PLANS } from '@frameline/shared'
 import { Button, Card, Meter, Modal, QRCode, Skeleton, useToast } from '@frameline/ui'
 import { useStudio, useUsage } from '../../lib/queries'
+import { useServerFeatures } from '../../lib/api'
 import { GALLERY_URL } from '../../lib/url'
 
-const WHATSAPP = '916351081819'
 const title = 'font-sans text-[15px] font-extrabold tracking-normal'
 
 async function copy(toast: ReturnType<typeof useToast>, text: string, what: string) {
@@ -83,12 +83,15 @@ export function FollowCard() {
 }
 
 export function HelpCard() {
+  // Support's WhatsApp comes from the server (SUPPORT_WHATSAPP); without one, Help is the way in.
+  const { supportWhatsapp } = useServerFeatures()
+  const wa = supportWhatsapp?.replace(/\D/g, '')
   return (
     <Card>
       <h2 className={title}>Need a hand?</h2>
-      <p className="mb-2.5 mt-0.5 text-[13px] text-ink-2">Guides, videos in English and हिन्दी, and a real person on WhatsApp.</p>
+      <p className="mb-2.5 mt-0.5 text-[13px] text-ink-2">Guides and videos in English and हिन्दी, and the team when you need a person.</p>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" className="max-sm:h-10" icon={<MessageCircle size={13} />} onClick={() => window.open(`https://wa.me/${WHATSAPP}?text=${encodeURIComponent('Hi Frameline, I need help with ')}`, '_blank', 'noopener')}>WhatsApp us</Button>
+        {wa && <Button size="sm" className="max-sm:h-10" icon={<MessageCircle size={13} />} onClick={() => window.open(`https://wa.me/${wa.length === 10 ? `91${wa}` : wa}?text=${encodeURIComponent('Hi Frameline, I need help with ')}`, '_blank', 'noopener')}>WhatsApp us</Button>}
         <Link to="/support" className="inline-flex h-[30px] items-center gap-1.5 rounded-control px-[11px] text-[12.5px] font-bold text-ink-2 hover:bg-sunk hover:text-ink max-sm:h-10">
           <LifeBuoy size={13} aria-hidden />Help centre
         </Link>

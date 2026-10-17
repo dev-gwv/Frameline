@@ -654,6 +654,12 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     listTickets: () => listAll<Ticket>('/v1/tickets', { limit: 90 }),
     createTicket: (input) => request<Ticket>('POST', '/v1/tickets', { body: pick(input, ['subject', 'eventId', 'platform', 'body'] as const), idempotent: true }),
     replyTicket: (id, body) => request<Ticket>('POST', `/v1/tickets/${enc(id)}/messages`, { body: { body }, idempotent: true }),
+    resolveTicket: (id) => request<Ticket>('POST', `/v1/tickets/${enc(id)}/resolve`),
+    async attachToTicket(id, file: AssetFile) {
+      const blob = file.blob ?? (file.uri ? await (await fetchImpl(file.uri)).blob() : null)
+      if (!blob) throw new ApiError({ status: 0, code: 'file_unreadable', detail: `Could not read ${file.filename}.` })
+      return request<{ fileName: string; size: number }>('POST', `/v1/tickets/${enc(id)}/attachments`, { query: { filename: file.filename }, raw: { body: blob, contentType: file.contentType ?? (blob.type || 'application/octet-stream') } })
+    },
     listTeam: async () => (await get<Page<TeamMember>>('/v1/team')).items,
     inviteMember: (email, role, eventIds) => request<TeamMember>('POST', '/v1/team/invites', { body: { email, role, eventIds }, idempotent: true }),
     getWatermark: () => get<WatermarkSettings>('/v1/watermark'),

@@ -116,6 +116,7 @@ export const broadcastOut = (r: Row<typeof s.broadcasts>): Broadcast => ({
 export const ticketOut = (r: Row<typeof s.tickets>, msgs: Row<typeof s.ticketMessages>[]): Ticket => ({
   id: r.id, subject: r.subject, eventId: opt(r.eventId), platform: r.platform, status: r.status,
   messages: msgs.map((m) => ({ from: m.from, body: m.body, at: m.at })),
+  ...(r.aiState === 'pending' && r.status !== 'closed' ? { assistant: 'thinking' as const } : r.aiState === 'human' && r.status !== 'closed' ? { assistant: 'with-team' as const } : {}),
 })
 export const websiteOut = (r: Row<typeof s.websites>): Website => ({
   published: r.published, template: r.template, headline: r.headline, sections: r.sections, customDomain: opt(r.customDomain),

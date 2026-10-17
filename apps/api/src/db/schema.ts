@@ -446,12 +446,24 @@ export const tickets = sqliteTable('tickets', {
   createdBy: text('created_by'),
   createdAt: ts('created_at').notNull(),
   updatedAt: ts('updated_at').notNull(),
-}, (t) => [index('tickets_studio_idx').on(t.studioId, t.updatedAt)])
+  // Support desk (services/support-ai.ts, services/support-desk.ts):
+  /** How-to, bug, billing, account or feature, as the assistant read it. */
+  category: text('category', { enum: ['how-to', 'bug', 'billing', 'account', 'feature', 'other'] }),
+  urgency: text('urgency', { enum: ['low', 'normal', 'high'] }),
+  /** pending: the assistant still has to answer the last message; done: it did; human: with our team; off: no assistant. */
+  aiState: text('ai_state', { enum: ['pending', 'done', 'human', 'off'] }).notNull().default('pending'),
+  /** The assistant's summary for our team (the Sheet row), never shown to the studio. */
+  summary: text('summary'),
+  /** When it went to our team (Sheet row + email), and when it was resolved. */
+  escalatedAt: ts('escalated_at'),
+  resolvedAt: ts('resolved_at'),
+}, (t) => [index('tickets_studio_idx').on(t.studioId, t.updatedAt), index('tickets_ai_idx').on(t.aiState, t.updatedAt)])
 
 export const ticketMessages = sqliteTable('ticket_messages', {
   id: text('id').primaryKey(),
   ticketId: text('ticket_id').notNull().references(() => tickets.id, { onDelete: 'cascade' }),
-  from: text('sender', { enum: ['me', 'support'] }).notNull(),
+  /** me: the studio; assistant: the AI's answer; support: a person on our team (from the Sheet). */
+  from: text('sender', { enum: ['me', 'support', 'assistant'] }).notNull(),
   body: text('body').notNull(),
   at: ts('at').notNull(),
 }, (t) => [index('ticket_messages_idx').on(t.ticketId, t.at)])

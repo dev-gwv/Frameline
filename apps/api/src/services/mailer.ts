@@ -1,5 +1,6 @@
 import type { Env } from '../env'
 import { ServiceUnavailable } from '../lib/errors'
+import { SmtpError, address, sendSmtp, type SmtpConfig, type SmtpConnect } from './smtp'
 
 export interface MailMessage { to: string; subject: string; text: string; html?: string }
 
@@ -27,6 +28,35 @@ export class ResendMailer implements Mailer {
   }
 }
 
+/** SMTP (Gmail or Google Workspace with an App Password): services/smtp.ts. */
+export class SmtpMailer implements Mailer {
+  readonly name = 'smtp'
+  constructor(private cfg: SmtpConfig, private open?: SmtpConnect) {}
+  async send(msg: MailMessage): Promise<void> {
+    try {
+      await sendSmtp(this.cfg, msg, this.open)
+    } catch (e) {
+      // Never log the password; the step and the server's reply are enough to see what was refused.
+      console.error(JSON.stringify({ level: 'error', msg: 'smtp send failed', step: e instanceof SmtpError ? e.step : 'unknown', detail: String(e).slice(0, 300) }))
+      throw new ServiceUnavailable('We could not send the email right now. Try again in a minute.', 'email_failed')
+    }
+  }
+}
+
+/** The SMTP settings when both the login and the App Password are set. */
+export function smtpConfig(env: Env): SmtpConfig | null {
+  if (!env.SMTP_USER || !env.SMTP_PASS) return null
+  const name = /^\s*(.*?)\s*</.exec(env.MAIL_FROM ?? '')?.[1] || 'Frameline'
+  return {
+    host: env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(env.SMTP_PORT) || 465,
+    user: env.SMTP_USER,
+    pass: env.SMTP_PASS,
+    // Gmail sends as the account it signs in with, unless SMTP_FROM is a "Send mail as" alias it owns.
+    from: env.SMTP_FROM || `${name} <${address(env.SMTP_USER)}>`,
+  }
+}
+
 /** Development transport: prints the message (including any sign-in code) to the Worker log. */
 export class ConsoleMailer implements Mailer {
   readonly name = 'console'
@@ -39,11 +69,13 @@ export class ConsoleMailer implements Mailer {
 class UnconfiguredMailer implements Mailer {
   readonly name = 'none'
   async send(): Promise<void> {
-    throw new ServiceUnavailable('Email sign-in is not configured on this server (RESEND_API_KEY missing).', 'email_not_configured')
+    throw new ServiceUnavailable('Email is not configured on this server (set SMTP_USER and SMTP_PASS, or RESEND_API_KEY).', 'email_not_configured')
   }
 }
 
 export function getMailer(env: Env): Mailer {
+  const smtp = smtpConfig(env)
+  if (smtp) return new SmtpMailer(smtp)
   if (env.RESEND_API_KEY) return new ResendMailer(env.RESEND_API_KEY, env.MAIL_FROM)
   if (env.ENVIRONMENT === 'development' || env.ENVIRONMENT === 'test') return new ConsoleMailer()
   return new UnconfiguredMailer()
