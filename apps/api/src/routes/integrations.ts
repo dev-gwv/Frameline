@@ -10,6 +10,7 @@ import { audit } from '../services/audit'
 import { createEvent } from '../services/events'
 import { STUDIO_AUTOPILOT, ensurePartnerStudio, ensurePartnerUser, link, linkedId, projectKey, spendJti } from '../services/partner'
 import { emit } from '../services/realtime'
+import { effectiveSettings } from '../lib/features'
 import { issueSession } from '../services/sessions'
 
 /**
@@ -105,7 +106,8 @@ const Gallery = z.object({
 }).openapi('PartnerGallery')
 
 type EventRow = typeof schema.events.$inferSelect
-const galleryOut = (c: Context<AppEnv>, projectId: string, e: EventRow) => ({
+const galleryOut = (c: Context<AppEnv>, projectId: string, row: EventRow) => galleryFrom(c, projectId, { ...row, settings: effectiveSettings(c.env, row.settings) })
+const galleryFrom = (c: Context<AppEnv>, projectId: string, e: EventRow) => ({
   projectId, eventId: e.id, shortId: e.shortId, name: e.name, status: e.status, photoCount: e.photoCount,
   galleryUrl: `${c.env.GALLERY_URL.replace(/\/$/, '')}/${e.shortId}`,
   pin: e.settings.pin ?? null,

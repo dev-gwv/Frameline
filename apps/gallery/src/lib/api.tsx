@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ApiError, createHttpApi, createMockApi, localStoragePersistence, memoryTokenStore, storageGuestTokenStore, type ChangeTopic, type FramelineApi,
+  ApiError, createHttpApi, createMockApi, localStoragePersistence, memoryTokenStore, storageGuestTokenStore, type ChangeTopic, type FramelineApi, fetchServerFeatures, type ServerFeatures,
 } from '@frameline/shared'
 import { guest } from './guest'
 
@@ -143,4 +143,9 @@ export function useApi() {
   const api = useContext(ApiCtx)
   if (!api) throw new Error('useApi must be used inside <ApiProvider>')
   return api
+}
+
+/** The server's run-time switches (AI features on or off), asked once per visit. */
+export function useServerFeatures(): ServerFeatures {
+  return useQuery({ queryKey: ['server-features'], queryFn: () => fetchServerFeatures(API_URL), staleTime: Infinity }).data ?? { ai: false }
 }

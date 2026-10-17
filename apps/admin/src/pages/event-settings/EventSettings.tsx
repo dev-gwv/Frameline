@@ -8,6 +8,8 @@ import { HostsCard, LimitCard, LookCard, SellingCard, TurnOffCard } from './Lowe
 import { guestSentence, SaveIndicator, type CardProps } from './parts'
 import { AccessCard, DownloadsCard, FacesCard, GuestUploadsCard } from './TopCards'
 import { useEventSaver } from './useEventSaver'
+import { withoutAi } from '@frameline/shared'
+import { useServerFeatures } from '../../lib/api'
 
 type Dialog = 'downloads' | 'log' | 'add-photos' | 'details' | null
 
@@ -24,6 +26,9 @@ export default function EventSettings() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const [dlSession, setDlSession] = useState(0)
   const props: CardProps = { event, set: saveSettings, update: saveEvent }
+  // With the AI features off (server switch), guests get these settings: no selfie, everyone sees everything.
+  const { ai } = useServerFeatures()
+  const guestSettings = ai ? event.settings : withoutAi(event.settings)
   const close = (v: boolean) => { if (!v) setDialog(null) }
 
   // Links like /settings#hosts (from Guests) jump to that card.
@@ -37,14 +42,14 @@ export default function EventSettings() {
     <div className="flex flex-col gap-3.5 pb-12">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3.5">
         <p className="flex-1 rounded-card bg-accent-soft px-4 py-[11px] text-[13.5px]" aria-live="polite">
-          <b>Guests can:</b> <span className="text-ink-2">{guestSentence(event.settings)}</span>
+          <b>Guests can:</b> <span className="text-ink-2">{guestSentence(guestSettings)}</span>
         </p>
         <SaveIndicator saving={saving} />
       </div>
 
       <div className="grid gap-3.5 md:grid-cols-2">
         <AccessCard {...props} />
-        <FacesCard {...props} />
+        {ai && <FacesCard {...props} />}
         <DownloadsCard {...props} onChange={() => { setDlSession((n) => n + 1); setDialog('downloads') }} />
         <GuestUploadsCard {...props} />
         <LookCard {...props} />

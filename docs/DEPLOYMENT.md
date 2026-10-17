@@ -106,3 +106,18 @@ data sitting alongside it).
 Unchanged from local dev until the linked work is done: photo/face processing (needs the VPS processor — see
 the project's saved plan for the Hostinger VPS), camera-sync FTP (same processor), and anything gated on the
 optional secrets above.
+
+## The AI switch (`AI_FEATURES`)
+
+Face finding and selfie search ("Find my photos") need the image processor (`apps/processor`, `PROCESSOR_URL`).
+Until it runs, production sets `AI_FEATURES: "off"` in `apps/api/wrangler.jsonc` (production vars). While off:
+
+- every gallery behaves as if selfie search and face privacy were off, and "only photos they're in" downloads
+  become "everything" (`withoutAi` in `packages/shared/src/rules.ts`, applied by `apps/api/src/lib/features.ts`);
+  the event's stored settings are not changed, so turning AI on restores them;
+- selfie search answers `face_search_disabled`, "Find faces again" answers 503 `feature_unavailable`;
+- `GET /v1/meta` says `features.ai: false`, and the admin and gallery apps hide the selfie and face controls
+  (Faces card, the full-access PIN, "Only photos they're in", selfie wording).
+
+To turn AI on: deploy the processor, set `PROCESSOR_URL`/`PROCESSOR_TOKEN`, change the var to `"on"` and deploy
+the API. No app release is needed; the apps read the switch at run time.

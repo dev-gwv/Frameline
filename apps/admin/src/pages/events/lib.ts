@@ -81,8 +81,10 @@ export const toDateInput = (iso: string | number) => {
 }
 
 /** "Who should see the photos?": the three presets in plain words (New event and setup step 3). */
-export const AUDIENCE: { value: PresetId; title: string; description: string }[] = [
-  { value: 'private-family', title: 'Only the people in them', description: 'Guests take a selfie to see their own photos. PIN required.' },
+export const audience = (ai: boolean): { value: PresetId; title: string; description: string }[] => [
+  ai
+    ? { value: 'private-family', title: 'Only the people in them', description: 'Guests take a selfie to see their own photos. PIN required.' }
+    : { value: 'private-family', title: 'Private, with a PIN', description: 'Only people with the link and PIN can open it.' },
   { value: 'open-corporate', title: 'Everyone with the link', description: 'Good for company events and parties.' },
   { value: 'race', title: 'Buyers (race or sports)', description: 'Guests find their photos and buy them.' },
 ]

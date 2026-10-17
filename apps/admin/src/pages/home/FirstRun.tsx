@@ -41,7 +41,7 @@ export function NextStepCard({ event }: { event?: PhotoEvent }) {
           <div className="text-[12.5px] text-ink-3">{fmt.date(event.date)} · {event.city}</div>
         </div>
         <p className="text-[14px] text-ink-2">
-          {empty ? 'Next step: add photos. Guests can’t see anything until you do.' : 'Next step: share the link. Guests take a selfie and find their own photos.'}
+          {empty ? 'Next step: add photos. Guests can’t see anything until you do.' : 'Next step: share the link and PIN with your client and their guests.'}
         </p>
         <div className="flex w-full flex-wrap gap-2">
           {empty

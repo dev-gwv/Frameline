@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ChevronRight, Download, ScanFace, X } from 'lucide-react'
 import { Button, Field, Input, LogoMark, Tip } from '@frameline/ui'
 import { fmt, toneCss } from '@frameline/shared'
-import { useApi } from '../lib/api'
+import { useApi, useServerFeatures } from '../lib/api'
 import { guest, useGuest } from '../lib/guest'
 import { friendlyError, isNotFound } from '../lib/errors'
 import { isStandalone, promptInstall, useCanInstall } from '../lib/pwa'
@@ -12,6 +12,7 @@ import { CodeForm } from '../components/common'
 /** frameline.in/ — enter an event code, reopen a recent gallery, or find a studio by its follow code. */
 export function Landing() {
   const api = useApi()
+  const { ai } = useServerFeatures()
   const navigate = useNavigate()
   const recent = useGuest((s) => s.recent)
   const follows = useGuest((s) => s.follows)
@@ -46,12 +47,12 @@ export function Landing() {
         <section className="flex flex-col gap-4">
           <div>
             <h1 className="font-display text-[30px] font-semibold leading-[1.1]">Open your photos</h1>
-            <p className="mt-1.5 text-[14.5px] text-ink-2">Type the code from your invite or the QR card. Then take a selfie to find every photo you’re in.</p>
+            <p className="mt-1.5 text-[14.5px] text-ink-2">Type the code from your invite or the QR card.{ai && ' Then take a selfie to find every photo you’re in.'}</p>
           </div>
           <div className="rounded-card border border-line bg-surface p-4 shadow-card">
             <CodeForm />
           </div>
-          <p className="flex items-center gap-2 text-[12.5px] text-ink-3"><ScanFace size={15} />No app or account needed. Your selfie is deleted after 30 days.</p>
+          <p className="flex items-center gap-2 text-[12.5px] text-ink-3"><ScanFace size={15} />No app or account needed.{ai && ' Your selfie is deleted after 30 days.'}</p>
         </section>
 
         {recent.length > 0 && (

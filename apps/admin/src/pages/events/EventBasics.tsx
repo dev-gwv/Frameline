@@ -1,7 +1,8 @@
 import { CalendarDays, MapPin } from 'lucide-react'
 import type { PresetId } from '@frameline/shared'
 import { Field, Input, RadioCardGroup } from '@frameline/ui'
-import { AUDIENCE } from './lib'
+import { audience } from './lib'
+import { useServerFeatures } from '../../lib/api'
 
 export interface EventBasicsValue { name: string; date: string; city: string; preset: PresetId }
 export type EventBasicsErrors = Partial<Record<'name' | 'date' | 'city', string>>
@@ -14,6 +15,7 @@ export function EventBasics({ value, onChange, errors = {}, idPrefix = 'ne', aut
   idPrefix?: string
   autoFocus?: boolean
 }) {
+  const { ai } = useServerFeatures()
   return (
     <>
       <Field label="Event name" htmlFor={`${idPrefix}-name`} error={errors.name}>
@@ -33,7 +35,7 @@ export function EventBasics({ value, onChange, errors = {}, idPrefix = 'ne', aut
       <div className="flex flex-col gap-[5px]">
         <span className="text-[12.5px] font-bold text-ink-2" id={`${idPrefix}-audience`}>Who should see the photos?</span>
         <RadioCardGroup label="Who should see the photos?" value={value.preset} onChange={(preset) => onChange({ preset })}
-          options={AUDIENCE.map((a) => ({ value: a.value, title: a.title, description: a.description }))} />
+          options={audience(ai).map((a) => ({ value: a.value, title: a.title, description: a.description }))} />
       </div>
     </>
   )

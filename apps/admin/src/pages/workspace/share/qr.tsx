@@ -107,7 +107,7 @@ export function buildPoster(args: { qrSvg: string; studio: string; event: string
   <text x="297.5" y="92" text-anchor="middle" font-family="Manrope, Segoe UI, sans-serif" font-size="13" letter-spacing="3" fill="#5E5548">${esc(studio.toUpperCase())}</text>
   <text x="297.5" y="160" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-size="36" font-weight="600" fill="#1B1712">${esc(event)}</text>
   <text x="297.5" y="210" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-size="24" font-style="italic" fill="${esc(color)}">Find your photos</text>
-  <text x="297.5" y="238" text-anchor="middle" font-family="Manrope, Segoe UI, sans-serif" font-size="13" fill="#5E5548">Scan the code, take a selfie, and see every photo you’re in.</text>
+  <text x="297.5" y="238" text-anchor="middle" font-family="Manrope, Segoe UI, sans-serif" font-size="13" fill="#5E5548">Scan the code with your phone camera to see the photos.</text>
   <rect x="147.5" y="270" width="300" height="300" rx="16" fill="#fff"/>
   <image href="${qr}" x="157.5" y="280" width="280" height="280"/>
   <text x="297.5" y="614" text-anchor="middle" font-family="JetBrains Mono, Consolas, monospace" font-size="16" fill="#1B1712">${esc(link)}</text>

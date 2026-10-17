@@ -24,3 +24,22 @@ export const FEATURES: Readonly<Features> = {
   cameraSync: false,
   broadcasts: false,
 }
+
+/**
+ * Switches the server sets per deployment, read at run time (GET /v1/meta) so flipping one needs no release.
+ * `ai`: face finding and selfie search. Off until the image processor is deployed; while off the server already
+ * gives every gallery settings that don't need it (withoutAi), and the apps hide the AI controls.
+ */
+export interface ServerFeatures { ai: boolean }
+
+/** Sample data (no API URL) shows everything; a server that can't be asked is treated as AI off, the safe side. */
+export async function fetchServerFeatures(apiUrl: string | undefined): Promise<ServerFeatures> {
+  if (!apiUrl) return { ai: true }
+  try {
+    const res = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/meta`)
+    const body = (await res.json()) as { features?: Partial<ServerFeatures> }
+    return { ai: body.features?.ai === true }
+  } catch {
+    return { ai: false }
+  }
+}

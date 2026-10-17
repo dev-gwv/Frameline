@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { ChevronRight, Copy, Eye, KeyRound, Link2, Mail, MessageCircle, RefreshCw } from 'lucide-react'
 import type { AccessMode, PhotoEvent, Studio } from '@frameline/shared'
 import { Button, ConfirmDialog, Field, Select, useToast } from '@frameline/ui'
-import { errorMessage, useApi } from '../../../lib/api'
+import { errorMessage, useApi, useServerFeatures } from '../../../lib/api'
 import { copyText, displayUrl, galleryLink } from '../lib'
 import { fullPinMatters, useFullAccessPin } from './fullAccessPin'
 import { fillTemplate, loadTemplate, mailtoUrl, variableValues, whatsappUrl } from './message'
@@ -30,6 +30,8 @@ export function useLinkTab(event: PhotoEvent, studio: Studio | undefined, onSpec
   const [confirmPin, setConfirmPin] = useState(false)
   const [confirmFull, setConfirmFull] = useState<'new' | 'off' | null>(null)
   const full = useFullAccessPin(event)
+  // Only meaningful while selfie search can keep guests to their own photos.
+  const { ai } = useServerFeatures()
   const s = event.settings
   const guests = s.access === 'link-pin' ? `Guests with PIN ${s.pin}` : 'Guests'
   const link = galleryLink(event, s.shortLinks)
@@ -71,7 +73,7 @@ export function useLinkTab(event: PhotoEvent, studio: Studio | undefined, onSpec
           <button type="button" onClick={() => setConfirmPin(true)} className="mt-1 inline-flex min-h-[28px] items-center gap-1 text-[12.5px] font-bold text-accent-text hover:underline"><RefreshCw size={12} />New PIN</button>
         </Field>
       </div>
-      {fullPinMatters(event) && (
+      {ai && fullPinMatters(event) && (
         <div className="-mt-1 rounded-control bg-sunk px-3 py-2.5 text-[12.5px] text-ink-2">
           {s.fullAccessPin ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

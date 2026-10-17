@@ -7,7 +7,7 @@ export const VARIABLES = ['Event name', 'Event ID', 'Studio name', 'Web gallery 
 export type Variable = (typeof VARIABLES)[number]
 
 export const DEFAULT_TEMPLATE =
-  'Namaste! The photos from {Event name} are ready.\n\nOpen {Web gallery link} and enter PIN {PIN}, then take a selfie to find yourself.\n\nPrefer the app? Use code {Event ID}.\n— {Studio name}'
+  'Namaste! The photos from {Event name} are ready.\n\nOpen {Web gallery link} and enter PIN {PIN}.\n\nPrefer the app? Use code {Event ID}.\n— {Studio name}'
 
 export function loadTemplate() {
   try { return localStorage.getItem(TEMPLATE_KEY) || DEFAULT_TEMPLATE } catch { return DEFAULT_TEMPLATE }

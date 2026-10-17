@@ -21,7 +21,7 @@ export function buildPoster({ qrSvg, studio, name, eventName, slug, color }: {
   <rect x="24" y="24" width="547" height="794" rx="18" fill="none" stroke="${esc(color)}" stroke-width="2"/>
   <text x="297.5" y="110" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-size="22" fill="#5E5548">${esc(studio)}</text>
   <text x="297.5" y="178" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-size="44" font-weight="600" fill="#1B1712">Find your photos</text>
-  <text x="297.5" y="214" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="17" fill="#5E5548">Scan with your phone camera. Take a selfie to see the ones you're in.</text>
+  <text x="297.5" y="214" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="17" fill="#5E5548">Scan with your phone camera to see the photos.</text>
   <rect x="147.5" y="262" width="300" height="300" rx="16" fill="#FFFFFF" stroke="#EAE2D3"/>
   <svg x="167.5" y="282" width="260" height="260" viewBox="${vb}">${inner}</svg>
   <text x="297.5" y="620" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="15" fill="#958B7B">Now showing</text>

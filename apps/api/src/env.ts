@@ -49,6 +49,8 @@ export interface Env {
   RAZORPAY_WEBHOOK_SECRET?: string
   /** Shared with Studio AutoPilot's server, which signs its sign-in links and gallery calls with it (32+ chars). */
   STUDIOAUTOPILOT_SECRET?: string
+  /** `off` switches the AI features (face finding, selfie search) off everywhere; see lib/features.ts. */
+  AI_FEATURES?: string
   /** Where gallery-changed notices go (Studio AutoPilot's /webhooks/frameline). Unset: no notices are queued. */
   STUDIOAUTOPILOT_WEBHOOK_URL?: string
 }

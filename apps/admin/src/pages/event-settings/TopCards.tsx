@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { CheckCheck, Download, Droplet, EyeOff, ImageIcon, KeyRound, ScanFace, ShieldCheck, Smartphone, Upload, UserCheck, Users } from 'lucide-react'
-import { fmt } from '@frameline/shared'
+import { fmt, withoutAi } from '@frameline/shared'
 import { Button, ConfirmDialog, Input, Meter, SettingRow, Toggle, useToast } from '@frameline/ui'
-import { errorMessage, useApi } from '../../lib/api'
+import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { useEventStats, useGuests } from '../../lib/queries'
 import { fullPinMatters, useFullAccessPin } from '../workspace/share/fullAccessPin'
 import { MoreOptions, SettingsCard, TextLink, ToggleRow, type CardProps } from './parts'
@@ -109,7 +109,9 @@ export function FacesCard({ event, set }: CardProps) {
 export const DOWNLOAD_WORDS = { all: 'Everything', own: 'Only photos they’re in', none: 'Nothing' } as const
 
 export function DownloadsCard({ event, set, onChange }: CardProps & { onChange: () => void }) {
-  const s = event.settings
+  const { ai } = useServerFeatures()
+  // While selfie search is off, "only photos they're in" behaves as Everything (withoutAi), so say that.
+  const s = ai ? event.settings : withoutAi(event.settings)
   return (
     <SettingsCard id="downloads" title="Downloads">
       <SettingRow

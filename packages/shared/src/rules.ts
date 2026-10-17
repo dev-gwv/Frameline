@@ -10,6 +10,20 @@ export const TRASH_DAYS = 30
 /** GST added to Frameline's own charges (plans, card-paid packs). Wallet payments include it in the amount taken. */
 export const GST_RATE = 0.18
 
+/**
+ * An event's settings as guests get them while the AI features (face finding, selfie search) are switched off
+ * (the server's AI_FEATURES=off): nobody can find themselves, so nothing may depend on it. Everyone the link
+ * and PIN let in sees every photo, and "only photos they're in" downloads become downloads of everything --
+ * otherwise nobody could download at all. Stored settings are untouched, so switching AI back on restores them.
+ */
+export const withoutAi = (s: EventSettings): EventSettings => ({
+  ...s,
+  faceSearch: false,
+  facePrivacy: false,
+  anonymousSelfie: false,
+  downloads: s.downloads === 'own' ? 'all' : s.downloads,
+})
+
 /** Settings added in contract v5; older stored events are read with these defaults. */
 export const EVENT_SETTINGS_V5_DEFAULTS: Pick<EventSettings, 'priceOverrides' | 'forSaleWatermark'> = { priceOverrides: {}, forSaleWatermark: true }
 /** Fills settings fields a stored event may not have yet. */

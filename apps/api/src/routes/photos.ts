@@ -17,6 +17,7 @@ import { assertEventVisible, type Membership } from '../services/access'
 import { audit } from '../services/audit'
 import { albumForMember, eventForMember, recountStatements } from '../services/events'
 import { emit } from '../services/realtime'
+import { aiOn } from '../lib/features'
 
 export const photoRoutes = createRouter()
 
@@ -453,6 +454,7 @@ photoRoutes.openapi(createRoute({
   request: { params: IdParam },
   responses: { 202: json(z.object({ queued: z.number().int() }), 'Queued'), ...problems(401, 403, 404) },
 }), async (c) => {
+  if (!aiOn(c.env)) throw new ServiceUnavailable('Face finding is switched off until the image processor is running.', 'feature_unavailable')
   const m = membershipOf(c)
   const db = getDb(c.env.DB)
   const ev = await eventForMember(db, m, c.req.valid('param').id)

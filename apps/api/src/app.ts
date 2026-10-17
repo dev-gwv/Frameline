@@ -25,6 +25,7 @@ import { publicRoutes } from './routes/public'
 import { realtimeRoutes } from './routes/realtime'
 import { studioRoutes } from './routes/studio'
 import { uploadRoutes } from './routes/uploads'
+import { aiOn } from './lib/features'
 
 export const API_MAJOR = 'v1'
 const JSON_LIMIT = 1024 * 1024 // 1 MiB for JSON bodies
@@ -100,11 +101,14 @@ export function createApp() {
       200: json(z.object({
         name: z.string(), apiVersion: z.string(), version: z.string(), build: z.string(), environment: z.string(),
         docs: z.string(), openapi: z.string(), time: z.string(),
+        /** Server switches the apps follow at run time (lib/features.ts). */
+        features: z.object({ ai: z.boolean() }),
       })),
     },
   }), (c) => c.json({
     name: 'frameline-api', apiVersion: API_MAJOR, version: c.env.API_VERSION, build: c.env.BUILD_SHA, environment: c.env.ENVIRONMENT,
     docs: '/v1/docs', openapi: '/v1/openapi.json', time: new Date().toISOString(),
+    features: { ai: aiOn(c.env) },
   }, 200))
 
   v1.route('/auth', authRoutes)

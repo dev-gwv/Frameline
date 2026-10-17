@@ -3,7 +3,7 @@ import { ChevronRight, FileText, Image, Mail } from 'lucide-react'
 import type { DownloadMode, PhotoEvent } from '@frameline/shared'
 import { fmt } from '@frameline/shared'
 import { Avatar, Button, Chip, EmptyState, Input, Modal, RadioCardGroup, SettingRow, Skeleton, Toggle } from '@frameline/ui'
-import { useApi } from '../../lib/api'
+import { useApi, useServerFeatures } from '../../lib/api'
 import { useAction, useDownloadEvents, useStudio } from '../../lib/queries'
 import { QueryError } from '../system'
 import type { SaveSettings } from './useEventSaver'
@@ -18,17 +18,20 @@ export function DownloadsModal({ open, onOpenChange, event, set, onLog, session 
   /** Changes each time the dialog is opened fresh (not when coming back from the log), which resets the choices. */
   session: number
 }) {
+  const { ai } = useServerFeatures()
   const api = useApi()
   const s = event.settings
   const studioEmail = useStudio().data?.email ?? ''
   const logCount = useDownloadEvents(open ? event.id : undefined).data?.length
-  const [mode, setMode] = useState<DownloadMode>(s.downloads)
+  // "Only photos they're in" behaves as Everything while selfie search is off, so that is what is picked.
+  const shown: DownloadMode = !ai && s.downloads === 'own' ? 'all' : s.downloads
+  const [mode, setMode] = useState<DownloadMode>(shown)
   const [anon, setAnon] = useState(s.anonymousDownloads)
   const [zipOpen, setZipOpen] = useState(false)
   const [email, setEmail] = useState('')
   const [tried, setTried] = useState(false)
   useEffect(() => {
-    setMode(s.downloads); setAnon(s.anonymousDownloads); setZipOpen(false); setEmail(''); setTried(false)
+    setMode(shown); setAnon(s.anonymousDownloads); setZipOpen(false); setEmail(''); setTried(false)
     // Reset only when the dialog is opened fresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session])
@@ -41,7 +44,7 @@ export function DownloadsModal({ open, onOpenChange, event, set, onLog, session 
   const emailError = tried && !EMAIL_RE.test(email.trim()) ? 'Enter a full email address, like name@gmail.com' : null
   const send = () => { setTried(true); if (EMAIL_RE.test(email.trim())) zip.mutate(email.trim()) }
   const save = () => {
-    const patch = { ...(mode !== s.downloads ? { downloads: mode } : {}), ...(anon !== s.anonymousDownloads ? { anonymousDownloads: anon } : {}) }
+    const patch = { ...(mode !== shown ? { downloads: mode } : {}), ...(anon !== s.anonymousDownloads ? { anonymousDownloads: anon } : {}) }
     if (Object.keys(patch).length) set(patch)
     onOpenChange(false)
   }
@@ -52,7 +55,7 @@ export function DownloadsModal({ open, onOpenChange, event, set, onLog, session 
       footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" onClick={save}>Save</Button></>}>
       <RadioCardGroup<DownloadMode> label="What guests can download" value={mode} onChange={setMode} options={[
         { value: 'all', title: 'Everything', description: 'Any photo in the gallery' },
-        { value: 'own', title: 'Only photos they’re in', description: s.faceSearch ? 'Found with their selfie' : 'Found with their selfie (turn on selfie search in Faces)' },
+        ...(ai ? [{ value: 'own' as const, title: 'Only photos they’re in', description: s.faceSearch ? 'Found with their selfie' : 'Found with their selfie (turn on selfie search in Faces)' }] : []),
         { value: 'none', title: 'Nothing', description: s.storeEnabled ? 'View only; they can still buy photos' : 'View only; they can still buy if selling is on' },
       ]} />
       <div className="border-t border-line">

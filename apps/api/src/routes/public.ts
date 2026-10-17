@@ -31,6 +31,7 @@ import { resolveLink } from '../services/guest-links'
 import { markOrderPaid, sendReceipt, verifyCheckoutSignature, verifyReceiptToken } from '../services/orders'
 import { createProviderOrder, grantStudioPurchase, openStudioPayment, paymentMode, settleStudioPayment } from '../services/payments'
 import { emit } from '../services/realtime'
+import { effectiveSettings } from '../lib/features'
 import { chunk } from './photos'
 import { UploadFileInput, completeUploadSession, createUploadSession } from './uploads'
 
@@ -61,7 +62,8 @@ async function eventByShortId(c: Context<AppEnv>, shortId: string): Promise<{ e:
     .innerJoin(schema.studios, eq(schema.studios.id, schema.events.studioId))
     .where(and(eq(schema.events.shortId, shortId.toUpperCase()), isNull(schema.events.deletedAt))).limit(1)
   if (!row) throw new NotFound('Gallery', shortId.toUpperCase())
-  return row
+  // Every guest rule below reads these: with the AI features off, no gallery depends on face finding.
+  return { ...row, e: { ...row.e, settings: effectiveSettings(c.env, row.e.settings) } }
 }
 
 const blockedReason = (e: EventRow): z.infer<typeof PublicEvent>['blocked'] =>

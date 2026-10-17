@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
-import { ApiError, createHttpApi, createMockApi, localStoragePersistence, storageGuestTokenStore, storageTokenStore, type ChangeTopic, type FramelineApi, type FramelineHttpApi } from '@frameline/shared'
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ApiError, createHttpApi, createMockApi, localStoragePersistence, storageGuestTokenStore, storageTokenStore, type ChangeTopic, type FramelineApi, type FramelineHttpApi, fetchServerFeatures, type ServerFeatures } from '@frameline/shared'
 import { payStudioCheckout } from './razorpay'
 
 const STORAGE_KEY = 'frameline.mock.v1'
@@ -111,4 +111,9 @@ export function useApi() {
 export function useHttpApi(): FramelineHttpApi | null {
   const api = useApi()
   return 'auth' in api ? (api as FramelineHttpApi) : null
+}
+
+/** The server's run-time switches (AI features on or off), asked once per visit. */
+export function useServerFeatures(): ServerFeatures {
+  return useQuery({ queryKey: ['server-features'], queryFn: () => fetchServerFeatures(API_URL), staleTime: Infinity }).data ?? { ai: false }
 }
