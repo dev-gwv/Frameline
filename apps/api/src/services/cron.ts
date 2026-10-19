@@ -5,7 +5,6 @@ import { purgeTrash } from '../routes/events'
 import { notifyWaitingGuests } from './notify'
 import { sendPartnerNotices } from './partner-notify'
 import { answerPendingTickets } from './support-ai'
-import { supportDigest } from './support-desk'
 import { publishTopics } from './realtime'
 import { purgeTrashedItems } from './trash'
 
@@ -43,8 +42,6 @@ export async function runEveryMinute(env: Env, now = new Date()): Promise<{ qrs:
 export async function runDaily(env: Env, now = Date.now()): Promise<{ purged: number; photos: number; albums: number; qrs: number; broadcasts: number }> {
   const purged = await purgeTrash(env, now)
   const items = await purgeTrashedItems(env, now)
-  // 03:00 UTC is 8:30 am in India: the support team's morning summary.
-  await supportDigest(env).catch((e) => console.error(JSON.stringify({ level: 'error', msg: 'support digest failed', error: String(e) })))
   return { purged, ...items }
 }
 

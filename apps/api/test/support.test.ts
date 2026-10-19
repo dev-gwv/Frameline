@@ -1,19 +1,17 @@
-import { SELF, createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test'
+import { SELF, env } from 'cloudflare:test'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import worker from '../src/index'
 import { getDb, schema } from '../src/db/client'
-import { answerTicket, parseVerdict } from '../src/services/support-ai'
-import { supportFilesUrl } from '../src/services/support-desk'
+import { answerTicket, handOverLine, parseVerdict } from '../src/services/support-ai'
 import { BASE, call, freshIp, tokenFor } from './helpers'
 
 /**
- * The support desk: the assistant answers first (Groq, NIM as fallback), hands bugs, money and account problems
- * to the team (Sheet row + email), and the team's replies from the Sheet land back in the studio's ticket.
+ * The support desk: the assistant answers first (Groq, NIM as fallback); bugs, money and account problems are
+ * handed over to Book a call (the owner's booking page), and the assistant then stays quiet on that ticket.
  */
 const db = () => getDb(env.DB)
-const SECRET = 'support-sheet-secret-0123456789-abcdef'
-const withAi = { ...env, SUPPORT_AI_API_KEY: 'gsk_test', SUPPORT_AI_FALLBACK_API_KEY: 'nvapi_test', SUPPORT_SHEET_URL: 'https://sheet.test/exec', SUPPORT_SHEET_SECRET: SECRET, AI_FEATURES: 'off' }
+const CALL = 'https://book.test/harsh/intro-call'
+const withAi = { ...env, SUPPORT_AI_API_KEY: 'gsk_test', SUPPORT_AI_FALLBACK_API_KEY: 'nvapi_test', SUPPORT_CALL_URL: CALL, AI_FEATURES: 'off' }
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -48,21 +46,21 @@ describe('the support assistant', () => {
     expect(await ticket(id)).toMatchObject({ status: 'answered', aiState: 'done', category: 'how-to' })
   })
 
-  it('hands a bug to the team even when the model says it can answer, with a Sheet row', async () => {
+  it('hands a bug over to Book a call even when the model says it can answer', async () => {
     const id = await newTicket('Upload fails at 80% every time on the Sharma wedding')
-    const sheet: any[] = []
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
-      sheet.push({ url, body: JSON.parse(String(init.body)) })
-      return new Response(JSON.stringify({ ok: true }), { status: 200 })
-    }))
-    const fetchStub = (async () => llm({ reply: 'Thanks, our team is looking at this.', category: 'bug', urgency: 'high', needs_human: false, summary: 'Uploads stop at 80%.', steps: '1. Upload 200 photos' })) as unknown as typeof fetch
+    const outside = vi.fn(async () => new Response('{}'))
+    vi.stubGlobal('fetch', outside)
+    const fetchStub = (async () => llm({ reply: 'Thanks, that sounds like a fault.', category: 'bug', urgency: 'high', needs_human: false, summary: 'Uploads stop at 80%.', steps: '1. Upload 200 photos' })) as unknown as typeof fetch
     expect(await answerTicket(withAi as never, id, fetchStub)).toBe('handed-over')
-    expect(await ticket(id)).toMatchObject({ aiState: 'human', urgency: 'high', category: 'bug' })
+    expect(await ticket(id)).toMatchObject({ aiState: 'human', urgency: 'high', category: 'bug', summary: 'Uploads stop at 80%.' })
     expect((await ticket(id)).escalatedAt).toBeTruthy()
-    expect(sheet).toHaveLength(1)
-    expect(sheet[0].url).toBe('https://sheet.test/exec')
-    expect(sheet[0].body).toMatchObject({ secret: SECRET, action: 'append', row: { ticketId: id, type: 'bug', urgency: 'high', summary: 'Uploads stop at 80%.', steps: '1. Upload 200 photos' } })
-    expect(sheet[0].body.row.files).toContain(`/v1/integrations/support/files/${id}.`)
+    expect((await messages(id)).at(-1)!.body).toBe(`Thanks, that sounds like a fault.\n\nBook a call with us at a time that suits you: ${CALL}`)
+    expect(outside).not.toHaveBeenCalled() // no Sheet, no inbox
+  })
+
+  it('points to WhatsApp when there is no booking page', () => {
+    expect(handOverLine({ SUPPORT_WHATSAPP: '+91 91091 92065' } as never)).toBe('Message us on WhatsApp and we will set up a call: +91 91091 92065')
+    expect(handOverLine({} as never)).toBe('Please book a call with us from the Help page.')
   })
 
   it('falls back to the second provider, and with no answer at all hands over instead of guessing', async () => {
@@ -76,9 +74,8 @@ describe('the support assistant', () => {
     expect(urls).toEqual(['https://api.groq.com/openai/v1/chat/completions', 'https://integrate.api.nvidia.com/v1/chat/completions'])
 
     const id2 = await newTicket('Something else')
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })))
     expect(await answerTicket(withAi as never, id2, (async () => new Response('down', { status: 503 })) as unknown as typeof fetch)).toBe('handed-over')
-    expect((await messages(id2)).at(-1)!.body).toContain('A person on the Frameline team will look at this')
+    expect((await messages(id2)).at(-1)!.body).toContain(`This one needs a person on the Frameline team.\n\nBook a call with us at a time that suits you: ${CALL}`)
   })
 
   it('never trusts a malformed answer', () => {
@@ -88,50 +85,16 @@ describe('the support assistant', () => {
   })
 })
 
-describe('the team, through the Sheet', () => {
-  async function sheetReply(body: Record<string, unknown>) {
-    const req = new Request('https://api.test/v1/integrations/support/reply', { method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': freshIp() }, body: JSON.stringify(body) })
-    const ctx = createExecutionContext()
-    const res = await worker.fetch(req, withAi as never, ctx)
-    await waitOnExecutionContext(ctx)
-    return res
-  }
-
-  it('puts the reply in the ticket, and Resolved closes it; a wrong secret changes nothing', async () => {
-    const id = await newTicket('Payment went through but plan not active')
-    expect((await sheetReply({ secret: 'wrong-secret-0123456789-abcdefgh', ticketId: id, reply: 'x', status: 'replied' })).status).toBe(401)
-    expect((await sheetReply({ secret: SECRET, ticketId: id, reply: 'We have activated your plan.', status: 'replied', by: 'Harsh' })).status).toBe(200)
-    expect((await messages(id)).at(-1)).toMatchObject({ from: 'support', body: 'We have activated your plan.' })
-    expect(await ticket(id)).toMatchObject({ status: 'answered', aiState: 'human' })
-    expect((await sheetReply({ secret: SECRET, ticketId: id, reply: '', status: 'resolved' })).status).toBe(200)
-    expect(await ticket(id)).toMatchObject({ status: 'closed' })
-    expect((await ticket(id)).resolvedAt).toBeTruthy()
-    expect((await sheetReply({ secret: SECRET, ticketId: 'tk_nope', reply: 'x', status: 'replied' })).status).toBe(404)
-  })
-})
-
 describe('the studio side', () => {
-  it('shows the assistant at work, closes on "That solved it", and keeps screenshots for the team only', async () => {
+  it('shows the assistant at work, and closes on "That solved it"', async () => {
     const token = await tokenFor('owner')
     const made = await call('/v1/tickets', { token, body: { subject: 'Watermark missing', platform: 'admin', body: 'The watermark is not on downloads' } })
     expect(made.json.assistant).toBe('thinking')
     const id = made.json.id as string
 
-    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
-    const up = await SELF.fetch(`${BASE}/v1/tickets/${id}/attachments?filename=screen.png`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'image/png', 'cf-connecting-ip': freshIp() }, body: png })
-    expect(up.status).toBe(201)
-    {
-      const [t] = await db().select({ studioId: schema.tickets.studioId }).from(schema.tickets).where(eq(schema.tickets.id, id)).limit(1)
-      const listed = await env.MEDIA.list({ prefix: `support/${t!.studioId}/${id}/` })
-      expect(listed.objects).toHaveLength(1)
-      expect((await call(`/v1/media/${listed.objects[0]!.key}`)).status).toBe(404)
-    }
-    const link = await supportFilesUrl(withAi as never, id)
-    const page = await worker.fetch(new Request(`https://api.test${link!.replace(/^https?:\/\/[^/]+/, '')}`), withAi as never, createExecutionContext())
-    expect(page.status).toBe(200)
-    expect(await page.text()).toContain('screen.png')
-    const forged = await worker.fetch(new Request(`https://api.test/v1/integrations/support/files/${id}.9999999999.forged`), withAi as never, createExecutionContext())
-    expect(forged.status).toBe(404)
+    // Gone with the Sheet: nobody on our side read them.
+    expect((await SELF.fetch(`${BASE}/v1/tickets/${id}/attachments?filename=screen.png`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'image/png', 'cf-connecting-ip': freshIp() }, body: new Uint8Array([1]) })).status).toBe(404)
+    expect((await call('/v1/integrations/support/reply', { body: { secret: 'x', ticketId: id, reply: 'x', status: 'replied' } })).status).toBe(404)
 
     const solved = await call(`/v1/tickets/${id}/resolve`, { token, body: {} })
     expect(solved.status).toBe(200)

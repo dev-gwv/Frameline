@@ -370,7 +370,7 @@ export interface Ticket {
   status: 'open' | 'answered' | 'waiting' | 'closed'
   /** me: the studio; assistant: the AI's answer; support: a person on our team. */
   messages: { from: 'me' | 'support' | 'assistant'; body: string; at: string }[]
-  /** The assistant is still writing its answer / the ticket is with our team (a person replies). */
+  /** The assistant is still writing its answer / it handed over: this one needs a call with us (Book a call). */
   assistant?: 'thinking' | 'with-team'
 }
 

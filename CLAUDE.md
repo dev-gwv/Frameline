@@ -102,17 +102,16 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
 - **Email**: `services/smtp.ts` (Gmail / Workspace over cloudflare:sockets, App Password) when `SMTP_USER` +
   `SMTP_PASS` are set; else Resend (`RESEND_API_KEY`); else production refuses to send. Gmail limits ~500/day
   (personal), 2,000 (Workspace).
-- **Support desk** (Help → Ask the team), the owner's choice of 17 Oct: AI first, then a Google Sheet a person
-  checks daily; no WhatsApp API.
-  - `services/support-ai.ts`: answers each ticket from the help guides (`packages/shared/src/help.ts`, only
-    features that are on) and the studio's facts; Groq (`SUPPORT_AI_API_KEY`) then NVIDIA NIM
-    (`SUPPORT_AI_FALLBACK_API_KEY`); bugs, billing and account always go to a person; malformed answers too.
-  - `services/support-desk.ts`: hand-over = a Sheet row (`SUPPORT_SHEET_URL`, Apps Script `docs/support-sheet.gs`)
-    + an email to `SUPPORT_INBOX`; replies come back through `POST /v1/integrations/support/reply`
-    (`SUPPORT_SHEET_SECRET`); morning summary 08:30 IST. Screenshots live in R2 `support/<studio>/<ticket>/` (never
-    under the public `/v1/media` prefix `studios/`), shown to the team through a signed 90-day link.
+- **Book a call is the way to a person** (owner, 19 Oct; it replaced the 17 Oct Google Sheet + inbox, which are
+  gone along with screenshot uploads and the morning summary -- never bring them back). `SUPPORT_CALL_URL` (wrangler
+  var, the owner's booking page) → `/v1/meta` `features.supportCallUrl` → Help's first card. The booking app handles
+  everything after the booking. Studio AutoPilot does the same with its own `support_call_url` (its 0272, 0273).
+- **Ask a question** (Help): `services/support-ai.ts` answers each ticket from the help guides
+  (`packages/shared/src/help.ts`, only features that are on) and the studio's facts; Groq (`SUPPORT_AI_API_KEY`)
+  then NVIDIA NIM (`SUPPORT_AI_FALLBACK_API_KEY`); bugs, billing, account and malformed answers are handed over:
+  `ai_state` human and the answer ends with `handOverLine()` (Book a call, else WhatsApp); the assistant then stays
+  quiet on that ticket and the thread shows a Book a call button.
   - Help page shows a WhatsApp link only when `SUPPORT_WHATSAPP` is set (a made-up number used to be hard-coded).
-  - **Secrets not set yet** (as of 19 Oct): until they are, tickets say "with our team" and nobody is notified.
   - Keep the help guides true: the assistant repeats them word for word.
 
 ## Launch status (17 Oct review)
@@ -124,7 +123,7 @@ full-access PIN, Studio AutoPilot link. Ready for a pilot with friendly studios 
 Before real studios: delete the production sample studio "Northlight Studio" (its galleries 6402F9F, 7A1C0B2 are
 public, PIN 5211 is in this public repo) — needs the owner's yes; make sure email works (SMTP secrets).
 Before charging: Razorpay keys; KYC/payouts for selling (keep selling off). Soon: a real domain, real Terms and
-Privacy (guests give phone numbers), the support secrets.
+Privacy (guests give phone numbers), the support AI key.
 
 Live test data: event "Frameline Test – Demo Wedding" (`ev_2iat4iwano8v`, gallery `B6F105B`, PIN 7883,
 full-access 2378) in the owner's studio, with 23 screenshots and test guests. Delete when done.
@@ -134,4 +133,4 @@ full-access 2378) in the owner's studio, with 23 screenshots and test guests. De
 - 15–19 Oct 2026 (Claude, terminal on the owner's PC): screenshots for the studio demo (`E:\BuildOurs\_screenshots`),
   live testing, Support page 422 fix (`e3eb4d6`), full-access PIN (`2f0d9f2`), Studio AutoPilot reads + notices
   (`eef85ad`), AI switch (`9299785`, `2a50d19`), processor load limits (`7795314`), support desk + Gmail SMTP
-  (`fdf51ed`). Studio AutoPilot side: `6b7a02a` (galleries list, Settings → Gallery, photos bell, 0264).
+  (`fdf51ed`), Book a call replaces the Sheet (19 Oct). Studio AutoPilot side: `6b7a02a` (galleries list, Settings → Gallery, photos bell, 0264).

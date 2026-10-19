@@ -58,21 +58,16 @@ export interface Env {
   /** A "Send mail as" alias the account owns, e.g. "Frameline <support@frameline.in>". */
   SMTP_FROM?: string
   /** The support assistant (services/support-ai.ts): an OpenAI-compatible chat API. Primary defaults to Groq, the
-   *  fallback to NVIDIA NIM; base URL and model are optional. No key: tickets go straight to our team. */
+   *  fallback to NVIDIA NIM; base URL and model are optional. No key: every ticket is handed over to Book a call. */
   SUPPORT_AI_API_KEY?: string
   SUPPORT_AI_BASE_URL?: string
   SUPPORT_AI_MODEL?: string
   SUPPORT_AI_FALLBACK_API_KEY?: string
   SUPPORT_AI_FALLBACK_BASE_URL?: string
   SUPPORT_AI_FALLBACK_MODEL?: string
-  /** The support Sheet's Apps Script web app, and the secret it and POST /v1/integrations/support/reply share. */
-  SUPPORT_SHEET_URL?: string
-  SUPPORT_SHEET_SECRET?: string
-  /** Where new tickets for the team and the morning summary are emailed. */
-  SUPPORT_INBOX?: string
   /** Support's WhatsApp number, e.g. +91 98450 55012: the Help page shows a chat link only when it is set. */
   SUPPORT_WHATSAPP?: string
-  /** Where Help's Book a call goes (the owner's booking page). */
+  /** Where Help's Book a call goes (the owner's booking page); the assistant's hand-over points there too. */
   SUPPORT_CALL_URL?: string
   /** `off` switches the AI features (face finding, selfie search) off everywhere; see lib/features.ts. */
   AI_FEATURES?: string

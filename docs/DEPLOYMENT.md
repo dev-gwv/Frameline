@@ -139,22 +139,15 @@ Workspace. Code: `apps/api/src/services/smtp.ts`.
 
 ## The support desk
 
-Help → Ask the team: the assistant answers first (`services/support-ai.ts`), and hands bugs, money, account
-problems and anything it is unsure of to the team: a row in the support Google Sheet plus an email
-(`services/support-desk.ts`). The team replies in the Sheet; the reply lands in the studio's ticket and inbox.
-A morning email (08:30 India) lists what is still open.
+Help → **Book a call** is the way to a person (`SUPPORT_CALL_URL`, a wrangler var: the owner's booking page; the
+booking app handles everything after the booking). Help → **Ask a question**: the assistant answers first
+(`services/support-ai.ts`); bugs, money, account problems and anything it is unsure of are handed over, and its
+answer ends with the Book a call link (else WhatsApp). There is no Sheet and no team inbox (owner, 19 Oct).
 
-1. The Sheet: follow the steps at the top of `docs/support-sheet.gs` (5 minutes). It gives the web app URL.
-2. Secrets:
-   ```
-   npx wrangler secret put SUPPORT_AI_API_KEY --env production            # Groq API key (console.groq.com)
-   npx wrangler secret put SUPPORT_AI_FALLBACK_API_KEY --env production   # optional: NVIDIA NIM key (build.nvidia.com)
-   npx wrangler secret put SUPPORT_SHEET_URL --env production             # the Sheet's web app URL
-   npx wrangler secret put SUPPORT_SHEET_SECRET --env production          # 24+ random characters, same as the Sheet's SECRET
-   npx wrangler secret put SUPPORT_INBOX --env production                 # where team emails and the morning summary go
-   npx wrangler secret put SUPPORT_WHATSAPP --env production              # optional: support's WhatsApp number for Help
-   ```
-   Models default to `llama-3.3-70b-versatile` (Groq) and `meta/llama-3.3-70b-instruct` (NIM); change with
-   `SUPPORT_AI_MODEL` / `SUPPORT_AI_FALLBACK_MODEL`. With no AI key every ticket goes straight to the team.
-3. Screenshots studios attach are kept in R2 under `support/` (never public); the Sheet row links them through a
-   signed page that lasts 90 days.
+```
+npx wrangler secret put SUPPORT_AI_API_KEY --env production            # Groq API key (console.groq.com)
+npx wrangler secret put SUPPORT_AI_FALLBACK_API_KEY --env production   # optional: NVIDIA NIM key (build.nvidia.com)
+npx wrangler secret put SUPPORT_WHATSAPP --env production              # optional: support's WhatsApp number for Help
+```
+Models default to `llama-3.3-70b-versatile` (Groq) and `meta/llama-3.3-70b-instruct` (NIM); change with
+`SUPPORT_AI_MODEL` / `SUPPORT_AI_FALLBACK_MODEL`. With no AI key every question is handed over to Book a call.

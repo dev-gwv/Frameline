@@ -4,18 +4,18 @@ import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
 import { aiOn, effectiveSettings } from '../lib/features'
 import { newId, nowIso } from '../lib/ids'
-import { escalateTicket } from './support-desk'
 
 /**
- * The support assistant: the first answer on every studio ticket (Help → Ask the team).
+ * The support assistant: the first answer on every studio ticket (Help → Ask a question).
  *
  * It answers from the same help guides the Help page shows (only those for features that are on) and from the
  * studio's own facts (plan, wallet, the event's settings and failed photos), and says whether a person on our
- * team must take over: bugs, money, account access, anything it is not sure of. Those go to the support Sheet
- * and inbox (services/support-desk.ts); once a ticket is with our team the assistant stays quiet on it.
+ * team must take over: bugs, money, account access, anything it is not sure of. Those are handed over: the answer
+ * ends with Book a call (SUPPORT_CALL_URL, else WhatsApp), and the assistant stays quiet on that ticket after.
+ * Our booking app takes it from there (owner, 19 Oct: no Sheet, no inbox).
  *
  * Any OpenAI-compatible chat API works. Groq first, NVIDIA NIM as the fallback when Groq is down or out of
- * quota; with no key at all, every ticket goes straight to our team.
+ * quota; with no key at all, every ticket is handed over.
  */
 export interface LlmConfig { name: string; baseUrl: string; apiKey: string; model: string }
 
@@ -109,13 +109,13 @@ export function parseVerdict(text: string | null): Verdict | null {
 const SYSTEM = `You are the support assistant for Frameline, an online photo gallery app for Indian wedding and event photography studios. A studio owner or their team has written to support from the Help page of the Frameline admin app.
 
 Rules:
-- Answer ONLY from GUIDES and FACTS below. Never invent buttons, menus, features, prices or timelines. If the guides do not cover it, say a person on the team will reply, and set needs_human to true.
+- Answer ONLY from GUIDES and FACTS below. Never invent buttons, menus, features, prices or timelines. If the guides do not cover it, say so and that they can talk it through with our team on a call, and set needs_human to true. The booking link is added after your reply; never write a link or a time yourself.
 - Features listed under SWITCHED OFF do not exist for them right now. Never suggest them.
-- Never promise refunds, credits, plan changes or account changes. Money, payments, sign-in or access problems, lost photos, and anything that looks like a bug: set needs_human to true, tell them our team has it, and ask for what is missing (which event, what they clicked, what they saw, a screenshot).
+- Never promise refunds, credits, plan changes or account changes. Money, payments, sign-in or access problems, lost photos, and anything that looks like a bug: set needs_human to true and say a person on our team should look at it with them on a call.
 - Write short, warm, plain sentences, like a helpful person on WhatsApp. No markdown headings. Use the studio's own language: if they wrote in Hindi or Hinglish, answer the same way; button names stay in English.
 - Reply with JSON only, exactly these keys:
   {"reply": string, "category": "how-to"|"bug"|"billing"|"account"|"feature"|"other", "urgency": "low"|"normal"|"high", "needs_human": boolean, "summary": string, "steps": string}
-  "summary" and "steps" are for our team, not the studio: what is wrong in two or three sentences, and the steps to see it happen (empty if not a bug). Urgency is high when an event is happening now or within two days, guests cannot open the gallery, or photos are lost.`
+  "summary" and "steps" are kept with the request, not shown to the studio: what is wrong in two or three sentences, and the steps to see it happen (empty if not a bug). Urgency is high when an event is happening now or within two days, guests cannot open the gallery, or photos are lost.`
 
 /** The studio's facts the assistant may use. */
 async function factsFor(env: Env, ticket: typeof schema.tickets.$inferSelect): Promise<string> {
@@ -165,7 +165,14 @@ export async function promptFor(env: Env, ticket: typeof schema.tickets.$inferSe
   return [{ role: 'system', content: system }, ...convo]
 }
 
-const HANDOVER = 'Thanks for writing in. A person on the Frameline team will look at this and reply here, usually within a working day.'
+/** How a person is reached: the booking page first, else WhatsApp. Added under every hand-over. */
+export function handOverLine(env: Env): string {
+  if (env.SUPPORT_CALL_URL) return `Book a call with us at a time that suits you: ${env.SUPPORT_CALL_URL}`
+  if (env.SUPPORT_WHATSAPP) return `Message us on WhatsApp and we will set up a call: ${env.SUPPORT_WHATSAPP}`
+  return 'Please book a call with us from the Help page.'
+}
+
+const HANDOVER = 'Thanks for writing in. This one needs a person on the Frameline team.'
 
 /**
  * Answers a ticket whose last message is the studio's (ai_state pending). Safe to call twice: it claims the
@@ -186,17 +193,14 @@ export async function answerTicket(env: Env, ticketId: string, fetchImpl: Fetch 
   const v: Verdict = verdict ?? { reply: HANDOVER, category: 'other', urgency: 'normal', needsHuman: true, summary: ticket.subject, steps: '' }
   const now = nowIso()
   await db.batch([
-    db.insert(schema.ticketMessages).values({ id: newId('tm'), ticketId, from: 'assistant', body: v.reply, at: now }),
+    db.insert(schema.ticketMessages).values({ id: newId('tm'), ticketId, from: 'assistant', body: v.needsHuman ? `${v.reply}\n\n${handOverLine(env)}` : v.reply, at: now }),
     db.update(t).set({
       status: 'answered', updatedAt: now, category: v.category, urgency: v.urgency,
       aiState: v.needsHuman ? 'human' : 'done', summary: v.summary || ticket.summary,
+      ...(v.needsHuman ? { escalatedAt: now } : {}),
     }).where(eq(t.id, ticketId)),
   ])
-  if (v.needsHuman) {
-    await escalateTicket(env, ticketId, { summary: v.summary || msgs.find((m) => m.from === 'me')?.body.slice(0, 500) || ticket.subject, steps: v.steps })
-    return 'handed-over'
-  }
-  return 'answered'
+  return v.needsHuman ? 'handed-over' : 'answered'
 }
 
 /** Minute cron: tickets still waiting for the assistant (its background run failed or timed out). */

@@ -11,8 +11,6 @@ import { createEvent } from '../services/events'
 import { STUDIO_AUTOPILOT, ensurePartnerStudio, ensurePartnerUser, link, linkedId, projectKey, spendJti } from '../services/partner'
 import { emit } from '../services/realtime'
 import { effectiveSettings } from '../lib/features'
-import { timingSafeEqual } from '../lib/crypto'
-import { applySheetReply, supportPrefix, verifySupportFilesToken } from '../services/support-desk'
 import { issueSession } from '../services/sessions'
 
 /**
@@ -255,63 +253,4 @@ integrationRoutes.openapi(createRoute({
     linked: true, studioName: s.name, plan: s.planId, validTill: s.validTill, walletRupees: s.walletPaise / 100,
     photosUsed: s.photosUsed, photosLimit: s.photosLimit, galleries: n, adminUrl,
   }, 200)
-})
-
-// ── The support Sheet ───────────────────────────────────────────────────────
-// Its Apps Script (docs/support-sheet.gs) posts each reply the team writes, with the shared SUPPORT_SHEET_SECRET.
-integrationRoutes.openapi(createRoute({
-  method: 'post', path: '/integrations/support/reply', tags: ['Integrations'], summary: 'A reply from the support Sheet',
-  description: 'Lands in the studio\'s ticket and emails them. `fixed` and `resolved` mark it resolved; `resolved` also closes it.',
-  request: {
-    body: body(z.object({
-      secret: z.string().max(200),
-      ticketId: z.string().min(1).max(128),
-      reply: z.string().max(5000).default(''),
-      status: z.enum(['replied', 'fixed', 'resolved']),
-      by: z.string().max(120).optional(),
-    })),
-  },
-  responses: { 200: json(z.object({ ok: z.literal(true) })), ...problems(401, 404, 422, 501) },
-}), async (c) => {
-  const input = c.req.valid('json')
-  const secret = c.env.SUPPORT_SHEET_SECRET
-  if (!secret || secret.length < 24) throw new NotConfigured('Support Sheet', 'Set SUPPORT_SHEET_SECRET (24+ characters) on this server.')
-  if (!timingSafeEqual(input.secret, secret)) throw new Unauthorized('This is not the support Sheet.', 'invalid_secret')
-  if (!(await applySheetReply(c.env, input))) throw new NotFound('Ticket', input.ticketId)
-  return c.json({ ok: true as const }, 200)
-})
-
-// The team's view of a ticket's screenshots, from the signed link in the Sheet row and the email.
-const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`)
-integrationRoutes.get('/integrations/support/files/:token', async (c) => {
-  const ticketId = await verifySupportFilesToken(c.env, c.req.param('token'))
-  if (!ticketId) return c.text('This link is not valid or has expired.', 404)
-  const [ticket] = await getDb(c.env.DB).select({ studioId: schema.tickets.studioId, subject: schema.tickets.subject }).from(schema.tickets).where(eq(schema.tickets.id, ticketId)).limit(1)
-  if (!ticket) return c.text('Ticket not found.', 404)
-  const listed = await c.env.MEDIA.list({ prefix: supportPrefix(ticket.studioId, ticketId), include: ['customMetadata'] })
-  const base = c.req.path.replace(/\/$/, '')
-  const items = listed.objects.map((o) => {
-    const name = o.customMetadata?.fileName ?? o.key.split('/').pop()!
-    const href = `${base}/${encodeURIComponent(o.key.split('/').pop()!)}`
-    const isImage = /\.(jpg|png|webp|gif)$/.test(o.key)
-    return `<li><a href="${esc(href)}" target="_blank" rel="noreferrer">${esc(name)}</a> · ${(o.size / 1048576).toFixed(1)} MB${isImage ? `<br><img src="${esc(href)}" alt="" style="max-width:100%;max-height:420px;margin-top:6px;border:1px solid #ddd">` : ''}</li>`
-  })
-  c.header('Cache-Control', 'private, no-store')
-  c.header('Referrer-Policy', 'no-referrer')
-  return c.html(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Ticket ${esc(ticketId)}</title>
-<body style="font-family:system-ui,sans-serif;max-width:860px;margin:24px auto;padding:0 16px"><h2>${esc(ticket.subject)}</h2><p>Ticket ${esc(ticketId)}</p>
-${items.length ? `<ul style="list-style:none;padding:0;display:grid;gap:18px">${items.join('')}</ul>` : '<p>No screenshots attached.</p>'}</body>`)
-})
-
-integrationRoutes.get('/integrations/support/files/:token/:file', async (c) => {
-  const ticketId = await verifySupportFilesToken(c.env, c.req.param('token'))
-  const file = c.req.param('file')
-  if (!ticketId || !/^[A-Za-z0-9_-]+\.[a-z0-9]{2,5}$/.test(file)) return c.text('Not found.', 404)
-  const [ticket] = await getDb(c.env.DB).select({ studioId: schema.tickets.studioId }).from(schema.tickets).where(eq(schema.tickets.id, ticketId)).limit(1)
-  const obj = ticket ? await c.env.MEDIA.get(`${supportPrefix(ticket.studioId, ticketId)}${file}`) : null
-  if (!obj) return c.text('Not found.', 404)
-  const headers = new Headers()
-  obj.writeHttpMetadata(headers)
-  headers.set('Cache-Control', 'private, no-store')
-  return new Response(obj.body, { headers })
 })

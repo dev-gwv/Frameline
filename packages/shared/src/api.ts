@@ -260,8 +260,6 @@ export interface FramelineApi {
   replyTicket(id: ID, body: string): Promise<Ticket>
   /** "That solved it": closes the ticket. */
   resolveTicket(id: ID): Promise<Ticket>
-  /** A screenshot or short screen recording for support (image or video, up to 50 MB, 5 per request). */
-  attachToTicket(id: ID, file: AssetFile): Promise<{ fileName: string; size: number }>
   listTeam(): Promise<TeamMember[]>
   inviteMember(email: string, role: TeamMember['role'], eventIds?: ID[]): Promise<TeamMember>
   updateMember(id: ID, patch: MemberPatch): Promise<TeamMember>
@@ -777,7 +775,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
         .map((a) => ({ a, n: words.filter((w) => `${a.title} ${a.tags.join(' ')}`.toLowerCase().includes(w)).length }))
         .sort((x, y) => y.n - x.n)[0]
       const found = best && best.n > 0
-      t.messages.push({ from: 'assistant', body: found ? best.a.answer : 'Thanks for writing in. A person on the Frameline team will look at this and reply here, usually within a working day.', at: new Date().toISOString() })
+      t.messages.push({ from: 'assistant', body: found ? best.a.answer : 'Thanks for writing in. This one needs a person on the Frameline team. Book a call with us at a time that suits you.', at: new Date().toISOString() })
       t.status = 'answered'
       if (found) delete t.assistant
       else t.assistant = 'with-team'
@@ -1367,7 +1365,6 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       if (t.assistant !== 'with-team') sampleAssistant(t, body)
       return clone(t)
     },
-    async attachToTicket(_id, file) { await wait(latency); return { fileName: file.filename, size: file.size ?? 0 } },
     async resolveTicket(id) {
       await wait(latency)
       const t = byId(s().tickets, id, 'Ticket')

@@ -6,7 +6,7 @@ import { getDb, schema } from '../db/client'
 import {
   activityOut, broadcastOut, cameraOut, cameraUploadOut, enquiryOut, ledgerOut, orderOut, priceOut, qrOut, storeSettingsOut, ticketOut,
 } from '../db/mappers'
-import { Conflict, NotFound, PayloadTooLarge, ServiceUnavailable, ValidationFailed } from '../lib/errors'
+import { Conflict, NotFound, ServiceUnavailable, ValidationFailed } from '../lib/errors'
 import { hashPassword, randomInt } from '../lib/crypto'
 import { toMajor, toMinor } from '../lib/money'
 import { addLedger, payoutBalance, walletOf } from '../services/billing'
@@ -24,7 +24,6 @@ import { AppError } from '../lib/errors'
 import { emit } from '../services/realtime'
 import { background } from '../lib/http'
 import { answerTicket } from '../services/support-ai'
-import { noteStudioReply, supportPrefix } from '../services/support-desk'
 import { sendReceipt } from '../services/orders'
 
 export const businessRoutes = createRouter()
@@ -317,15 +316,14 @@ businessRoutes.openapi(createRoute({
   if (!ticket) throw new NotFound('Ticket', id)
   const now = nowIso()
   const text = c.req.valid('json').body
-  // With our team: the person sees it (Sheet note + email). Otherwise the assistant answers again.
+  // Handed over (it needs a call with us): kept, and the assistant stays quiet. Otherwise it answers again.
   const withTeam = ticket.aiState === 'human'
   await db.batch([
     db.insert(schema.ticketMessages).values({ id: newId('tm'), ticketId: id, from: 'me', body: text, at: now }),
     db.update(t).set({ status: 'waiting', updatedAt: now, ...(withTeam || ticket.aiState === 'off' ? {} : { aiState: 'pending' as const }), ...(ticket.status === 'closed' ? { resolvedAt: null } : {}) }).where(eq(t.id, id)),
   ])
   emit(c, m.studioId, 'misc')
-  if (withTeam) background(c, noteStudioReply(c.env, id, text))
-  else if (ticket.aiState !== 'off') background(c, answerTicket(c.env, id).then(() => emit(c, m.studioId, 'misc')))
+  if (!withTeam && ticket.aiState !== 'off') background(c, answerTicket(c.env, id).then(() => emit(c, m.studioId, 'misc')))
   const [fresh] = await db.select().from(t).where(eq(t.id, id)).limit(1)
   return c.json((await withMessages(db, [fresh]))[0], 200)
 })
@@ -347,37 +345,6 @@ businessRoutes.openapi(createRoute({
   emit(c, m.studioId, 'misc')
   const [fresh] = await db.select().from(t).where(eq(t.id, id)).limit(1)
   return c.json((await withMessages(db, [fresh]))[0], 200)
-})
-
-const SCREENSHOT_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm' }
-const SCREENSHOT_MAX = 50 * 1048576
-const SCREENSHOTS_PER_TICKET = 5
-
-businessRoutes.openapi(createRoute({
-  method: 'post', path: '/tickets/{id}/attachments', tags: ['Support'], summary: 'Attach a screenshot or short screen recording', security,
-  description: 'Send the raw file as the body with its Content-Type: an image (JPG, PNG, WebP, GIF) or a video (MP4, MOV, WebM), up to 50 MB, at most 5 per request. Only Frameline support sees them.',
-  middleware: [requireStudio('uploader')] as const,
-  request: { params: IdParam, query: z.object({ filename: z.string().trim().min(1).max(200) }) },
-  responses: { 201: json(z.object({ fileName: z.string(), size: z.number().int() }), 'Attached'), ...problems(401, 403, 404, 409, 413, 415, 422) },
-}), async (c) => {
-  const m = membershipOf(c)
-  const id = c.req.valid('param').id
-  const t = schema.tickets
-  const [ticket] = await getDb(c.env.DB).select({ id: t.id }).from(t).where(and(eq(t.id, id), eq(t.studioId, m.studioId))).limit(1)
-  if (!ticket) throw new NotFound('Ticket', id)
-  const contentType = (c.req.header('content-type') ?? '').split(';')[0].trim().toLowerCase()
-  const ext = SCREENSHOT_TYPES[contentType]
-  if (!ext) throw new AppError(415, 'unsupported_media_type', 'Unsupported media type', 'Attach a screenshot (JPG, PNG, WebP, GIF) or a short screen recording (MP4, MOV, WebM).')
-  if (Number(c.req.header('content-length') ?? 0) > SCREENSHOT_MAX) throw new PayloadTooLarge(SCREENSHOT_MAX)
-  const prefix = supportPrefix(m.studioId, id)
-  const existing = await c.env.MEDIA.list({ prefix, limit: SCREENSHOTS_PER_TICKET + 1 })
-  if (existing.objects.length >= SCREENSHOTS_PER_TICKET) throw new Conflict(`Up to ${SCREENSHOTS_PER_TICKET} files per request.`, 'too_many_files')
-  const bytes = await c.req.arrayBuffer()
-  if (bytes.byteLength > SCREENSHOT_MAX) throw new PayloadTooLarge(SCREENSHOT_MAX)
-  if (!bytes.byteLength) throw new AppError(422, 'empty_file', 'Empty file', 'The file is empty.')
-  const fileName = c.req.valid('query').filename
-  await c.env.MEDIA.put(`${prefix}${newId('sf')}.${ext}`, bytes, { httpMetadata: { contentType }, customMetadata: { fileName } })
-  return c.json({ fileName, size: bytes.byteLength }, 201)
 })
 
 // ── Enquiries ──────────────────────────────────────────────────────────────

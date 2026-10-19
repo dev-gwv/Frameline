@@ -450,11 +450,11 @@ export const tickets = sqliteTable('tickets', {
   /** How-to, bug, billing, account or feature, as the assistant read it. */
   category: text('category', { enum: ['how-to', 'bug', 'billing', 'account', 'feature', 'other'] }),
   urgency: text('urgency', { enum: ['low', 'normal', 'high'] }),
-  /** pending: the assistant still has to answer the last message; done: it did; human: with our team; off: no assistant. */
+  /** pending: the assistant still has to answer the last message; done: it did; human: handed over to Book a call; off: no assistant. */
   aiState: text('ai_state', { enum: ['pending', 'done', 'human', 'off'] }).notNull().default('pending'),
-  /** The assistant's summary for our team (the Sheet row), never shown to the studio. */
+  /** The assistant's summary of the problem, kept with the request, never shown to the studio. */
   summary: text('summary'),
-  /** When it went to our team (Sheet row + email), and when it was resolved. */
+  /** When it was handed over to Book a call, and when it was resolved. */
   escalatedAt: ts('escalated_at'),
   resolvedAt: ts('resolved_at'),
 }, (t) => [index('tickets_studio_idx').on(t.studioId, t.updatedAt), index('tickets_ai_idx').on(t.aiState, t.updatedAt)])
