@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, CheckCircle2, ChevronDown, FileImage, FileVideo, Loader2, MessageCircle, MessageSquare, Paperclip, PlayCircle, Search, Send, Ticket as TicketIcon, Users, X } from 'lucide-react'
+import { Bot, CalendarClock, CheckCircle2, ChevronDown, FileImage, FileVideo, Loader2, MessageCircle, MessageSquare, Paperclip, PlayCircle, Search, Send, Ticket as TicketIcon, Users, X } from 'lucide-react'
 import { availableArticles, fmt, type Ticket } from '@frameline/shared'
 import { Button, Card, Chip, cn, EmptyState, Field, Input, Modal, Page, Segmented, Select, Skeleton, Textarea, useToast, type ChipTone } from '@frameline/ui'
 import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
@@ -23,17 +23,18 @@ export default function Support() {
   const tickets = useTickets()
   const [params, set] = useParamState()
   const topic = params.get('topic')
-  const { supportWhatsapp } = useServerFeatures()
+  const { supportWhatsapp, supportCallUrl } = useServerFeatures()
   const cards = [
     { icon: <TicketIcon size={16} />, title: 'Ask the team', body: 'A question, or something not working. Add screenshots.', cta: 'New request', onClick: () => set({ new: '1' }) },
     { icon: <PlayCircle size={16} />, title: 'Guides and videos', body: 'English and हिन्दी', cta: 'Browse', onClick: () => set({ topic: 'all' }) },
+    ...(supportCallUrl ? [{ icon: <CalendarClock size={16} />, title: 'Book a call', body: 'Pick a time that suits you', cta: 'Book a call', onClick: () => window.open(supportCallUrl, '_blank', 'noopener') }] : []),
     ...(supportWhatsapp ? [{ icon: <MessageCircle size={16} />, title: 'WhatsApp us', body: supportWhatsapp, cta: 'Open chat', onClick: () => window.open(waLink(supportWhatsapp), '_blank', 'noopener') }] : []),
   ]
   const list = tickets.data ?? []
   const open = list.find((t) => t.id === params.get('request')) ?? null
   return (
     <Page title="Help" subtitle="Our assistant answers in about a minute. When it needs a person, the Frameline team replies here within a working day.">
-      <div className={cn('mb-5 grid gap-3.5', cards.length === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
+      <div className={cn('mb-5 grid gap-3.5', cards.length === 4 ? 'sm:grid-cols-2 lg:grid-cols-4' : cards.length === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
         {cards.map((c) => (
           <Card key={c.title} className="flex flex-col items-start gap-2">
             <span className="grid size-8 place-items-center rounded-control bg-accent-soft text-accent-text">{c.icon}</span>

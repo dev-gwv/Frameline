@@ -1,19 +1,22 @@
 /**
  * Frameline support Sheet (Google Apps Script). The support desk's side for people.
  *
- * Frameline adds a row here for every ticket the assistant hands to the team, and adds the studio's later
- * messages to that row's "Notes from studio". You answer in "Reply to studio" and set Status; within five
+ * One Sheet for both apps, a tab each: Frameline adds a row to "Frameline" for every ticket its assistant hands
+ * to the team, and Studio AutoPilot adds one to "Studio AutoPilot" for every Report a problem. A studio's later
+ * messages are added to that row's "Notes from studio". You answer in "Reply to studio" and set Status; within five
  * minutes (or Frameline → Send replies now) the reply lands in the studio's ticket and they get an email.
  *
  * Setup, once (about 5 minutes):
  *  1. Make a new Google Sheet. Extensions → Apps Script. Paste this whole file over the sample code. Save.
  *  2. Project Settings (gear) → Script Properties → add:
  *       SECRET     the same long random text as Frameline's SUPPORT_SHEET_SECRET (24+ characters)
- *       REPLY_URL  https://frameline-api.dev-d9b.workers.dev/v1/integrations/support/reply
+ *       REPLY_URL                   https://frameline-api.dev-d9b.workers.dev/v1/integrations/support/reply
+ *       STUDIOAUTOPILOT_REPLY_URL   https://api.studioautopilot.in/webhooks/support-sheet
+ *     Both apps use the same SECRET (Frameline's SUPPORT_SHEET_SECRET = Studio AutoPilot's SUPPORT_SHEET_SECRET).
  *  3. In the editor pick the function "setup" and press Run. Allow the permissions it asks for.
- *     It makes the "Tickets" tab with its columns and a 5-minute timer that sends your replies.
+ *     It makes the "Frameline" and "Studio AutoPilot" tabs with their columns and a 5-minute timer that sends your replies.
  *  4. Deploy → New deployment → type "Web app". Execute as: Me. Who has access: Anyone. Deploy.
- *     Copy the Web app URL: that is Frameline's SUPPORT_SHEET_URL.
+ *     Copy the Web app URL: it is SUPPORT_SHEET_URL in both apps.
  *     (Anyone with the URL can reach it, but every request must carry the SECRET, or it is ignored.)
  *
  * Daily use: sort or filter by Status. Statuses:
@@ -23,7 +26,9 @@
  *   "Sent at", and set the status again.
  */
 
-const SHEET_NAME = 'Tickets'
+/** One tab per app; a request names its app (Frameline sends none). */
+const APPS = { 'Frameline': 'REPLY_URL', 'Studio AutoPilot': 'STUDIOAUTOPILOT_REPLY_URL' }
+const DEFAULT_APP = 'Frameline'
 const HEADERS = [
   'Ticket ID', 'Opened', 'Studio', 'Plan', 'Person', 'Type', 'Urgency', 'Subject', 'Summary', 'Steps to repeat',
   'Their message', 'Event', 'Gallery', 'Where', 'Screenshots', 'Notes from studio', 'Status', 'Reply to studio',
@@ -34,12 +39,13 @@ const col = (name) => HEADERS.indexOf(name) + 1
 
 function props() {
   const p = PropertiesService.getScriptProperties()
-  return { secret: p.getProperty('SECRET') || '', replyUrl: p.getProperty('REPLY_URL') || '' }
+  return { secret: p.getProperty('SECRET') || '', replyUrl: (app) => p.getProperty(APPS[app] || 'REPLY_URL') || '' }
 }
 
-function sheet() {
+function sheet(app) {
+  const name = APPS[app] ? app : DEFAULT_APP
   const ss = SpreadsheetApp.getActiveSpreadsheet()
-  return ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME)
+  return ss.getSheetByName(name) || ss.insertSheet(name)
 }
 
 const json = (o) => ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON)
@@ -53,7 +59,7 @@ function doPost(e) {
   const lock = LockService.getScriptLock()
   lock.waitLock(20000)
   try {
-    const sh = sheet()
+    const sh = sheet(body.app)
     if (body.action === 'append') {
       const r = body.row || {}
       if (findRow(sh, r.ticketId)) return json({ ok: true, duplicate: true })
@@ -86,11 +92,16 @@ function findRow(sh, ticketId) {
   return 0
 }
 
-/** Sheet → Frameline: every row with a status of Replied, Fixed or Resolved and no "Sent at" yet. */
+/** Sheet → each app: every row with a status of Replied, Fixed or Resolved and no "Sent at" yet. */
 function sendReplies() {
-  const { secret, replyUrl } = props()
-  if (!secret || !replyUrl) throw new Error('Set SECRET and REPLY_URL in Project Settings → Script Properties.')
-  const sh = sheet()
+  Object.keys(APPS).forEach(sendRepliesFor)
+}
+
+function sendRepliesFor(app) {
+  const { secret } = props()
+  const replyUrl = props().replyUrl(app)
+  if (!secret || !replyUrl) return
+  const sh = sheet(app)
   if (sh.getLastRow() < 2) return
   const rows = sh.getRange(2, 1, sh.getLastRow() - 1, HEADERS.length).getValues()
   rows.forEach((r, i) => {
@@ -110,17 +121,21 @@ function sendReplies() {
 
 /** Run once from the editor: the tab, its columns, the Status choices and the 5-minute timer. */
 function setup() {
-  const sh = sheet()
+  Object.keys(APPS).forEach(setupTab)
+  ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === 'sendReplies').forEach((t) => ScriptApp.deleteTrigger(t))
+  ScriptApp.newTrigger('sendReplies').timeBased().everyMinutes(5).create()
+}
+
+function setupTab(app) {
+  const sh = sheet(app)
   sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold').setBackground('#f3efe7')
   sh.setFrozenRows(1)
   sh.setColumnWidths(1, HEADERS.length, 140)
   ;['Summary', 'Their message', 'Notes from studio', 'Reply to studio'].forEach((h) => sh.setColumnWidth(col(h), 320))
   const rule = SpreadsheetApp.newDataValidation().requireValueInList(STATUSES, true).setAllowInvalid(false).build()
   sh.getRange(2, col('Status'), 1000, 1).setDataValidation(rule)
-  ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === 'sendReplies').forEach((t) => ScriptApp.deleteTrigger(t))
-  ScriptApp.newTrigger('sendReplies').timeBased().everyMinutes(5).create()
 }
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('Frameline').addItem('Send replies now', 'sendReplies').addToUi()
+  SpreadsheetApp.getUi().createMenu('Support').addItem('Send replies now', 'sendReplies').addToUi()
 }

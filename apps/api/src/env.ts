@@ -72,6 +72,8 @@ export interface Env {
   SUPPORT_INBOX?: string
   /** Support's WhatsApp number, e.g. +91 98450 55012: the Help page shows a chat link only when it is set. */
   SUPPORT_WHATSAPP?: string
+  /** Where Help's Book a call goes (the owner's booking page). */
+  SUPPORT_CALL_URL?: string
   /** `off` switches the AI features (face finding, selfie search) off everywhere; see lib/features.ts. */
   AI_FEATURES?: string
   /** Where gallery-changed notices go (Studio AutoPilot's /webhooks/frameline). Unset: no notices are queued. */

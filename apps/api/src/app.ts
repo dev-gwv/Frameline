@@ -102,13 +102,13 @@ export function createApp() {
         name: z.string(), apiVersion: z.string(), version: z.string(), build: z.string(), environment: z.string(),
         docs: z.string(), openapi: z.string(), time: z.string(),
         /** Server switches the apps follow at run time (lib/features.ts). */
-        features: z.object({ ai: z.boolean(), supportWhatsapp: z.string().optional() }),
+        features: z.object({ ai: z.boolean(), supportWhatsapp: z.string().optional(), supportCallUrl: z.string().optional() }),
       })),
     },
   }), (c) => c.json({
     name: 'frameline-api', apiVersion: API_MAJOR, version: c.env.API_VERSION, build: c.env.BUILD_SHA, environment: c.env.ENVIRONMENT,
     docs: '/v1/docs', openapi: '/v1/openapi.json', time: new Date().toISOString(),
-    features: { ai: aiOn(c.env), ...(c.env.SUPPORT_WHATSAPP ? { supportWhatsapp: c.env.SUPPORT_WHATSAPP } : {}) },
+    features: { ai: aiOn(c.env), ...(c.env.SUPPORT_WHATSAPP ? { supportWhatsapp: c.env.SUPPORT_WHATSAPP } : {}), ...(c.env.SUPPORT_CALL_URL ? { supportCallUrl: c.env.SUPPORT_CALL_URL } : {}) },
   }, 200))
 
   v1.route('/auth', authRoutes)

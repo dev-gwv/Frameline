@@ -34,6 +34,8 @@ export interface ServerFeatures {
   ai: boolean
   /** Support's WhatsApp number (SUPPORT_WHATSAPP), when there is one: the Help page shows a chat link. */
   supportWhatsapp?: string
+  /** Where Book a call goes (SUPPORT_CALL_URL), when there is one. */
+  supportCallUrl?: string
 }
 
 /** Sample data (no API URL) shows everything; a server that can't be asked is treated as AI off, the safe side. */
@@ -43,7 +45,12 @@ export async function fetchServerFeatures(apiUrl: string | undefined): Promise<S
     const res = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/meta`)
     const body = (await res.json()) as { features?: Partial<ServerFeatures> }
     const wa = body.features?.supportWhatsapp
-    return { ai: body.features?.ai === true, ...(typeof wa === 'string' && wa ? { supportWhatsapp: wa } : {}) }
+    const call = body.features?.supportCallUrl
+    return {
+      ai: body.features?.ai === true,
+      ...(typeof wa === 'string' && wa ? { supportWhatsapp: wa } : {}),
+      ...(typeof call === 'string' && /^https:\/\//.test(call) ? { supportCallUrl: call } : {}),
+    }
   } catch {
     return { ai: false }
   }
