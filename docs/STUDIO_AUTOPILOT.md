@@ -245,6 +245,19 @@ The findings above describe the code as it was on 12 Oct 2026. These are fixed s
   - `downloadFile` returns the stored rendition when the file is plain and unrotated, otherwise a fresh render from the processor.
 - Single downloads and guest ZIPs use it, so watermarked galleries get ZIPs again whenever a processor is connected. Without one: 409 `watermark_required`, and the gallery switches to saving one by one.
 
+**Batch 11, launch with AI off (23 Oct)**
+- GST invoices name the seller from wrangler vars `SELLER_NAME`, `SELLER_GSTIN`, `SELLER_ADDRESS` (`GET /v1/meta` `features.seller`). Unset: no invoice downloads ("Tax invoices will be available here soon"), no made-up company, and the KYC declaration letter is addressed neutrally. The false "we've emailed it" is gone.
+- `PATCH /events/:id` can no longer set `photoLimit`, `expiresAt` or `plan` (422); they change only by paying.
+- New events hold 10,000 photos (`EVENT_PHOTO_LIMIT`); migration `0011` raised events still on the old 2,000.
+- Web copies without the processor: the studio's browser makes a 2048 px JPEG of each photo it uploads (`apps/admin/src/lib/webCopy.ts`) and sends it to `PUT /v1/photos/:id/web`, stored as `…/renditions/2048.jpg` (`photos.web_copy`, migration `0012`). Photos carry `webUrl`; galleries and the studio grid show it. Guests get only the web copy unless the gallery offers full-size downloads. The processor writes the same file and sets the flag too.
+- `GET /v1/meta` `features.payments` (Razorpay keys, or simulated in dev/test). Off: no Sell photos page or nav, no selling toggle, UPI/Card disabled, no client renewal links, and guests never see anything for sale (`effectiveSettings` turns `storeEnabled` off). Withdraw no longer promises "1–2 working days".
+- Hidden until a sender exists: the gallery's "Notify me" (`FEATURES.guestNotify`), reminder emails in Settings → Notifications (`FEATURES.reminderEmails`). Hosts are invited by email only.
+- With AI off: no Face finding menu or modal, no "One person" link (`/faces/match` answers 403), no face-search renewal item in Needs you, no "With people" sort or viewer People tab, and the selfie wording on Events, Sell, sign-up preview, Reports, Help and presets is neutral.
+- Terms (`/terms`, new) and Privacy (`/privacy`, updated: no face data now, real recipients) on the studio site, both marked as drafts; sign-in links there, and the guest sign-up form links to the privacy page (`VITE_ADMIN_URL`).
+- A studio on its trial (`studios.on_trial`, migration `0013`) sees "Free trial till …" instead of "renews".
+- No more `<handle>.frameline.in` promises, "© Northlight" watermark default or YouTube "walkthrough" links.
+- Studio AutoPilot gets a `status` notice when a gallery is archived, restored, trashed or deleted.
+
 **Still open:**
 - Guest email verification for "registered" galleries. Batch 2 already removed the session takeover, so a typed email can't reach anyone else's photos or orders; what's left is that the email isn't proven.
 - Browser selfie embeddings (needs the face models hosted somewhere the gallery can load them).

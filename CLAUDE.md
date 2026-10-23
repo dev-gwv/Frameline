@@ -76,8 +76,14 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
   untouched. `GET /v1/meta` → `features.ai`; admin and gallery read it at run time (`useServerFeatures`) and hide
   face controls, the full-access PIN and selfie wording. Turning on: deploy the processor, set `PROCESSOR_URL` /
   `PROCESSOR_TOKEN`, set the var to "on".
+- Payments: `GET /v1/meta` `features.payments` is true only with Razorpay keys (or simulated in dev/test). Off:
+  admin hides selling, payouts, card/UPI and client renewal links; `effectiveSettings` turns `storeEnabled` off for
+  guests. `features.seller` comes from `SELLER_*` vars; without it there are no invoice downloads.
 - `FEATURES` (`packages/shared/src/features.ts`, compile time): driveImport, aiEnhance, cameraSync, broadcasts,
-  website are all **off** (they were simulated). Help guides carry `needs` and are hidden for switched-off features.
+  website, guestNotify, reminderEmails are all **off** (they were simulated, or nothing sends them). Help guides
+  carry `needs` and are hidden for switched-off features.
+- Photos get a 2048 px web copy from the studio's browser at upload (`PUT /v1/photos/:id/web`, `photos.web_copy`,
+  `Photo.webUrl`); show photos with `displayUrl(photo)`, download originals from `photo.url`.
 
 ## PINs
 
@@ -124,6 +130,22 @@ Before real studios: delete the production sample studio "Northlight Studio" (it
 public, PIN 5211 is in this public repo) — needs the owner's yes; make sure email works (SMTP secrets).
 Before charging: Razorpay keys; KYC/payouts for selling (keep selling off). Soon: a real domain, real Terms and
 Privacy (guests give phone numbers), the support AI key.
+
+**23 Oct: launching with AI off and no payments** (batch 11 in docs/STUDIO_AUTOPILOT.md). What isn't real is
+hidden or says so: selling, payouts, card/UPI, invoices without a seller, "Notify me", reminder emails, face finding.
+
+**Pending (owner):**
+- Real company name, GSTIN and address for invoices: wrangler vars `SELLER_NAME`, `SELLER_GSTIN`, `SELLER_ADDRESS`
+  (production vars in `apps/api/wrangler.jsonc`). Until then no invoice downloads.
+- SMTP secrets (`SMTP_USER`, `SMTP_PASS`) so email really goes out.
+- Razorpay keys. **Before adding them, extend trial studios' `valid_till`**: a lapsed trial is only enforced once
+  payments are live, so every old trial would be locked out of uploads the moment the keys go in.
+- Legal review of `apps/admin/public/terms.html` and `privacy.html` (both drafts; operator Grateful World Ventures
+  (OPC) Private Limited, address and GSTIN still "to be added").
+- A real domain.
+- Make both GitHub repos private.
+- Northlight sample studio stays for testing until launch, then delete it.
+- Hosting the processor (then `AI_FEATURES` on).
 
 Live test data: event "Frameline Test – Demo Wedding" (`ev_2iat4iwano8v`, gallery `B6F105B`, PIN 7883,
 full-access 2378) in the owner's studio, with 23 screenshots and test guests. Delete when done.
