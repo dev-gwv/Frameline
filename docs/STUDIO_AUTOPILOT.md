@@ -248,7 +248,7 @@ The findings above describe the code as it was on 12 Oct 2026. These are fixed s
 **Still open:**
 - Guest email verification for "registered" galleries. Batch 2 already removed the session takeover, so a typed email can't reach anyone else's photos or orders; what's left is that the email isn't proven.
 - Browser selfie embeddings (needs the face models hosted somewhere the gallery can load them).
-- KYC review, and support tickets nobody can answer.
+- KYC review. (Support tickets are answered by the assistant in `services/support-ai.ts`, with Book a call as the hand-over to a person; see CLAUDE.md.)
 
 **Needs the owner:**
 - Razorpay keys (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`). The browser gets the key from each checkout, so `VITE_RAZORPAY_KEY` isn't needed.
