@@ -70,6 +70,8 @@ export interface Usage {
   planId: Plan['id']
   period: 'yearly' | 'quarterly'
   validTill: string
+  /** On the free trial a new studio starts with; `validTill` is when it ends. */
+  trial?: boolean
   photosUsed: number
   photosLimit: number
   guestReserved: number
@@ -182,6 +184,8 @@ export interface Photo {
   tone: Tone
   /** Object URL / CDN URL once a real file exists. */
   url?: string
+  /** A 2048 px copy for showing in grids and the viewer (made at upload); absent on older photos. Use `displayUrl`. */
+  webUrl?: string
   /** `failed`: the file couldn't be processed (unsupported or corrupt); delete it or upload it again. */
   status: 'ready' | 'processing' | 'failed'
   hidden: boolean

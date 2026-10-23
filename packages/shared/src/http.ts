@@ -162,6 +162,12 @@ export interface HttpApiOptions {
   onUploadProgress?: (p: UploadProgress) => void
   /** Files uploaded in parallel (default 3). */
   uploadConcurrency?: number
+  /**
+   * Makes the 2048 px JPEG web copy of a photo file (browser canvas), or null when it can't. When given, studio
+   * uploads send each photo's web copy after the photo is created (PUT /v1/photos/:id/web), so galleries load
+   * that instead of the original even without the image processor.
+   */
+  makeWebCopy?: (file: Blob) => Promise<Blob | null>
   /** Where guest (gallery) session tokens are kept, per event short id. Defaults to memory. */
   guestTokens?: GuestTokenStore
   /**
@@ -256,7 +262,8 @@ const absolutizeMedia = (_key: string, value: unknown) =>
 const LOCAL_URL = /^(blob|file|content|ph|assets-library|data):/i
 
 const STUDIO_KEYS = ['name', 'handle', 'logoUrl', 'brandColor', 'phone', 'email', 'website', 'instagram', 'city', 'about'] as const
-const EVENT_KEYS = ['shortId', 'name', 'type', 'date', 'endDate', 'city', 'status', 'photoLimit', 'expiresAt', 'coverTones', 'hosts', 'highlights', 'plan'] as const
+// Not photoLimit, expiresAt or plan: those change only by paying (packs, renewals, plans), never by an edit.
+const EVENT_KEYS = ['shortId', 'name', 'type', 'date', 'endDate', 'city', 'status', 'coverTones', 'hosts', 'highlights'] as const
 const QR_KEYS = ['name', 'slug', 'eventId', 'target', 'color', 'scheduledEventId', 'scheduledAt', 'dotStyle', 'logoUrl'] as const
 const STUDIO_PROFILE_KEYS = ['coverUrl', 'studioType', 'referralSource', 'services', 'testimonials', 'faq', 'socialLinks', 'portfolioLinks', 'app', 'billing'] as const
 const WATERMARK_KEYS = ['mode', 'text', 'subtitle', 'position', 'size', 'opacity', 'font', 'applyTo', 'logoUrl', 'edgeOffset'] as const
@@ -470,7 +477,11 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
       },
     })
     const results: { photoId: string; parts: { partNumber: number; etag: string }[] }[] = []
+    // Studio uploads only: the web copy is made while the files upload and sent once the photos exist.
+    const makeWebCopy = t.guest === undefined ? options.makeWebCopy : undefined
+    const webCopies = new Map<string, Blob>()
     const queue = session.files.map((sf, i) => ({ sf, blob: blobs[i] }))
+    const pool = (n: number, run: () => Promise<void>) => Promise.all(Array.from({ length: Math.max(1, n) }, run))
     const worker = async () => {
       for (let item = queue.shift(); item; item = queue.shift()) {
         const { sf, blob } = item
@@ -483,15 +494,27 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
             loaded += slice.size
             options.onUploadProgress?.({ photoId: sf.photoId, filename: sf.filename, loaded, total: blob.size })
           }
+          if (makeWebCopy) {
+            const copy = await makeWebCopy(blob).catch(() => null)
+            if (copy) webCopies.set(sf.photoId, copy)
+          }
         }
         results.push({ photoId: sf.photoId, parts })
       }
     }
-    await Promise.all(Array.from({ length: Math.max(1, options.uploadConcurrency ?? 3) }, worker))
+    await pool(options.uploadConcurrency ?? 3, worker)
     const order = new Map(session.files.map((f, i) => [f.photoId, i]))
     results.sort((a, b) => order.get(a.photoId)! - order.get(b.photoId)!)
     const done = await request<{ items: Photo[] }>('POST', t.complete(session.uploadId), {
       idempotent: true, guest: t.guest, body: { files: results },
+    })
+    // Best effort: a photo without a web copy still works, galleries just load the original.
+    const sends = [...webCopies]
+    await pool(options.uploadConcurrency ?? 3, async () => {
+      for (let next = sends.shift(); next; next = sends.shift()) {
+        const [photoId, copy] = next
+        await request<void>('PUT', `/v1/photos/${enc(photoId)}/web`, { raw: { body: copy, contentType: 'image/jpeg' } }).catch(() => undefined)
+      }
     })
     return done.items
   }

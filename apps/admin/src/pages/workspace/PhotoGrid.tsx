@@ -1,6 +1,6 @@
 import { useRef, type MouseEvent, type PointerEvent } from 'react'
 import { Check, Heart } from 'lucide-react'
-import type { Photo } from '@frameline/shared'
+import { displayUrl, type Photo } from '@frameline/shared'
 import { PhotoTile, cn } from '@frameline/ui'
 import { liveUrl } from './lib'
 
@@ -46,7 +46,7 @@ function Tile({ photo, index, selected, selecting, onToggle, onOpen }: { photo: 
 
   return (
     <div className="group/tile relative" onContextMenu={(e) => { if (press.current.fired) e.preventDefault() }}>
-      <PhotoTile tone={photo.tone} url={liveUrl(photo.url)} rotation={photo.rotation} selected={selected} processing={processing} hidden={photo.hidden} alt={photo.filename}
+      <PhotoTile tone={photo.tone} url={liveUrl(displayUrl(photo))} rotation={photo.rotation} selected={selected} processing={processing} hidden={photo.hidden} alt={photo.filename}
         rounded="rounded-[8px]" className="max-sm:!aspect-square max-sm:rounded-[4px]" />
       {photo.status === 'failed' && (
         <span className="pointer-events-none absolute left-1.5 top-1.5 z-[5] rounded bg-bad px-1.5 py-0.5 text-[9.5px] font-bold text-white" title="This file couldn’t be processed. Delete it or upload it again.">Couldn’t process</span>

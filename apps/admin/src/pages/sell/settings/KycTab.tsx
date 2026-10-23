@@ -3,7 +3,8 @@ import { Download, FileText, Upload } from 'lucide-react'
 import { Button, Card, Chip, Field, Input, Segmented, Select, useToast } from '@frameline/ui'
 import { downloadFile, INDIAN_STATES } from '../../wallet/lib'
 import { assetAccept, assetErrorMessage, assetProblem } from '../../wallet/assets'
-import { useApi } from '../../../lib/api'
+import type { Seller } from '@frameline/shared'
+import { useApi, useServerFeatures } from '../../../lib/api'
 import type { DocId, DocStatus, TabProps } from './model'
 
 const DOCS: { id: DocId; label: string; hint: string }[] = [
@@ -16,14 +17,15 @@ const STATUS: Record<DocStatus, { label: string; tone: 'ok' | 'accent' | 'warn' 
   verified: { label: 'Verified', tone: 'ok' }, review: { label: 'In review', tone: 'accent' }, needed: { label: 'Needed', tone: 'warn' },
 }
 
-function declarationLetter(name: string, pan: string, address: string) {
+/** Addressed to the invoicing company when the server has one (SELLER_NAME), else to "Frameline" (no made-up company). */
+function declarationLetter(name: string, pan: string, address: string, seller?: Seller) {
   const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
   return `GST NON-REGISTRATION DECLARATION
 
 Date: ${today}
 
 To,
-Frameline Technologies Pvt. Ltd.
+${seller ? `${seller.name}${seller.address ? `\n${seller.address}` : ''}` : 'Frameline (the photo gallery service)'}
 
 Subject: Declaration that we are not registered under the Goods and Services Tax Act, 2017
 
@@ -51,6 +53,7 @@ export function KycTab({ data, set, errors }: TabProps) {
   const k = data.kyc
   const toast = useToast()
   const api = useApi()
+  const { seller } = useServerFeatures()
   const [uploading, setUploading] = useState<DocId | null>(null)
   const inputs = useRef<Partial<Record<DocId, HTMLInputElement | null>>>({})
   const [docError, setDocError] = useState<Partial<Record<DocId, string>>>({})
@@ -96,7 +99,7 @@ export function KycTab({ data, set, errors }: TabProps) {
         ) : (
           <div className="rounded-control border border-dashed border-line-2 bg-sunk p-3 text-[12.5px] text-ink-2">
             Not registered? Download the declaration letter, sign it, and upload it as your GST document below.
-            <div className="mt-2"><Button size="sm" icon={<Download size={13} />} onClick={() => downloadFile('gst-declaration-letter.txt', declarationLetter(k.legalName, k.pan, address))}>Download declaration letter template</Button></div>
+            <div className="mt-2"><Button size="sm" icon={<Download size={13} />} onClick={() => downloadFile('gst-declaration-letter.txt', declarationLetter(k.legalName, k.pan, address, seller))}>Download declaration letter template</Button></div>
           </div>
         )}
 

@@ -14,7 +14,8 @@ import { STUDIO_AUTOPILOT } from './partner'
  * changed and why; Studio AutoPilot reads the gallery back through its own signed API, so nothing in a notice
  * is trusted beyond "go and look". A failed call is retried with backoff and dropped after MAX_ATTEMPTS.
  */
-export type NoticeReason = 'photos' | 'pin' | 'settings'
+/** status: archived, restored, moved to the trash or deleted for good (Studio AutoPilot then reads it back, or gets a 404). */
+export type NoticeReason = 'photos' | 'pin' | 'settings' | 'status'
 
 const PREFIX = 'sa-out:'
 const PHOTO_QUIET_SEC = 120

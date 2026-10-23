@@ -16,11 +16,11 @@ function HandleChip({ status }: { status: HandleStatus }) {
 }
 
 const handleHint: Record<HandleStatus, string> = {
-  empty: 'Guests see this in every gallery link.',
+  empty: 'A short name for your studio. Photos guests download are named with it.',
   invalid: 'Use 3–40 lowercase letters, numbers or hyphens.',
-  checking: 'Guests see this in every gallery link.',
-  available: 'Guests see this in every gallery link.',
-  taken: 'Someone already has this address. Try adding your city, like northlight-pune.',
+  checking: 'A short name for your studio. Photos guests download are named with it.',
+  available: 'A short name for your studio. Photos guests download are named with it.',
+  taken: 'Someone already has this handle. Try adding your city, like northlight-pune.',
 }
 
 export function StepBrand({ draft, patch, handleStatus, onError }: {
@@ -91,10 +91,10 @@ export function StepBrand({ draft, patch, handleStatus, onError }: {
         </div>
       </div>
 
-      <Field label="Gallery address" htmlFor="st-handle" error={handleStatus === 'taken' || handleStatus === 'invalid' ? handleHint[handleStatus] : undefined} hint={handleHint[handleStatus]}>
+      <Field label="Studio handle" htmlFor="st-handle" error={handleStatus === 'taken' || handleStatus === 'invalid' ? handleHint[handleStatus] : undefined} hint={handleHint[handleStatus]}>
         <Input id="st-handle" value={draft.handle} spellCheck={false} autoCapitalize="none" className="h-[42px]" aria-invalid={handleStatus === 'taken' || handleStatus === 'invalid' || undefined}
           onChange={(e) => patch({ handle: e.target.value.toLowerCase().replace(/\s+/g, '-') })}
-          suffix={<span className="flex shrink-0 items-center gap-2"><span className="text-[13px] text-ink-3 max-[400px]:hidden">.frameline.in</span><HandleChip status={handleStatus} /></span>} />
+          suffix={<HandleChip status={handleStatus} />} />
       </Field>
 
       <Field label="Phone for guests to call" htmlFor="st-phone" hint="Optional. Guests see a call button in your galleries.">

@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react'
 import { CheckCircle2, Download } from 'lucide-react'
 import { fmt, PACKS, type PhotoEvent, type Plan, type PlanChange, type Usage } from '@frameline/shared'
 import { Button, Field, Modal, RadioCardGroup, Select, useToast } from '@frameline/ui'
-import { useApi } from '../../lib/api'
+import { useApi, useServerFeatures } from '../../lib/api'
 import { useAction, useEvents } from '../../lib/queries'
 import { round2, type Billing } from '../wallet/lib'
 import { BillingForm, validateBilling } from '../settings/BillingForm'
 import { useBilling } from '../settings/billing'
-import { downloadInvoice } from '../settings/invoices'
+import { downloadInvoice, INVOICES_SOON } from '../settings/invoices'
 import { PayMethods, type PayWith } from './PlanModals'
 import { GST_RATE, planChangeQuote, type Period } from './usePlanState'
 
@@ -81,12 +81,13 @@ export function CheckoutModal({ target, period, usage, wallet, onClose, onPaid }
 export function PaidModal({ result, plan, onClose }: { result: PlanChange | null; plan: Plan | null; onClose: () => void }) {
   const toast = useToast()
   const { billing } = useBilling()
+  const { seller } = useServerFeatures()
   if (!result || !plan) return null
   const p = result.purchase
   return (
     <Modal open onOpenChange={(v) => !v && onClose()} title={`You’re on ${plan.name}`} width={460}
       footer={<>
-        {p && <Button variant="ghost" icon={<Download size={14} />} disabled={!billing} onClick={() => { downloadInvoice(p, billing!); toast.success('Invoice downloaded', 'Open it and print to PDF if you need a PDF.') }}>Download invoice</Button>}
+        {p && seller && <Button variant="ghost" icon={<Download size={14} />} disabled={!billing} onClick={() => { downloadInvoice(p, billing!, seller); toast.success('Invoice downloaded', 'Open it and print to PDF if you need a PDF.') }}>Download invoice</Button>}
         <Button variant="primary" onClick={onClose}>Done</Button>
       </>}>
       <div className="flex items-start gap-3.5">
@@ -96,7 +97,7 @@ export function PaidModal({ result, plan, onClose }: { result: PlanChange | null
           {' '}{result.total > 0
             ? <>You paid <b className="text-ink tnum">{fmt.rupees(result.total, true)}</b> ({fmt.rupees(result.charged, true)} + GST {fmt.rupees(result.gst, true)}){result.payWith === 'wallet' ? ' from your wallet' : result.payWith === 'upi' ? ' by UPI' : ' by card'}.</>
             : 'Nothing to pay: your unused time covered it.'}
-          {p ? ' Your invoice is in Settings → Invoices, and we’ve emailed it.' : ''}
+          {p ? (seller ? ' Your invoice is in Settings → Invoices.' : ` ${INVOICES_SOON}`) : ''}
         </p>
       </div>
     </Modal>

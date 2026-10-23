@@ -7,6 +7,10 @@
  * - aiEnhance: took ₹8 from the wallet; the processor has no enhance step.
  * - cameraSync: issued FTP logins for an FTP server that doesn't exist.
  * - broadcasts: marked messages "sent"; nothing was delivered.
+ * - guestNotify: the gallery's "Notify me" took a phone number; the sender (apps/api services/notify.ts) only logs
+ *   (no SMS/WhatsApp yet).
+ * - reminderEmails: Settings → Notifications offered event-expiry and plan reminders and a weekly summary; nothing
+ *   sends them. (What does go out by email: sign-in codes, team and host invites, ZIP links, order emails.)
  */
 export interface Features {
   /** Website builder, custom domain and the Enquiries inbox (admin), plus the guest "Enquire" entry points that feed it. */
@@ -15,6 +19,8 @@ export interface Features {
   aiEnhance: boolean
   cameraSync: boolean
   broadcasts: boolean
+  guestNotify: boolean
+  reminderEmails: boolean
 }
 
 export const FEATURES: Readonly<Features> = {
@@ -23,6 +29,8 @@ export const FEATURES: Readonly<Features> = {
   aiEnhance: false,
   cameraSync: false,
   broadcasts: false,
+  guestNotify: false,
+  reminderEmails: false,
 }
 
 /**
@@ -32,26 +40,35 @@ export const FEATURES: Readonly<Features> = {
  */
 export interface ServerFeatures {
   ai: boolean
+  /** Card/UPI payments work (Razorpay keys set). Off: selling, payouts and card top-ups are hidden. */
+  payments: boolean
   /** Support's WhatsApp number (SUPPORT_WHATSAPP), when there is one: the Help page shows a chat link. */
   supportWhatsapp?: string
   /** Where Book a call goes (SUPPORT_CALL_URL), when there is one. */
   supportCallUrl?: string
+  /** The company on GST invoices (SELLER_NAME, SELLER_GSTIN, SELLER_ADDRESS). Unset: no invoices yet. */
+  seller?: Seller
 }
 
-/** Sample data (no API URL) shows everything; a server that can't be asked is treated as AI off, the safe side. */
+export interface Seller { name: string; gstin: string; address?: string }
+
+/** Sample data (no API URL) shows everything; a server that can't be asked is treated as switched off, the safe side. */
 export async function fetchServerFeatures(apiUrl: string | undefined): Promise<ServerFeatures> {
-  if (!apiUrl) return { ai: true }
+  if (!apiUrl) return { ai: true, payments: true }
   try {
     const res = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/meta`)
     const body = (await res.json()) as { features?: Partial<ServerFeatures> }
     const wa = body.features?.supportWhatsapp
     const call = body.features?.supportCallUrl
+    const seller = body.features?.seller
     return {
       ai: body.features?.ai === true,
+      payments: body.features?.payments === true,
       ...(typeof wa === 'string' && wa ? { supportWhatsapp: wa } : {}),
       ...(typeof call === 'string' && /^https:\/\//.test(call) ? { supportCallUrl: call } : {}),
+      ...(seller && typeof seller.name === 'string' && typeof seller.gstin === 'string' ? { seller } : {}),
     }
   } catch {
-    return { ai: false }
+    return { ai: false, payments: false }
   }
 }

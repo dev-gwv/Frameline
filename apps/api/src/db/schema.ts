@@ -79,6 +79,8 @@ export const studios = sqliteTable('studios', {
   planId: text('plan_id', { enum: ['starter', 'studio', 'pro', 'agency'] }).notNull().default('starter'),
   planPeriod: text('plan_period', { enum: ['yearly', 'quarterly'] }).notNull().default('yearly'),
   validTill: ts('valid_till').notNull(),
+  /** On the free trial a new studio starts with (provisioning), until it first gets a plan; validTill is the trial's end. */
+  onTrial: bool('on_trial').notNull().default(false),
   photosUsed: integer('photos_used').notNull().default(0),
   photosLimit: integer('photos_limit').notNull().default(50_000),
   guestReserved: integer('guest_reserved').notNull().default(0),
@@ -234,6 +236,11 @@ export const photos = sqliteTable('photos', {
    * photoCount/quota (see recountStatements) — never exposed in the API's Photo shape, like r2Key.
    */
   copiedFrom: text('copied_from'),
+  /**
+   * A 2048 px JPEG of this photo is stored next to the original (…/renditions/2048.jpg): made by the studio's
+   * browser at upload (PUT /photos/{id}/web) or by the processor. Galleries show it instead of the original.
+   */
+  webCopy: bool('web_copy').notNull().default(false),
 }, (t) => [
   index('photos_deleted_idx').on(t.deletedAt),
   index('photos_r2key_idx').on(t.r2Key),

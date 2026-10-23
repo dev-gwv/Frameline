@@ -44,6 +44,7 @@ export function usageOut(r: Row<typeof s.studios>): Usage {
   return {
     planId: r.planId, period: r.planPeriod, validTill: r.validTill, photosUsed: r.photosUsed, photosLimit: r.photosLimit,
     guestReserved: r.guestReserved, walletCredits: toMajor(r.walletPaise), renewalMultiplier: r.renewalMultiplier,
+    ...(r.onTrial ? { trial: true } : {}),
   }
 }
 
@@ -66,14 +67,27 @@ export function albumOut(r: Row<typeof s.albums>): Album {
   }
 }
 
+/** Where a photo's 2048 px web copy is stored, next to the original (also the processor's download rendition). */
+export const webCopyKey = (r2Key: string) => r2Key.replace(/\/[^/]+$/, '/renditions/2048.jpg')
+
 export function photoOut(r: Row<typeof s.photos>, mediaBase?: string): Photo {
   const url = r.url ?? (r.r2Key && r.status === 'ready' ? mediaUrl(r.r2Key, mediaBase) : undefined)
+  const webUrl = r.webCopy && r.r2Key && !r.url && r.status === 'ready' ? mediaUrl(webCopyKey(r.r2Key), mediaBase) : undefined
   return {
     id: r.id, eventId: r.eventId, albumId: r.albumId, filename: r.filename, index: r.index, capturedAt: r.capturedAt, tone: r.tone,
-    url, status: r.status, hidden: r.hidden, favourites: r.favourites, downloads: r.downloads, faces: r.faces, exif: r.exif,
+    url, ...(webUrl ? { webUrl } : {}), status: r.status, hidden: r.hidden, favourites: r.favourites, downloads: r.downloads, faces: r.faces, exif: r.exif,
     uploadedBy: r.uploadedBy, source: r.source, reviewStatus: opt(r.reviewStatus), enhancedFrom: opt(r.enhancedFrom),
     quality: r.quality, views: r.views, rotation: addRotation(r.rotation, 0), deletedAt: opt(r.deletedAt),
   }
+}
+
+/**
+ * A photo as guests get it. With a web copy, guests are given only that (grid, viewer and web-size downloads all
+ * use it) unless the gallery offers full-size downloads; then `url` stays the original for those.
+ */
+export function guestPhotoOut(r: Row<typeof s.photos>, mediaBase: string | undefined, fullSize: boolean): Photo {
+  const out = photoOut(r, mediaBase)
+  return out.webUrl && !fullSize ? { ...out, url: out.webUrl } : out
 }
 
 /** Public URL for an R2 object: CDN base in production, the Worker's /v1/media route in dev. */

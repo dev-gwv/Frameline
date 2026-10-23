@@ -4,7 +4,8 @@ import { BASE_RENEWAL, PACKS, RENEWAL_CREDIT_DISCOUNT, TRASH_DAYS, selfieHasNoFa
 import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
 import { accessRequestOut, eventOut, filmOut, guestOut, personOut } from '../db/mappers'
-import { Conflict, NotFound, ValidationFailed } from '../lib/errors'
+import { Conflict, Forbidden, NotFound, ValidationFailed } from '../lib/errors'
+import { aiOn } from '../lib/features'
 import { newId, nowIso } from '../lib/ids'
 import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, problems, security } from '../lib/openapi'
 import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
@@ -89,7 +90,7 @@ eventRoutes.openapi(createRoute({
     if (taken) throw new Conflict(`The gallery code ${patch.shortId} is already used. Try another.`, 'short_id_taken')
   }
   const norm = { ...patch }
-  for (const k of ['date', 'endDate', 'expiresAt'] as const) if (norm[k]) norm[k] = new Date(norm[k]!).toISOString()
+  for (const k of ['date', 'endDate'] as const) if (norm[k]) norm[k] = new Date(norm[k]!).toISOString()
   let invited: Host[] = []
   if (patch.hosts) {
     // Clients may add/remove hosts and change `access`; `status` and `invitedAt` stay server-owned.
@@ -106,6 +107,8 @@ eventRoutes.openapi(createRoute({
   if (Object.keys(norm).length) await db.update(schema.events).set(norm).where(eq(schema.events.id, ev.id)).run()
   if (invited.length) await inviteHosts(c.env, ev, invited).catch(() => undefined)
   audit(c, 'event.update', { type: 'event', id: ev.id }, { fields: Object.keys(patch) })
+  // Archived or back: Studio AutoPilot shows the gallery's state, so tell it.
+  if (patch.status && patch.status !== ev.status) background(c, queuePartnerNotice(c.env, ev.id, 'status'))
   emit(c, m.studioId, 'events')
   return c.json(eventOut(await eventForMember(db, m, ev.id)), 200)
 })
@@ -183,7 +186,10 @@ eventRoutes.openapi(createRoute({
   return c.body(null, 204)
 })
 
-/** Tells new hosts about the event: email when there is one, else a (simulated) SMS/WhatsApp log line. */
+/**
+ * Tells new hosts about the event by email. A host with only a phone number gets a log line: there is no
+ * SMS/WhatsApp sender yet, so the studio app asks for an email (event-settings/HostModal.tsx).
+ */
 async function inviteHosts(env: Env, ev: typeof schema.events.$inferSelect, hosts: Host[]) {
   const link = `${env.GALLERY_URL.replace(/\/$/, '')}/${ev.shortId.toLowerCase()}`
   for (const h of hosts) {
@@ -234,6 +240,8 @@ eventRoutes.openapi(createRoute({
   if (permanent) {
     const trashed = await eventForMember(db, m, c.req.valid('param').id, { includeDeleted: true })
     if (!trashed.deletedAt) throw new Conflict('Move the event to the trash first; only trashed events can be deleted for good.', 'not_in_trash')
+    // Queued before the purge removes the Studio AutoPilot link it is looked up by.
+    await queuePartnerNotice(c.env, trashed.id, 'status')
     await purgeEvent(c.env, m.studioId, trashed.id)
     audit(c, 'event.purge', { type: 'event', id: trashed.id }, { name: trashed.name })
     emit(c, m.studioId, 'events', 'misc')
@@ -242,6 +250,7 @@ eventRoutes.openapi(createRoute({
   const ev = await eventForMember(db, m, c.req.valid('param').id)
   await db.update(schema.events).set({ deletedAt: nowIso() }).where(eq(schema.events.id, ev.id)).run()
   audit(c, 'event.trash', { type: 'event', id: ev.id }, { name: ev.name })
+  background(c, queuePartnerNotice(c.env, ev.id, 'status'))
   emit(c, m.studioId, 'events', 'albums', 'photos', 'misc')
   return c.body(null, 204)
 })
@@ -574,6 +583,7 @@ eventRoutes.openapi(createRoute({
   if (!ev.deletedAt) throw new Conflict('This event isn’t in the trash.', 'not_deleted')
   await db.update(schema.events).set({ deletedAt: null }).where(eq(schema.events.id, ev.id)).run()
   audit(c, 'event.restore', { type: 'event', id: ev.id })
+  background(c, queuePartnerNotice(c.env, ev.id, 'status'))
   emit(c, m.studioId, 'events', 'albums', 'photos')
   return c.json(eventOut(await eventForMember(db, m, ev.id)), 200)
 })
@@ -627,6 +637,8 @@ eventRoutes.openapi(createRoute({
 }), async (c) => {
   const m = membershipOf(c)
   const ev = await eventForMember(getDb(c.env.DB), m, c.req.valid('param').id)
+  // Same answer as the guest selfie search while the AI features are off (no processor, no faces to match).
+  if (!aiOn(c.env)) throw new Forbidden('Face search is turned off.', 'face_search_disabled')
   const input = c.req.valid('json')
   if (selfieHasNoFace(input)) return c.json({ faceFound: false, reason: 'no_face' as const, personId: null, photoIds: [] }, 200)
   return c.json({ faceFound: true, ...(await matchFaces(c.env, ev.id, input.key, input.embedding, input.minScore)) }, 200)

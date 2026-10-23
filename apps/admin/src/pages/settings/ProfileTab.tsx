@@ -91,7 +91,7 @@ function ProfileForm({ studio }: { studio: Studio }) {
           <h3 className="font-sans text-[15px] font-extrabold">Studio and contact</h3>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Studio name" error={show('name')} htmlFor="p-name"><Input id="p-name" value={form.name} onChange={(e) => set({ name: e.target.value })} /></Field>
-            <Field label="Handle" error={show('handle')} hint={`${form.handle || 'yourname'}.frameline.in`} htmlFor="p-handle">
+            <Field label="Handle" error={show('handle')} hint="A short name for your studio. Photos guests download are named with it." htmlFor="p-handle">
               <Input id="p-handle" value={form.handle} onChange={(e) => set({ handle: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })} />
             </Field>
           </div>

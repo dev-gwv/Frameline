@@ -154,8 +154,8 @@ export function SignInForm({ onDone, onGoogle, googleBusy, expired, googleError,
       </div>
       {auth.mode === 'demo' && usePassword && <p className="rounded-control bg-sunk px-3 py-1.5 text-[12px] text-ink-2">Sample data: any password with 6 or more characters works.</p>}
       <p className="mt-2 text-[12px] text-ink-3">
-        By continuing you agree to the <a className="underline hover:text-ink" href="https://frameline.in/terms" target="_blank" rel="noreferrer">Terms of Use</a> and{' '}
-        <a className="underline hover:text-ink" href="https://frameline.in/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.
+        By continuing you agree to the <a className="underline hover:text-ink" href="/terms" target="_blank" rel="noreferrer">Terms of Use</a> and{' '}
+        <a className="underline hover:text-ink" href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.
       </p>
     </form>
   )

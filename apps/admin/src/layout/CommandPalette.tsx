@@ -4,8 +4,9 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { CalendarDays, Plus, RefreshCcw, Search, Share2, Upload, UserPlus, Users, Zap } from 'lucide-react'
 import { fmt, NEEDS_YOU_EXPIRY_DAYS, type PhotoEvent } from '@frameline/shared'
 import { cn } from '@frameline/ui'
-import { ALL_PAGES } from './nav'
+import { ALL_PAGES, withSelling } from './nav'
 import { useEvents } from '../lib/queries'
+import { useServerFeatures } from '../lib/api'
 
 type Group = 'Events' | 'Actions' | 'Pages'
 interface Cmd { id: string; group: Group; label: string; sub?: string; icon: ReactNode; to: string; keywords: string }
@@ -25,6 +26,7 @@ const statusWord = (e: PhotoEvent, days: number) =>
 export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const navigate = useNavigate()
   const events = useEvents().data
+  const { payments } = useServerFeatures()
   const [q, setQ] = useState('')
   const [active, setActive] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
@@ -44,7 +46,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
       ...expiring.map((e): Cmd => ({ id: `renew-${e.id}`, group: 'Actions', label: `Renew ${e.name}`, sub: statusWord(e, days(e)), icon: <Zap size={16} />, to: `/plan?renew=${e.id}`, keywords: `renew extend expire ${e.shortId}` })),
       { id: 'invite', group: 'Actions', label: 'Invite someone to your team', icon: <UserPlus size={16} />, to: '/settings/team?invite=1', keywords: 'team member add editor uploader second shooter' },
     ]
-    const pages: Cmd[] = ALL_PAGES.map((p) => ({ id: `page-${p.to}`, group: 'Pages', label: p.label, sub: p.description, icon: <p.icon size={16} />, to: p.to, keywords: p.keywords ?? '' }))
+    const pages: Cmd[] = withSelling(ALL_PAGES, payments).map((p) => ({ id: `page-${p.to}`, group: 'Pages', label: p.label, sub: p.description, icon: <p.icon size={16} />, to: p.to, keywords: p.keywords ?? '' }))
     // Actions for one event, offered when the query matches it.
     const perEvent = (e: PhotoEvent): Cmd[] => [
       ...(expiring.includes(e) ? [] : e.status !== 'archived' && days(e) <= 60 ? [{ id: `renew-${e.id}`, group: 'Actions' as const, label: `Renew ${e.name}`, icon: <RefreshCcw size={16} />, to: `/plan?renew=${e.id}`, keywords: '' }] : []),
@@ -53,7 +55,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
       { id: `guests-${e.id}`, group: 'Actions', label: `Guests of ${e.name}`, icon: <Users size={16} />, to: `/events/${e.id}/guests`, keywords: '' },
     ]
     return { base: { eventCmds, actions, pages, list }, perEvent }
-  }, [events])
+  }, [events, payments])
 
   const results = useMemo(() => {
     const t = q.trim().toLowerCase()

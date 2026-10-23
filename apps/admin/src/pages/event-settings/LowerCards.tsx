@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Droplet, MoreHorizontal, Palette, Plus, ShoppingBag, Tag, Trash2, Upload, UserCog } from 'lucide-react'
 import { fmt, type EventHost, type HostAccess } from '@frameline/shared'
 import { Avatar, Button, Chip, ConfirmDialog, Meter, Modal, SettingRow, Skeleton, Toggle, Menu, useToast } from '@frameline/ui'
-import { errorMessage, useApi } from '../../lib/api'
+import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { usePrices, useStoreSettings } from '../../lib/queries'
 import { PriceRows, pricesValid } from '../sell/Prices'
 import { AddHostModal } from './HostModal'
@@ -33,6 +33,16 @@ export function SellingCard({ event, set }: CardProps) {
   const store = useStoreSettings()
   const s = event.settings
   const ready = !!store.data?.payout.verified
+  const { payments } = useServerFeatures()
+  if (!payments) return (
+    <SettingsCard id="selling" title="Selling">
+      <SettingRow
+        icon={<ShoppingBag size={15} />} title="Sell photos from this event"
+        description="Not switched on yet: guests can’t pay by card or UPI, so nothing is for sale."
+        control={s.storeEnabled ? <Toggle label="Sell photos from this event" checked onCheckedChange={(v) => !v && set({ storeEnabled: false })} /> : undefined}
+      />
+    </SettingsCard>
+  )
   return (
     <SettingsCard id="selling" title="Selling">
       {ready || s.storeEnabled ? (

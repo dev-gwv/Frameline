@@ -1,7 +1,7 @@
 import { ScanFace } from 'lucide-react'
 import { fmt, type PhotoEvent } from '@frameline/shared'
 import { Button, Meter, Modal } from '@frameline/ui'
-import { useApi } from '../../lib/api'
+import { useApi, useServerFeatures } from '../../lib/api'
 import { useAction, useAlbums, useEventStats, usePeople } from '../../lib/queries'
 import { useModalParam } from '../../lib/url'
 import { FilmsModal } from './FilmsModal'
@@ -18,6 +18,8 @@ export function EventModals({ event }: { event: PhotoEvent }) {
   const albums = useAlbums(event.id).data ?? []
   const is = (name: string) => m.modal === name
   const albumId = m.params.get('album') ?? undefined
+  // Face finding needs the image processor: no modal while the AI features are off, even from an old link.
+  const { ai } = useServerFeatures()
 
   return (
     <>
@@ -26,7 +28,7 @@ export function EventModals({ event }: { event: PhotoEvent }) {
       <UploadModal open={is('upload')} onOpenChange={(v) => !v && m.close()} event={event} albums={albums} albumId={albumId} />
       <ImportModal open={is('import')} onOpenChange={(v) => !v && m.close()} event={event} albums={albums} />
       <FilmsModal eventId={event.id} open={is('films')} onOpenChange={(v) => !v && m.close()} />
-      <FacesModal event={event} open={is('faces')} onOpenChange={(v) => !v && m.close()} />
+      <FacesModal event={event} open={ai && is('faces')} onOpenChange={(v) => !v && m.close()} />
     </>
   )
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { ArrowUpDown, CalendarPlus, Check, ChevronDown, Plus, Search, SearchX } from 'lucide-react'
 import { Button, EmptyState, Input, Menu, Page, TabBar } from '@frameline/ui'
+import { useServerFeatures } from '../../lib/api'
 import { useDeletedEvents, useEvents } from '../../lib/queries'
 import { useParamState } from '../../lib/url'
 import { QueryError } from '../system'
@@ -19,6 +20,7 @@ export default function Events() {
   const deleted = useDeletedEvents()
   const list = useMemo(() => events.data ?? [], [events.data])
   const { actions, dialogs } = useEventActions(list)
+  const { ai } = useServerFeatures()
 
   // Old links used ?status=…; keep them working.
   useEffect(() => { const old = params.get('status'); if (old) set({ status: undefined, f: old }, true) }, [params, set])
@@ -64,7 +66,7 @@ export default function Events() {
         <div className={GRID} aria-busy="true" aria-label="Loading events">{Array.from({ length: 8 }, (_, i) => <EventCardSkeleton key={i} />)}</div>
       ) : list.length === 0 ? (
         <EmptyState icon={<CalendarPlus size={24} />} title="Create your first event"
-          body="An event is one gallery with one link. Upload photos, share the link, and guests find themselves with a selfie."
+          body={`An event is one gallery with one link. Upload photos, share the link, and guests ${ai ? 'find themselves with a selfie' : 'open it with the PIN'}.`}
           action={<Button variant="primary" icon={<Plus size={15} />} onClick={newEvent}>New event</Button>} />
       ) : shown.length === 0 ? (
         <EmptyState icon={<SearchX size={24} />} title="No events match"

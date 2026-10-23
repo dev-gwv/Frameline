@@ -30,7 +30,7 @@ export function WithdrawModal({ open, onOpenChange, wallet, settings, onDone }: 
 
   const withdraw = useAction((v: number) => api.requestPayout(v), {
     errorToast: false,
-    success: (e) => `${fmt.rupees(-e.amount, true)} is on its way · arrives in 1–2 working days`,
+    success: (e) => `Payout of ${fmt.rupees(-e.amount, true)} requested`,
     onSuccess: () => { onOpenChange(false); onDone() },
     onError: (err) => setServerError(err instanceof ApiError && err.code === 'payout_account_unverified' ? 'Your account isn’t verified yet. Check it in Selling settings first.' : errorMessage(err)),
   })
@@ -66,7 +66,7 @@ export function WithdrawModal({ open, onOpenChange, wallet, settings, onDone }: 
             : 'Add the bank account your money should go to.'}
         </p>
       )}
-      {verified && <p className="text-[13px] text-ink-3">Arrives in 1–2 working days.{heldBack > 0 ? ` The other ${fmt.rupees(heldBack, true)} in your wallet is money you added; it pays for packs, renewals and AI enhance.` : ''}</p>}
+      {verified && <p className="text-[13px] text-ink-3">Payouts aren’t automatic yet: our team sends each one by bank transfer, and it shows under Payouts.{heldBack > 0 ? ` The other ${fmt.rupees(heldBack, true)} in your wallet is money you added; it pays for packs and renewals.` : ''}</p>}
     </Modal>
   )
 }

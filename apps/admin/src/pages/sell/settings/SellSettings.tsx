@@ -3,13 +3,14 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Navigate, useParams } from 'react-router-dom'
 import type { StoreSettings, StoreSettingsPatch } from '@frameline/shared'
 import { Button, Page, Skeleton, useToast } from '@frameline/ui'
-import { useApi } from '../../../lib/api'
+import { useApi, useServerFeatures } from '../../../lib/api'
 import { useAction, useEvents, useStoreSettings } from '../../../lib/queries'
 import { BackLink } from '../../../lib/url'
 import { QueryError } from '../../system'
 import { SideList } from '../../settings/SideList'
 import { payoutState, setupState } from '../lib'
 import { DefaultPrices } from '../Prices'
+import { SellingOff } from '../Sell'
 import { apiFieldErrors, fromApi, toPatch, validate, type Errors, type StoreSettingsData, type TabId, type TabProps } from './model'
 import { KycTab } from './KycTab'
 import { PayoutsTab } from './PayoutsTab'
@@ -37,6 +38,8 @@ export default function SellSettings() {
   const events = useEvents()
   const saved = useMemo(() => (q.data ? fromApi(q.data) : null), [q.data])
   const tab = ALIASES[raw] ?? raw
+  const { payments } = useServerFeatures()
+  if (!payments) return <SellingOff />
   if (!TABS.some((t) => t.id === tab)) return <Navigate to="/sell/settings/business" replace />
   const setup = setupState(q.data, (events.data ?? []).filter((e) => e.settings.storeEnabled).length)
 

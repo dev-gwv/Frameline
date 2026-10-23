@@ -1,5 +1,5 @@
 import type { Env } from '../env'
-import { photoOut } from '../db/mappers'
+import { photoOut, webCopyKey } from '../db/mappers'
 import type { schema } from '../db/client'
 import { hmacSha256, timingSafeEqual, toBase64Url } from './crypto'
 
@@ -36,6 +36,7 @@ export async function studioPhotoOut(env: Env, r: PhotoRow) {
   const out = photoOut(r, env.PUBLIC_MEDIA_BASE)
   if (out.url && r.r2Key && !guestCanSee(r) && out.url.startsWith('/v1/media/')) {
     out.url = `${out.url}?${await signMediaKey(env.JWT_SECRET, r.r2Key)}`
+    if (out.webUrl) out.webUrl = `${out.webUrl}?${await signMediaKey(env.JWT_SECRET, webCopyKey(r.r2Key))}`
   }
   return out
 }

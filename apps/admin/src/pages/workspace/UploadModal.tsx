@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, ChevronDown, ChevronLeft, ImagePlus, Upload } from 'lucide-react'
 import { PACKS, fmt, type Album, type ID, type Photo, type PhotoEvent, type UploadFile } from '@frameline/shared'
 import { Button, Field, Meter, Modal, PhotoTile, RadioCardGroup, Select, Toggle, cn, useToast } from '@frameline/ui'
-import { errorMessage, useApi } from '../../lib/api'
+import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { useUsage, useWalletBalance, useWatermark } from '../../lib/queries'
 import { useUploads } from '../../layout/UploadDock'
 import { liveUrl, objectUrl, photosLabel } from './lib'
@@ -30,6 +30,7 @@ export function UploadModal({ open, onOpenChange, event, albums, albumId }: Prop
   const files = usePendingFiles()
   const usage = useUsage().data
   const wm = useWatermark().data
+  const { ai } = useServerFeatures()
   const regular = useMemo(() => albums.filter((a) => a.kind === 'album').sort((a, b) => a.order - b.order), [albums])
   const preset = regular.find((a) => a.id === albumId) ?? (regular.length === 1 ? regular[0] : undefined)
   const [target, setTarget] = useState<ID>('')
@@ -159,18 +160,23 @@ export function UploadModal({ open, onOpenChange, event, albums, albumId }: Prop
           )}
           {needsAlbum && <p className="text-[13px] text-ink-2">They go into an album called <b className="text-ink">{DEFAULT_ALBUM}</b>. Rename it or add more albums any time.</p>}
           <RadioCardGroup<'web' | 'original'> label="Quality" columns={2} value={quality} onChange={setQuality} options={[
-            { value: 'web', title: 'Standard', description: 'Resized for the web and watermarked. Counts as 1 photo.' },
-            { value: 'original', title: 'Original files', description: 'Full quality for download. Counts as 2 photos.' },
+            { value: 'web', title: 'Standard', description: 'Guests see a 2048 px web copy. Your file is kept as it is. Counts as 1 photo.' },
+            { value: 'original', title: 'Original files', description: 'For galleries that offer full-size downloads. Counts as 2 photos.' },
           ]} />
-          <div className="flex items-center gap-3 rounded-[10px] border border-line px-3 py-2.5">
-            <div className="min-w-0 flex-1">
-              <b className="text-[13.5px]">Add my watermark</b>
-              <div className="text-[12.5px] text-ink-2">
-                {wm ? `${wm.mode === 'logo' ? 'Your logo' : `© ${wm.text}`}, ${POS[wm.position] ?? 'bottom right'}` : 'Your studio watermark'} · <Link to="/watermark" className="font-bold text-accent-text hover:underline">Change</Link>
+          {/* Burning the watermark into a photo needs the image processor, which runs only with the AI features. */}
+          {ai ? (
+            <div className="flex items-center gap-3 rounded-[10px] border border-line px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <b className="text-[13.5px]">Add my watermark</b>
+                <div className="text-[12.5px] text-ink-2">
+                  {wm ? `${wm.mode === 'logo' ? 'Your logo' : `© ${wm.text}`}, ${POS[wm.position] ?? 'bottom right'}` : 'Your studio watermark'} · <Link to="/watermark" className="font-bold text-accent-text hover:underline">Change</Link>
+                </div>
               </div>
+              <Toggle label="Add my watermark" checked={watermark} onCheckedChange={setWatermark} />
             </div>
-            <Toggle label="Add my watermark" checked={watermark} onCheckedChange={setWatermark} />
-          </div>
+          ) : (
+            <p className="text-[12.5px] text-ink-2">Guest downloads carry your watermark as set on the <Link to="/watermark" className="font-bold text-accent-text hover:underline">Watermark</Link> page.</p>
+          )}
 
           {tooLarge.length > 0 && (
             <div className="flex items-start gap-2 rounded-[10px] bg-warn-soft px-3 py-2.5 text-[12.5px] text-warn">

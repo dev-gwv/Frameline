@@ -17,7 +17,7 @@ const PLATFORM_LABEL: Record<Ticket['platform'], string> = { admin: 'This websit
 
 /**
  * /support "Help": Book a call (the way to a person, owner 19 Oct; our booking app takes it from there), Ask a
- * question (the assistant answers in about a minute and hands over to Book a call), Guides and videos, and
+ * question (the assistant answers in about a minute and hands over to Book a call), Guides, and
  * WhatsApp when support has a number; then your requests. ?new=1, ?request=<id>, ?topic=<article>.
  */
 export default function Support() {
@@ -28,7 +28,7 @@ export default function Support() {
   const cards = [
     ...(supportCallUrl ? [{ icon: <CalendarClock size={16} />, title: 'Book a call', body: 'Talk to us at a time that suits you', cta: 'Book a call', onClick: () => window.open(supportCallUrl, '_blank', 'noopener') }] : []),
     { icon: <TicketIcon size={16} />, title: 'Ask a question', body: 'Our assistant answers in about a minute', cta: 'Ask', onClick: () => set({ new: '1' }) },
-    { icon: <PlayCircle size={16} />, title: 'Guides and videos', body: 'English and हिन्दी', cta: 'Browse', onClick: () => set({ topic: 'all' }) },
+    { icon: <PlayCircle size={16} />, title: 'Guides', body: 'Short answers to common questions', cta: 'Browse', onClick: () => set({ topic: 'all' }) },
     ...(supportWhatsapp ? [{ icon: <MessageCircle size={16} />, title: 'WhatsApp us', body: supportWhatsapp, cta: 'Open chat', onClick: () => window.open(waLink(supportWhatsapp), '_blank', 'noopener') }] : []),
   ]
   const list = tickets.data ?? []
@@ -102,7 +102,7 @@ function RequestModal({ open, onOpenChange, onCreated }: { open: boolean; onOpen
     <Modal open={open} onOpenChange={onOpenChange} title="Ask a question" description="Our assistant answers in about a minute. If it needs a person, it gives you a link to book a call." width={560}
       footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" loading={send.isPending} onClick={() => { setTried(true); if (!error) send.mutate(undefined) }}>Send request</Button></>}>
       <Field label="What happened?" error={tried ? error : ''} htmlFor="req-what">
-        <Textarea id="req-what" rows={4} autoFocus placeholder="Guests say the selfie finds no photos in the Riya & Kabir gallery…" value={what} onChange={(e) => setWhat(e.target.value)} />
+        <Textarea id="req-what" rows={4} autoFocus placeholder="Guests say the PIN doesn’t open the Riya & Kabir gallery…" value={what} onChange={(e) => setWhat(e.target.value)} />
       </Field>
       <Field label="Which event?" htmlFor="req-event">
         <Select id="req-event" value={eventId} onChange={(e) => setEventId(e.target.value)}>
@@ -177,7 +177,7 @@ function GuidesModal({ topic, onClose }: { topic: string | null; onClose: () => 
   useEffect(() => { setQuery(''); setExpanded(linked?.id ?? null) }, [topic]) // eslint-disable-line react-hooks/exhaustive-deps
   const results = linked && !query ? [linked, ...searchArticles('', list).filter((a) => a.id !== linked.id)] : searchArticles(query, list)
   return (
-    <Modal open={!!topic} onOpenChange={(v) => !v && onClose()} title="Guides and videos" description="Short answers, with videos in English and हिन्दी." width={640}
+    <Modal open={!!topic} onOpenChange={(v) => !v && onClose()} title="Guides" description="Short answers to common questions." width={640}
       footer={<><Button variant="ghost" onClick={onClose}>Close</Button><Button variant="primary" icon={<TicketIcon size={14} />} onClick={() => set({ topic: undefined, new: '1' })}>Still stuck? Ask a question</Button></>}>
       <Input icon={<Search size={16} />} aria-label="Search guides" placeholder="Search, e.g. “change PIN”" value={query} onChange={(e) => { setQuery(e.target.value); setExpanded(null) }}
         suffix={query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')} className="text-ink-3 hover:text-ink"><X size={15} /></button> : undefined} />

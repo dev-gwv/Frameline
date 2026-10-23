@@ -57,6 +57,12 @@ export const STORE_COMMISSION = 0.1
 /** One-time coupons: code → rupees added to the wallet. */
 export const COUPONS: Record<string, number> = { WELCOME500: 500 }
 
+/**
+ * Photos one new event may hold before it needs a pack. 10,000 while payments are off (23 Oct): a big wedding fits
+ * and nobody hits a wall they can't pay past. The studio's plan quota still counts every photo.
+ */
+export const EVENT_PHOTO_LIMIT = 10_000
+
 export const PACKS = [
   { photos: 1000, price: 700 },
   { photos: 3000, price: 1350 },

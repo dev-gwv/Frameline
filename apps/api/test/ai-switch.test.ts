@@ -23,8 +23,33 @@ async function call(path: string, init: { body?: unknown; token?: string; ai?: b
 
 describe('the AI switch', () => {
   it('tells the apps whether AI is on', async () => {
-    expect((await call('/v1/meta')).json.features).toEqual({ ai: true })
-    expect((await call('/v1/meta', { ai: false })).json.features).toEqual({ ai: false })
+    expect((await call('/v1/meta')).json.features).toMatchObject({ ai: true })
+    expect((await call('/v1/meta', { ai: false })).json.features).toMatchObject({ ai: false })
+  })
+
+  it('tells the apps whether payments work and who the invoice seller is, never a made-up one', async () => {
+    const meta = async (e: Record<string, unknown>) => {
+      const ctx = createExecutionContext()
+      const res = await worker.fetch(new Request('https://api.test/v1/meta', { headers: { 'cf-connecting-ip': freshIp() } }), { ...env, ...e }, ctx)
+      await waitOnExecutionContext(ctx)
+      return ((await res.json()) as { features: Record<string, unknown> }).features
+    }
+    const prod = { ENVIRONMENT: 'production', RAZORPAY_KEY_ID: undefined, RAZORPAY_KEY_SECRET: undefined }
+    expect(await meta(prod)).toMatchObject({ payments: false })
+    expect((await meta(prod)).seller).toBeUndefined()
+    expect(await meta({ ...prod, RAZORPAY_KEY_ID: 'rzp_live_x', RAZORPAY_KEY_SECRET: 's' })).toMatchObject({ payments: true })
+    expect(await meta({ SELLER_NAME: 'Acme Pvt Ltd', SELLER_GSTIN: '27ABCDE1234F1Z5' })).toMatchObject({ seller: { name: 'Acme Pvt Ltd', gstin: '27ABCDE1234F1Z5' } })
+  })
+
+  it('without payments, no gallery offers anything for sale (a checkout could only fail)', async () => {
+    const get = async (e: Record<string, unknown>) => {
+      const ctx = createExecutionContext()
+      const res = await worker.fetch(new Request('https://api.test/v1/public/events/7A1C0B2', { headers: { 'cf-connecting-ip': freshIp() } }), { ...env, ...e }, ctx)
+      await waitOnExecutionContext(ctx)
+      return ((await res.json()) as { settings: { storeEnabled: boolean } }).settings
+    }
+    expect((await get({})).storeEnabled).toBe(true) // Mehta Sangeet sells; tests simulate payments
+    expect((await get({ ENVIRONMENT: 'production', RAZORPAY_KEY_ID: undefined, RAZORPAY_KEY_SECRET: undefined })).storeEnabled).toBe(false)
   })
 
   it('with AI off, a face-privacy gallery works without a selfie: the event PIN sees and downloads everything', async () => {

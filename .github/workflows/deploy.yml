@@ -111,6 +111,8 @@ jobs:
         run: pnpm build
         env:
           VITE_API_URL: ${{ vars.API_URL || 'https://frameline-api.dev-d9b.workers.dev' }}
+          # The Terms and Privacy pages live on the studio site (apps/admin/public); the guest sign-up links there.
+          VITE_ADMIN_URL: ${{ vars.APP_URL || 'https://frameline-admin.pages.dev' }}
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

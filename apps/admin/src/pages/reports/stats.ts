@@ -19,8 +19,11 @@ const prevLabel = (month: string) => {
   return new Intl.DateTimeFormat('en-IN', { month: 'long' }).format(new Date(y, m - 2, 1))
 }
 
-/** The four "this month" tiles from the API's studio totals (this month vs the month before). */
-export function monthStats(s: StudioStats): MonthStat[] {
+/**
+ * The four "this month" tiles from the API's studio totals (this month vs the month before). Face searches only
+ * with the AI features on, photo sales only with payments on; photo views and photos added take their place.
+ */
+export function monthStats(s: StudioStats, on: { ai: boolean; payments: boolean } = { ai: true, payments: true }): MonthStat[] {
   const pm = prevLabel(s.month)
   const compare = (now: number, before: number, show: (n: number) => string) =>
     before > 0 ? (now >= before ? `Up ${Math.round(((now - before) / before) * 100)}% on ${pm}` : `${show(before)} in ${pm}`) : `Nothing in ${pm}`
@@ -28,8 +31,12 @@ export function monthStats(s: StudioStats): MonthStat[] {
   return [
     { label: 'Gallery visits', value: fmt.count(t.visits), sub: compare(t.visits, l.visits, fmt.count) },
     { label: 'Downloads', value: fmt.count(t.downloads), sub: compare(t.downloads, l.downloads, fmt.count) },
-    { label: 'Face searches', value: fmt.count(t.faceSearches), sub: compare(t.faceSearches, l.faceSearches, fmt.count) },
-    { label: 'Photo sales', value: fmt.rupees(t.sales), sub: compare(t.sales, l.sales, fmt.rupees) },
+    on.ai
+      ? { label: 'Face searches', value: fmt.count(t.faceSearches), sub: compare(t.faceSearches, l.faceSearches, fmt.count) }
+      : { label: 'Photo views', value: fmt.count(t.photoViews), sub: compare(t.photoViews, l.photoViews, fmt.count) },
+    on.payments
+      ? { label: 'Photo sales', value: fmt.rupees(t.sales), sub: compare(t.sales, l.sales, fmt.rupees) }
+      : { label: 'Photos added', value: fmt.count(t.photosDelivered), sub: compare(t.photosDelivered, l.photosDelivered, fmt.count) },
   ]
 }
 

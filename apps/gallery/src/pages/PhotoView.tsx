@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Link2, Lock, MessageCircle, MoreHorizontal, Printer, ScanFace, Share2, ShoppingBag } from 'lucide-react'
 import { Button, cn, Menu, Tip, useToast } from '@frameline/ui'
-import { fmt, toneCss, type Photo } from '@frameline/shared'
+import { displayUrl, fmt, toneCss, type Photo } from '@frameline/shared'
 import { useQueryClient } from '@tanstack/react-query'
 import { useHighlights, usePhotoList } from '../lib/queries'
 import { useApi } from '../lib/api'
@@ -183,9 +183,9 @@ export function PhotoView() {
             style={{ aspectRatio: `${w} / ${h}`, width: `min(100%, calc((100dvh - 220px) * ${w / h}))`, background: photo.url ? undefined : toneCss(photo.tone), transform: dx ? `translateX(${dx}px)` : undefined }}
           >
             {photo.url && (rotation
-              ? <img src={photo.url} alt={photo.filename} draggable={false} className="absolute left-1/2 top-1/2 max-w-none object-cover"
+              ? <img src={displayUrl(photo)} alt={photo.filename} draggable={false} className="absolute left-1/2 top-1/2 max-w-none object-cover"
                   style={{ width: `${(sideways ? h / w : 1) * 100}%`, height: `${(sideways ? w / h : 1) * 100}%`, transform: `translate(-50%, -50%) rotate(${rotation}deg)` }} />
-              : <img src={photo.url} alt={photo.filename} className="size-full object-cover" draggable={false} />)}
+              : <img src={displayUrl(photo)} alt={photo.filename} className="size-full object-cover" draggable={false} />)}
             {!photo.url && <span className="sr-only">{`Photo ${photo.filename}`}</span>}
             <SaleMark shortId={event.shortId} photoId={photo.id} scale={2.5} logoUrl={studio.logoUrl} />
           </div>

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ArrowUpDown, Check, HardDriveDownload, Images, Upload, Camera, X } from 'lucide-react'
 import { FEATURES, fmt, type ID, type Photo } from '@frameline/shared'
 import { Button, EmptyState, Menu, Skeleton, useToast } from '@frameline/ui'
-import { errorMessage } from '../../lib/api'
+import { errorMessage, useServerFeatures } from '../../lib/api'
 import { useAlbums, usePeople } from '../../lib/queries'
 import { useModalParam, useParamState } from '../../lib/url'
 import { useEventContext } from '../event/EventLayout'
@@ -39,7 +39,11 @@ export default function Workspace() {
   const albumParam = params.get('album') ?? undefined
   const album = albums.find((a) => a.id === albumParam && !pending.albums.has(a.id))
   const albumId = album?.id
-  const sort = parseSort(params.get('sort'))
+  // "With people" needs face finding: not offered (and an old link falls back to newest) while AI is off.
+  const { ai } = useServerFeatures()
+  const sorts = ai ? GRID_SORTS : GRID_SORTS.filter((s) => s.value !== 'people')
+  const asked = parseSort(params.get('sort'))
+  const sort: GridSort = !ai && asked === 'people' ? 'newest' : asked
   const personId = params.get('person') ?? undefined
   const person = people?.find((p) => p.id === personId)
   const setAlbum = (id?: ID) => setParams({ album: id, person: undefined })
@@ -163,7 +167,7 @@ export default function Workspace() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Menu width={250} trigger={<Button size="sm" icon={<ArrowUpDown size={13} />} className="max-sm:h-10">{sortLabel}</Button>}
-                    items={GRID_SORTS.map((s) => ({
+                    items={sorts.map((s) => ({
                       label: s.label, description: s.description,
                       icon: sort === s.value ? <Check size={14} /> : <span className="inline-block w-3.5" />,
                       onSelect: () => setSort(s.value),

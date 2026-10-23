@@ -1,5 +1,6 @@
 import { withoutAi, type EventSettings } from '@frameline/shared'
 import type { Env } from '../env'
+import { canSimulatePayments, paymentsLive } from '../services/payments'
 
 /**
  * Server-side switches, set per deployment (wrangler vars), read on every request -- flipping one needs no code
@@ -11,5 +12,14 @@ import type { Env } from '../env'
  */
 export const aiOn = (env: Pick<Env, 'AI_FEATURES'>): boolean => env.AI_FEATURES !== 'off'
 
-/** The settings an event behaves by right now. */
-export const effectiveSettings = (env: Pick<Env, 'AI_FEATURES'>, s: EventSettings): EventSettings => (aiOn(env) ? s : withoutAi(s))
+/** Card/UPI payments can be taken (Razorpay keys set, or simulated in development and tests). */
+export const paymentsOn = (env: Env): boolean => paymentsLive(env) || canSimulatePayments(env)
+
+/**
+ * The settings an event behaves by right now. Without payments nothing is for sale either: a guest must never
+ * reach a checkout that can only fail. Stored settings are untouched.
+ */
+export const effectiveSettings = (env: Env, s: EventSettings): EventSettings => {
+  const out = aiOn(env) ? s : withoutAi(s)
+  return out.storeEnabled && !paymentsOn(env) ? { ...out, storeEnabled: false } : out
+}

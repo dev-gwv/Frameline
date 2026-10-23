@@ -3,10 +3,11 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { ChevronDown, CircleHelp, LogOut, Search } from 'lucide-react'
 import { fmt } from '@frameline/shared'
 import { Avatar, BottomSheet, LogoMark, Menu, Tip, cn, type MenuItem } from '@frameline/ui'
+import { useServerFeatures } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { useStudio, useUsage } from '../lib/queries'
 import { CommandPalette } from './CommandPalette'
-import { ACCOUNT_NAV, MORE_NAV, PHONE_MORE_NAV, PHONE_TABS, PRIMARY_NAV, isActive, isMorePage, uploadTarget } from './nav'
+import { ACCOUNT_NAV, MORE_NAV, PHONE_MORE_NAV, PHONE_TABS, PRIMARY_NAV, isActive, isMorePage, uploadTarget, withSelling } from './nav'
 import { UploadDock } from './UploadDock'
 
 const ROLE = { owner: 'Owner', editor: 'Editor', uploader: 'Uploader' } as const
@@ -50,6 +51,7 @@ export function AppShell() {
 function TopBar({ onSearch }: { onSearch: () => void }) {
   const { pathname } = useLocation()
   const navigate = useNavigate()
+  const { payments } = useServerFeatures()
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
       <div className="flex h-[52px] items-center gap-1 px-4 md:h-14 lg:px-7">
@@ -58,7 +60,7 @@ function TopBar({ onSearch }: { onSearch: () => void }) {
           <span>Frameline</span>
         </Link>
         <nav aria-label="Main" className="hidden h-full items-stretch md:flex">
-          {PRIMARY_NAV.map((it) => <TopLink key={it.to} to={it.to} active={isActive(it, pathname)}>{it.label}</TopLink>)}
+          {withSelling(PRIMARY_NAV, payments).map((it) => <TopLink key={it.to} to={it.to} active={isActive(it, pathname)}>{it.label}</TopLink>)}
           <Menu
             align="start" width={600} columns={2}
             items={MORE_NAV.map((it): MenuItem => ({ label: it.label, description: it.description, icon: <it.icon size={17} />, onSelect: () => navigate(it.to) }))}
@@ -173,12 +175,13 @@ function MoreSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
   const { user } = useAuth()
   const studio = useStudio().data
   const signOut = useSignOut()
+  const { payments } = useServerFeatures()
   const row = 'flex min-h-[48px] items-center gap-3 rounded-control px-2 text-[14px] font-bold hover:bg-sunk'
   return (
     <BottomSheet open={open} onOpenChange={onOpenChange} title="More">
       <h2 className="px-2 pb-2 pt-1 font-sans text-[16px] font-extrabold">More</h2>
       <div className="grid grid-cols-2 gap-1">
-        {PHONE_MORE_NAV.map((it) => (
+        {withSelling(PHONE_MORE_NAV, payments).map((it) => (
           <Link key={it.to} to={it.to} onClick={() => onOpenChange(false)} className="flex min-h-[64px] items-start gap-2.5 rounded-control p-2 hover:bg-sunk">
             <span className="mt-0.5 text-ink-2"><it.icon size={18} /></span>
             <span className="min-w-0">

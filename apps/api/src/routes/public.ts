@@ -1,10 +1,10 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import type { Context } from 'hono'
 import { and, asc, count, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
-import { DOWNLOAD_ALL_LIMIT, STORE_COMMISSION, effectivePrices, selfieHasNoFace } from '@frameline/shared'
+import { DOWNLOAD_ALL_LIMIT, STORE_COMMISSION, displayUrl, effectivePrices, selfieHasNoFace } from '@frameline/shared'
 import type { AppEnv, GuestClaims } from '../env'
 import { getDb, schema } from '../db/client'
-import { albumOut, enquiryOut, filmOut, hostOut, orderOut, photoOut, priceOut, publicStudioOut, storeSettingsOut, studioOut, watermarkOut, zipOut } from '../db/mappers'
+import { albumOut, enquiryOut, filmOut, guestPhotoOut, hostOut, orderOut, photoOut, priceOut, publicStudioOut, storeSettingsOut, studioOut, watermarkOut, zipOut } from '../db/mappers'
 import { sha256Hex, timingSafeEqual } from '../lib/crypto'
 import { AppError, Forbidden, NotConfigured, NotFound, RateLimited, Unauthorized, ValidationFailed } from '../lib/errors'
 import { background, clientIp } from '../lib/http'
@@ -134,7 +134,7 @@ publicRoutes.openapi(createRoute({
   if (e.coverPhotoId) {
     // A cover the studio has since hidden is not shown to guests.
     const [cp] = await db.select().from(schema.photos).where(and(eq(schema.photos.id, e.coverPhotoId), visible())).limit(1)
-    if (cp) coverUrl = photoOut(cp, c.env.PUBLIC_MEDIA_BASE).url
+    if (cp) coverUrl = displayUrl(photoOut(cp, c.env.PUBLIC_MEDIA_BASE))
   }
   const { pin: _pin, fullAccessPin: _full, ...settings } = e.settings
   const blocked = blockedReason(e)
@@ -305,7 +305,7 @@ publicRoutes.openapi(createRoute({
   const [{ total }] = await db.select({ total: count() }).from(p).where(where)
   if (q.highlights) {
     const rows = await db.select().from(p).where(where).orderBy(desc(p.favourites), asc(p.id)).limit(q.limit).offset(q.offset ?? 0)
-    return c.json({ items: rows.map((r) => photoOut(r, c.env.PUBLIC_MEDIA_BASE)), total, nextCursor: null }, 200)
+    return c.json({ items: rows.map((r) => guestPhotoOut(r, c.env.PUBLIC_MEDIA_BASE, e.settings.originalDownloads)), total, nextCursor: null }, 200)
   }
   const sortCol = q.sort === 'name' ? p.filename : q.sort === 'sequence' ? p.index : p.capturedAt
   const dir = q.sort === 'newest' ? 'desc' : 'asc'
@@ -316,7 +316,7 @@ publicRoutes.openapi(createRoute({
   const items = rows.slice(0, q.limit)
   const last = items[items.length - 1]
   const lastKey = last ? (q.sort === 'name' ? last.filename : q.sort === 'sequence' ? last.index : last.capturedAt) : ''
-  return c.json({ items: items.map((r) => photoOut(r, c.env.PUBLIC_MEDIA_BASE)), total, nextCursor: more && last ? encodeCursor(lastKey, last.id) : null }, 200)
+  return c.json({ items: items.map((r) => guestPhotoOut(r, c.env.PUBLIC_MEDIA_BASE, e.settings.originalDownloads)), total, nextCursor: more && last ? encodeCursor(lastKey, last.id) : null }, 200)
 })
 
 publicRoutes.openapi(createRoute({
@@ -393,7 +393,7 @@ publicRoutes.openapi(createRoute({
   for (const part of chunk(ids)) rows.push(...await db.select().from(schema.photos).where(and(inArray(schema.photos.id, part), eq(schema.photos.eventId, e.id), visible())))
   const order = new Map(ids.map((id, i) => [id, i]))
   rows.sort((a, b) => order.get(a.id)! - order.get(b.id)!)
-  return c.json({ items: rows.map((r) => photoOut(r, c.env.PUBLIC_MEDIA_BASE)) }, 200)
+  return c.json({ items: rows.map((r) => guestPhotoOut(r, c.env.PUBLIC_MEDIA_BASE, e.settings.originalDownloads)) }, 200)
 })
 
 publicRoutes.openapi(createRoute({

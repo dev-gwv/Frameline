@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Plus, ShoppingBag } from 'lucide-react'
 import { fmt, TONES, toneCss, type Order } from '@frameline/shared'
 import { Button, Card, ChecklistSteps, ConfirmDialog, Page, Skeleton, StatCard, TabBar } from '@frameline/ui'
-import { useApi } from '../../lib/api'
+import { useApi, useServerFeatures } from '../../lib/api'
 import { useAction, useCarts, useEvents, useLedger, useOrders, useStoreSettings, useWalletBalance } from '../../lib/queries'
 import { useParamState } from '../../lib/url'
 import { useAuth } from '../../lib/auth'
@@ -40,6 +40,7 @@ export default function Sell() {
   const ledger = useLedger()
   const wallet = useWalletBalance(owner)
   const carts = useCarts()
+  const { payments } = useServerFeatures()
 
   const rawTab = params.get('tab') ?? 'orders'
   const tab: Tab = TAB_ALIASES[rawTab] ?? (TABS.some((t) => t.value === rawTab) ? rawTab as Tab : 'orders')
@@ -62,6 +63,7 @@ export default function Sell() {
     <WithdrawModal open={withdrawOpen} onOpenChange={(v) => set({ withdraw: v ? '1' : undefined })} wallet={wallet.data} settings={settings.data} onDone={() => set({ tab: 'payouts', withdraw: undefined })} />
   </>
 
+  if (!payments) return <SellingOff />
   if (settings.isError) return <Page title="Sell photos"><QueryError error={settings.error} retry={() => settings.refetch()} what="selling" /></Page>
   if (settings.isLoading || events.isLoading || orders.isLoading) return (
     <Page title="Sell photos"><div className="grid gap-3.5 sm:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-[96px] rounded-card" />)}</div><Skeleton className="mt-5 h-72 rounded-card" /></Page>
@@ -107,6 +109,18 @@ export default function Sell() {
   )
 }
 
+/** Card/UPI payments aren't switched on (GET /v1/meta `payments`): nothing can be sold or paid out yet. */
+export function SellingOff() {
+  return (
+    <Page title="Sell photos">
+      <Card className="max-w-[640px]">
+        <b className="block text-[15px]">Selling isn’t switched on yet</b>
+        <p className="mt-1 text-[13.5px] text-ink-2">Guests can’t buy photos or prints until card and UPI payments are set up. Your galleries, downloads and sharing all work as usual.</p>
+      </Card>
+    </Page>
+  )
+}
+
 function RemindDialog({ open, onOpenChange, ids, names }: { open: boolean; onOpenChange: (v: boolean) => void; ids: string[]; names: string[] }) {
   const api = useApi()
   const send = useAction((v: string[]) => api.remindCarts(v), { success: (r) => `Reminder sent to ${r.reminded} ${r.reminded === 1 ? 'guest' : 'guests'}` })
@@ -120,10 +134,11 @@ function RemindDialog({ open, onOpenChange, ids, names }: { open: boolean; onOpe
 
 function FirstRun({ setup, onSell, children }: { setup: ReturnType<typeof setupState>; onSell: () => void; children: React.ReactNode }) {
   const navigate = useNavigate()
+  const { ai } = useServerFeatures()
   const next = !setup.business ? 0 : !setup.payout ? 1 : 2
   const btn = (i: number, label: string, onClick: () => void) => <Button size="sm" variant={i === next ? 'primary' : 'secondary'} onClick={onClick}>{label}</Button>
   return (
-    <Page title="Sell photos" subtitle="Guests buy their photos and prints. You keep 90%; payouts go to your bank weekly.">
+    <Page title="Sell photos" subtitle="Guests buy their photos and prints. You keep 90% of each sale.">
       <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
         <Card>
           <ChecklistSteps title="Start selling in 3 steps" steps={[
@@ -138,7 +153,7 @@ function FirstRun({ setup, onSell, children }: { setup: ReturnType<typeof setupS
           </div>
           <div className="p-[18px]">
             <b className="block">What guests see</b>
-            <p className="text-[13.5px] text-ink-2">A “Buy” button on each photo, and an “All your photos” bundle after they take a selfie.</p>
+            <p className="text-[13.5px] text-ink-2">A “Buy” button on each photo{ai ? ', and an “All your photos” bundle after they take a selfie' : ''}.</p>
           </div>
         </Card>
       </div>

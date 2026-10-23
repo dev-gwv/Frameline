@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, Heart, WifiOff } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button, cn, Input, LogoMark, PhotoTile, Tip, type ButtonProps } from '@frameline/ui'
-import { fmt, toneCss, type Photo, type PublicEvent } from '@frameline/shared'
+import { displayUrl, fmt, toneCss, type Photo, type PublicEvent } from '@frameline/shared'
 import { useApi } from '../lib/api'
 import { SaleMark } from './SaleWatermark'
 import { friendlyError, isNotFound } from '../lib/errors'
@@ -102,7 +102,7 @@ export function PhotoGrid({ photos, hrefFor, className, favourites, shortId, log
       {photos.map((p) => (
         <li key={p.id} className="tile-auto relative overflow-hidden rounded-[3px]">
           <Link to={hrefFor(p)} aria-label={`Open photo ${p.filename}`} className="block rounded-[3px] focus-visible:outline-offset-1">
-            <PhotoTile tone={p.tone} url={p.url} rotation={p.rotation} aspect="1 / 1" rounded="rounded-[3px]" alt={p.filename} />
+            <PhotoTile tone={p.tone} url={displayUrl(p)} rotation={p.rotation} aspect="1 / 1" rounded="rounded-[3px]" alt={p.filename} />
           </Link>
           {shortId && <SaleMark shortId={shortId} photoId={p.id} logoUrl={logoUrl} />}
           {favourites?.includes(p.id) && <Heart size={14} className="pointer-events-none absolute right-1.5 top-1.5 fill-white text-white drop-shadow" aria-label="Favourite" />}

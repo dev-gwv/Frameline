@@ -77,6 +77,7 @@ export const Usage = z.object({
   planId: z.enum(['starter', 'studio', 'pro', 'agency']),
   period: z.enum(['yearly', 'quarterly']),
   validTill: z.string(),
+  trial: z.boolean().optional().openapi({ description: 'On the free trial a new studio starts with; validTill is when it ends. Absent once a plan is bought.' }),
   photosUsed: z.number().int(),
   photosLimit: z.number().int(),
   guestReserved: z.number().int(),
@@ -153,6 +154,8 @@ export const NewEventInput = z.object({
   guestUploadLimit: z.number().int().min(0).max(100_000).default(300),
 }).strict().openapi('NewEventInput')
 
+// photoLimit, expiresAt and plan are not editable: they change only by paying (packs, renewals, plan changes).
+// `.strict()` turns a client that still sends them into a 422 instead of a free upgrade.
 export const EventPatch = z.object({
   shortId: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{7}$/, 'The gallery code is 7 letters or digits'),
   name: z.string().trim().min(1).max(160),
@@ -161,12 +164,9 @@ export const EventPatch = z.object({
   endDate: IsoDate,
   city: z.string().trim().max(120),
   status: EventStatus,
-  photoLimit: z.number().int().min(0).max(1_000_000),
-  expiresAt: IsoDate,
   coverTones: z.tuple([Tone, Tone, Tone]),
   hosts: z.array(EventHost).max(20),
   highlights: z.boolean(),
-  plan: z.enum(['subscription', 'pack', 'trial']),
 }).partial().strict().openapi('EventPatch')
 
 // The full-access PIN is set and cleared only through /events/{id}/full-pin, which keeps it apart from the event PIN.
@@ -189,7 +189,8 @@ export const Box = z.tuple([z.number(), z.number(), z.number(), z.number()])
 
 export const Photo = z.object({
   id: Id, eventId: Id, albumId: Id, filename: z.string(), index: z.number().int(), capturedAt: z.string(), tone: Tone,
-  url: z.string().optional(), status: z.enum(['ready', 'processing', 'failed']), hidden: z.boolean(), favourites: z.number().int(),
+  url: z.string().optional(), webUrl: z.string().optional().openapi({ description: 'A 2048 px JPEG copy for showing, when one was made at upload.' }),
+  status: z.enum(['ready', 'processing', 'failed']), hidden: z.boolean(), favourites: z.number().int(),
   downloads: z.number().int(), faces: z.array(z.object({ personId: Id, box: Box })), exif: Exif, uploadedBy: z.string(),
   source: z.enum(['web', 'camera', 'drive', 'guest', 'desktop']),
   reviewStatus: z.enum(['pending', 'approved', 'rejected']).optional(), enhancedFrom: z.string().optional(),

@@ -125,10 +125,13 @@ export const limits = {
   }),
   /** Token refresh, per IP. */
   refresh: rateLimit({ name: 'refresh', limit: 60, windowSec: 60, keys: ip }),
-  /** Authenticated writes, per user. */
+  /**
+   * Authenticated writes, per user. Not the web copies an upload sends (PUT /photos/:id/web): one per photo, so a
+   * 400-photo upload would hit 120 a minute; the global ceiling still caps them.
+   */
   write: rateLimit({
     name: 'write', limit: 120, windowSec: 60, binding: 'RL_WRITE',
-    keys: (c) => (['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) ? [] : [`user:${c.get('user')?.id ?? clientIp(c)}`]),
+    keys: (c) => (['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) || (c.req.method === 'PUT' && /^\/v1\/photos\/[^/]+\/web$/.test(c.req.path)) ? [] : [`user:${c.get('user')?.id ?? clientIp(c)}`]),
   }),
   /**
    * Guest gallery endpoints, per guest: their gallery session, else their device, else their IP. Per IP alone,

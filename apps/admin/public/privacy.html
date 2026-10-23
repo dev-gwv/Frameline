@@ -22,58 +22,75 @@
 <body>
 <main>
   <h1>Frameline Privacy Policy</h1>
-  <p class="updated">Effective 28 September 2026. "Frameline" is a working product name and may change; this policy covers the service regardless of its final name.</p>
+  <p class="updated">Effective 23 October 2026. "Frameline" is a working product name and may change; this policy covers the service regardless of its final name.</p>
 
-  <p>Frameline ("we", "us") is a photo-delivery service that lets event photographers ("studios") upload photos
-  from a shoot and share them with their clients and guests, including finding a guest's own photos with a
-  selfie. This page explains what personal data we collect, why, and what you can do about it.</p>
+  <div class="box">
+    <strong>Draft.</strong> This policy is a working draft that describes what the product does today. It has not
+    yet been reviewed by a lawyer; before a public launch it will be checked against India's Digital Personal Data
+    Protection Act, 2023 and any other place the service operates in.
+  </div>
+
+  <p>Frameline ("we", "us") is a photo-delivery service run by <strong>Grateful World Ventures (OPC) Private
+  Limited</strong> (registered address and GSTIN to be added). It lets event photographers ("studios") upload
+  photos from a shoot and share them with their clients and guests. This page explains what personal data we
+  collect, why, who else handles it, and what you can do about it.</p>
 
   <h2>Who this applies to</h2>
   <p>Two kinds of people use Frameline: <strong>studios</strong> (photographers and their team, who have an
   account) and <strong>guests</strong> (people invited to a studio's event gallery, who usually don't have an
   account). A studio decides what its guests see and how long their event stays open; for the photos and guest
-  details tied to one event, the studio is the data controller and we act as its processor. For a studio's own
-  account data, we are the controller.</p>
+  details tied to one event, the studio is responsible for them and we handle them on its behalf. For a studio's
+  own account data, we are responsible.</p>
 
   <h2>What we collect</h2>
   <ul>
-    <li><strong>Studio accounts:</strong> name, email, phone, business details you provide for selling photos
-      (e.g. GST/PAN for invoicing), and payout bank details if you sell photos through us.</li>
-    <li><strong>Guest details:</strong> name and an email or phone number, given when a guest opens a gallery
-      that asks for them.</li>
-    <li><strong>Selfie photos, only if a guest chooses to use "Find my photos":</strong> we process the selfie to
-      compute a mathematical representation of the face (a set of numbers we can compare against event photos)
-      so the guest can find photos they're in. We don't use this to identify anyone outside the one event it was
-      taken for, and it is not shared, sold, or used for any other purpose.</li>
-    <li><strong>Event photos</strong> a studio uploads, and photos a guest uploads back (if a studio allows it).</li>
-    <li><strong>Order and payment information</strong> if a guest buys photos or prints: name, shipping address
-      for prints, and order amount. Card and UPI details are handled directly by our payment processor
-      (Razorpay) — we never see or store your card number.</li>
+    <li><strong>Studio accounts:</strong> name, email, phone, the billing details you add for invoices (name,
+      address, GSTIN), and, if you sell photos through us later, business and payout bank details.</li>
+    <li><strong>Guest details:</strong> name, mobile number and (if you add it) email, given when a guest opens a
+      gallery that asks for them.</li>
+    <li><strong>Event photos</strong> a studio uploads, and photos a guest uploads back (if a studio allows it).
+      We also keep a smaller web-size copy of each photo so galleries load quickly.</li>
+    <li><strong>Selfies and face data: not collected at the moment.</strong> Face matching ("Find my photos with a
+      selfie") is switched off. We may offer it later; if we do, it will only run when a guest chooses to take a
+      selfie, the face data will be used only to find that guest's photos in that one event, and this policy will
+      say so before it starts.</li>
+    <li><strong>Order and payment information</strong> once selling photos is switched on (it is not yet): name,
+      shipping address for prints, and order amount. Card and UPI details would be handled directly by our payment
+      processor (Razorpay); we never see or store your card number.</li>
+    <li><strong>Support questions</strong> a studio sends from Help, and the answers.</li>
     <li><strong>Basic technical data:</strong> IP address and device information, kept briefly for security,
-      abuse prevention (e.g. rate-limiting), and error diagnosis.</li>
+      abuse prevention (e.g. limiting repeated PIN attempts) and error diagnosis.</li>
     <li><strong>Account sign-in:</strong> if you use "Continue with Google", Google shares your name, email
       address and profile photo with us, under Google's own privacy policy.</li>
   </ul>
 
   <h2>Why we collect it</h2>
   <ul>
-    <li>To run the service: create your studio, store and deliver your event photos, and let guests find and
-      download the photos they're in.</li>
-    <li>To process orders when a guest buys photos or prints, and to pay studios that sell through us.</li>
-    <li>To keep the service secure and prevent abuse (for example, limiting repeated PIN attempts on a gallery).</li>
-    <li>To send account emails you'd expect: sign-in codes, receipts, and — only if a studio turns it on —
-      updates about their own events to their own guests.</li>
+    <li>To run the service: create your studio, store and deliver your event photos, and let guests open,
+      browse and download them.</li>
+    <li>To keep the service secure and prevent abuse.</li>
+    <li>To send the emails you'd expect: sign-in codes, team and host invites, and links to photo downloads.</li>
+    <li>To answer studios' support questions.</li>
+    <li>Later, once they are switched on: to process orders and pay studios that sell through us.</li>
   </ul>
-  <p>We do not sell personal data, and we do not use guest photos, selfies, or contact details for advertising.</p>
+  <p>We do not sell personal data, and we do not use guest photos or contact details for advertising.</p>
 
-  <h2>Who we share it with</h2>
-  <p>We use a small number of service providers ("sub-processors") to run Frameline. Each only receives the
-  data it needs to do its job:</p>
+  <h2>Who else handles it</h2>
+  <p>We use a small number of service providers to run Frameline. Each only receives the data it needs to do
+  its job:</p>
   <ul>
-    <li><strong>Cloudflare</strong> — hosting, file storage, and our database (Workers, R2, D1, Vectorize).</li>
-    <li><strong>Razorpay</strong> — payment processing for orders (India).</li>
-    <li><strong>Resend</strong> — sending sign-in-code and transactional emails.</li>
-    <li><strong>Google</strong> — only if you choose "Continue with Google" to sign in.</li>
+    <li><strong>Cloudflare</strong>: hosting, file storage and our database. All photos and account data are
+      stored with Cloudflare.</li>
+    <li><strong>Google (Gmail / Google Workspace)</strong>: sending our emails (the recipient's address and the
+      email itself), and sign-in if you choose "Continue with Google".</li>
+    <li><strong>Groq and NVIDIA</strong>: the assistant that answers support questions in Help. The question, the
+      conversation so far and a few facts about the studio's account needed to answer it (plan, wallet, the
+      event's settings) are sent to them to write a reply. Guests' details are not sent.</li>
+    <li><strong>Studio AutoPilot</strong>: only when a studio links its Studio AutoPilot account. Then Studio
+      AutoPilot can sign the studio in, create galleries for its projects, and read each gallery's name, link,
+      PINs, photo and visit counts and closing date, plus the studio's plan, wallet balance and photos used.
+      Guest details are not shared with it.</li>
+    <li><strong>Razorpay</strong>: payment processing, once payments are switched on.</li>
   </ul>
   <p>We don't share personal data with anyone else, except where required by law.</p>
 
@@ -81,19 +98,16 @@
   <ul>
     <li>A studio's account data is kept while the account is active, and for a reasonable period after in case
       you want to reactivate it.</li>
-    <li>An event's photos and guest data are kept for as long as the studio keeps that event live. When a
-      studio deletes an event (or a photo, or an album), it's held for <strong>30 days</strong> so it can be
-      restored by mistake, then permanently removed.</li>
-    <li>A guest's face data (the selfie match data, not the selfie image itself) is deleted with the event it
-      was created for, and a studio can turn face matching off for an event at any time.</li>
+    <li>An event's photos and guest data are kept for as long as the studio keeps that event. When a studio
+      deletes an event (or a photo, or an album), it's held for <strong>30 days</strong> so it can be restored
+      if deleted by mistake, then permanently removed.</li>
   </ul>
 
   <h2>Your rights</h2>
-  <p>Depending on where you live, you may have the right to access, correct, export, or delete your personal
-  data, and to withdraw consent for anything we asked for it. For anything to do with a specific event's guest
-  data, the fastest route is asking that event's studio directly, since they control the gallery; for anything
-  about your own studio account, or if you'd rather come to us, email
-  <a href="mailto:dev@gratefulworldventures.in">dev@gratefulworldventures.in</a> and we'll act on it.</p>
+  <p>You can ask to see, correct, export or delete your personal data, and withdraw consent you gave. For
+  anything to do with a specific event's guest data, the fastest route is asking that event's studio directly,
+  since they control the gallery; for anything about your own studio account, or if you'd rather come to us,
+  email <a href="mailto:dev@gratefulworldventures.in">dev@gratefulworldventures.in</a> and we'll act on it.</p>
 
   <h2>Cookies and local storage</h2>
   <p>We use browser storage to keep you signed in and to remember basic preferences (like a collapsed menu).
@@ -107,13 +121,8 @@
   <p>If we make a material change, we'll update the date at the top of this page.</p>
 
   <h2>Contact</h2>
-  <p>Questions about this policy, or a request about your data: <a href="mailto:dev@gratefulworldventures.in">dev@gratefulworldventures.in</a>.</p>
-
-  <div class="box">
-    This is a working draft written to accurately describe what the product does today, for use while
-    Frameline is in development and early testing. Before a public launch, we recommend it be reviewed by a
-    lawyer familiar with India's DPDP Act and any other regions the service operates in.
-  </div>
+  <p>Questions about this policy, or a request about your data: <a href="mailto:dev@gratefulworldventures.in">dev@gratefulworldventures.in</a>.
+  See also our <a href="/terms">Terms of Use</a>.</p>
 </main>
 </body>
 </html>

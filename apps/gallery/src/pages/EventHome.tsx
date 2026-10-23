@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ChevronRight, Film, ImagePlus, Images, Lock, MessageCircle, Play, ScanFace, Share2, Sparkles, Store } from 'lucide-react'
 import { cn } from '@frameline/ui'
-import { fmt, toneCss, type Album, type Tone } from '@frameline/shared'
+import { displayUrl, fmt, toneCss, type Album, type Tone } from '@frameline/shared'
 import { guestAlbums, useAlbumCover, useHighlights } from '../lib/queries'
 import { Container, EventHero, PrimaryButton, TextButton, WideButton } from '../components/common'
 import { EventShell, useShareGallery } from '../components/Shell'
@@ -82,7 +82,7 @@ export function EventHome() {
             <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4">
               {highlights.length > 0 && (
                 <li>
-                  <AlbumTile title="Highlights" count={highlights.length} icon={<Sparkles size={13} />} tone={highlights[0].tone} url={highlights[0].url} onClick={() => navigate(`${base}/a/highlights`)} />
+                  <AlbumTile title="Highlights" count={highlights.length} icon={<Sparkles size={13} />} tone={highlights[0].tone} url={displayUrl(highlights[0])} onClick={() => navigate(`${base}/a/highlights`)} />
                 </li>
               )}
               {albums.map((a, i) => (
@@ -151,7 +151,7 @@ function AlbumCover({ album, shortId, fallback, locked, lockText, onClick }: { a
   const q = useAlbumCover(shortId, album.id, !locked && album.photoCount > 0)
   const first = q.data
   const tone = first?.tone ?? (locked || album.photoCount === 0 || q.isError ? fallback : undefined)
-  return <AlbumTile title={album.name} count={album.photoCount} tone={tone} url={first?.url} locked={lockText} onClick={onClick} />
+  return <AlbumTile title={album.name} count={album.photoCount} tone={tone} url={first && displayUrl(first)} locked={lockText} onClick={onClick} />
 }
 
 function AlbumTile({ title, count, tone, url, icon, locked, onClick }: { title: string; count: number; tone?: Tone; url?: string; icon?: ReactNode; locked?: boolean; onClick: () => void }) {

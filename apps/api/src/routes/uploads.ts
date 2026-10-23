@@ -4,6 +4,7 @@ import type { Context } from 'hono'
 import { hash, tone } from '@frameline/shared'
 import type { AppEnv, PhotoJob } from '../env'
 import { getDb, schema } from '../db/client'
+import { webCopyKey } from '../db/mappers'
 import type { UploadFileRecord, UploadSessionOptions } from '../db/schema'
 import { AppError, Conflict, NotFound, Unauthorized, ValidationFailed } from '../lib/errors'
 import { newId, nowIso } from '../lib/ids'
@@ -234,6 +235,34 @@ uploadRoutes.put('/uploads/:uploadId/files/:photoId/parts/:partNumber{[0-9]+}', 
   const part = await c.env.MEDIA.resumeMultipartUpload(file.key, file.multipartId).uploadPart(partNumber, bytes)
   c.header('ETag', part.etag)
   return c.json({ partNumber: part.partNumber, etag: part.etag }, 200)
+})
+
+/** Most a web copy may weigh: a 2048 px JPEG is usually 0.3–1.5 MB. */
+export const WEB_COPY_MAX_BYTES = 8 * 1024 * 1024
+
+/**
+ * The studio's browser sends a 2048 px JPEG of each photo it just uploaded (no image processor needed), stored as
+ * …/renditions/2048.jpg next to the original. Galleries then show it instead of the full-size file, and web-size
+ * downloads and ZIPs use it. The processor, when it runs, writes the same file again. Best effort: a photo
+ * without one still works, it just loads the original.
+ */
+uploadRoutes.put('/photos/:id/web', requireStudio('uploader', 'upload'), async (c) => {
+  const m = membershipOf(c)
+  const db = getDb(c.env.DB)
+  const p = schema.photos
+  const [photo] = await db.select().from(p).where(and(eq(p.id, c.req.param('id')), eq(p.studioId, m.studioId), isNull(p.deletedAt))).limit(1)
+  if (!photo) throw new NotFound('Photo', c.req.param('id'))
+  assertEventVisible(m, photo.eventId)
+  if (!photo.r2Key || photo.url) throw new Conflict('This photo has no uploaded file to go with a web copy.', 'no_file')
+  if (!/^image\/jpeg\b/.test(c.req.header('content-type') ?? '')) throw new AppError(415, 'unsupported_media_type', 'Send a JPEG', 'The web copy must be a JPEG.')
+  const bytes = new Uint8Array(await c.req.arrayBuffer())
+  if (bytes.byteLength > WEB_COPY_MAX_BYTES) throw new AppError(413, 'payload_too_large', 'Too large', 'The web copy is too large.')
+  if (bytes.byteLength < 3 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw new ValidationFailed([{ field: '(body)', in: 'body', message: 'Not a JPEG file', code: 'not_jpeg' }])
+  await c.env.MEDIA.put(webCopyKey(photo.r2Key), bytes, { httpMetadata: { contentType: 'image/jpeg' } })
+  // Copies of the photo (picks albums) share its file, so they share the web copy too.
+  await db.update(p).set({ webCopy: true }).where(and(eq(p.studioId, m.studioId), eq(p.r2Key, photo.r2Key))).run()
+  emit(c, m.studioId, 'photos')
+  return c.body(null, 204)
 })
 
 const CompleteBody = z.object({

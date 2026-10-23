@@ -103,6 +103,8 @@
         "AI_FEATURES": "off",
         // Help → Book a call (the owner's booking page, 19 Oct).
         "SUPPORT_CALL_URL": "https://calendly-common-meeting-web-bjvr.vercel.app/harsh-solanki/intro-call"
+        // The company on studios' GST invoices, once the owner has it: "SELLER_NAME", "SELLER_GSTIN" (both needed)
+        // and "SELLER_ADDRESS". Unset: the apps offer no invoice downloads (GET /v1/meta features.seller).
       },
       "triggers": { "crons": ["* * * * *", "0 3 * * *"] },
       "d1_databases": [{ "binding": "DB", "database_name": "frameline", "database_id": "32bf8f23-7594-4c5f-8e7a-51b5eed336a7", "migrations_dir": "migrations" }],

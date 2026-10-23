@@ -2,7 +2,7 @@ import { and, asc, count, eq } from 'drizzle-orm'
 import { availableArticles, FEATURES } from '@frameline/shared'
 import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
-import { aiOn, effectiveSettings } from '../lib/features'
+import { aiOn, effectiveSettings, paymentsOn } from '../lib/features'
 import { newId, nowIso } from '../lib/ids'
 
 /**
@@ -141,6 +141,8 @@ async function factsFor(env: Env, ticket: typeof schema.tickets.$inferSelect): P
   return lines.join('\n')
 }
 
+const sellerSet = (env: Env) => !!env.SELLER_NAME && !!env.SELLER_GSTIN
+
 function switchedOff(env: Env): string {
   const off = [
     !aiOn(env) && 'selfie search / "Find my photos" / face recognition',
@@ -149,13 +151,16 @@ function switchedOff(env: Env): string {
     !FEATURES.driveImport && 'Google Drive import',
     !FEATURES.broadcasts && 'broadcast messages to guests',
     !FEATURES.website && 'website builder',
+    !paymentsOn(env) && 'card/UPI payments, selling photos to guests and payouts',
+    !sellerSet(env) && 'GST invoice downloads (coming soon)',
+    'SMS/WhatsApp "notify me" messages to guests',
   ].filter(Boolean)
   return off.length ? off.join('; ') : 'nothing'
 }
 
 /** The prompt for one ticket: rules, guides, facts, then the conversation so far. */
 export async function promptFor(env: Env, ticket: typeof schema.tickets.$inferSelect, msgs: (typeof schema.ticketMessages.$inferSelect)[]): Promise<Msg[]> {
-  const guides = availableArticles({ ai: aiOn(env) }).map((a) => `- ${a.title}: ${a.answer}`).join('\n')
+  const guides = availableArticles({ ai: aiOn(env), payments: paymentsOn(env), ...(sellerSet(env) ? { seller: { name: env.SELLER_NAME!, gstin: env.SELLER_GSTIN! } } : {}) }).map((a) => `- ${a.title}: ${a.answer}`).join('\n')
   const system = `${SYSTEM}\n\nGUIDES:\n${guides}\n\nSWITCHED OFF: ${switchedOff(env)}\n\nFACTS:\n${await factsFor(env, ticket)}`
   const convo: Msg[] = msgs.slice(-10).map((m) => ({
     role: m.from === 'me' ? 'user' : 'assistant',

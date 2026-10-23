@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, Check, ChevronDown, Copy, Folder, KeyRound, QrCode, ScanFace, Upload } from 'lucide-react'
 import type { Album, GuestLinkPayload, GuestLinkResult, PhotoEvent, Studio } from '@frameline/shared'
 import { Button, Chip, Input, Select, cn, useToast } from '@frameline/ui'
-import { errorMessage, useApi } from '../../../lib/api'
+import { errorMessage, useApi, useServerFeatures } from '../../../lib/api'
 import { usePeople } from '../../../lib/queries'
 import { GALLERY_URL } from '../../../lib/url'
 import { displayUrl, downloadBlob, slug } from '../lib'
@@ -11,9 +11,11 @@ import { StyledQR, svgString, svgToPng } from './qr'
 
 type CardId = 'album' | 'person' | 'vip'
 
-/** Share → Special links: one album, one person (from a face photo), family (VIP: no PIN, no sign-up, every photo). */
+/** Share → Special links: one album, one person (from a face photo; only with the AI features on), family (VIP: no PIN, no sign-up, every photo). */
 export function SpecialLinks({ event, albums, studio }: { event: PhotoEvent; albums: Album[]; studio?: Studio }) {
-  const [open, setOpen] = useState<CardId | null>('person')
+  const { ai } = useServerFeatures()
+  const [open, setOpen] = useState<CardId | null>(ai ? 'person' : 'album')
+  useEffect(() => { if (!ai) setOpen((o) => (o === 'person' ? 'album' : o)) }, [ai])
   const brand = studio?.brandColor ?? '#1C1814'
   const toggle = (id: CardId) => setOpen((o) => (o === id ? null : id))
   return (
@@ -21,9 +23,9 @@ export function SpecialLinks({ event, albums, studio }: { event: PhotoEvent; alb
       <LinkCard id="album" icon={<Folder size={15} />} title="One album" body="Only one album, for example the Haldi photos for the bride’s family" open={open === 'album'} onToggle={toggle}>
         <AlbumLink event={event} albums={albums} brand={brand} />
       </LinkCard>
-      <LinkCard id="person" icon={<ScanFace size={15} />} title="One person" body="Opens straight to one person’s photos, no selfie needed" open={open === 'person'} onToggle={toggle}>
+      {ai && <LinkCard id="person" icon={<ScanFace size={15} />} title="One person" body="Opens straight to one person’s photos, no selfie needed" open={open === 'person'} onToggle={toggle}>
         <PersonLink event={event} brand={brand} />
-      </LinkCard>
+      </LinkCard>}
       <LinkCard id="vip" icon={<KeyRound size={15} />} title="Family (VIP)" body="Skips the PIN and sign-up, and sees every photo" open={open === 'vip'} onToggle={toggle}>
         <VipLink event={event} brand={brand} />
       </LinkCard>

@@ -87,6 +87,10 @@ export function uploadTarget(pathname: string, search: string): string {
 export const ALL_PAGES: NavItem[] = [...PRIMARY_NAV, ...MORE_NAV, ...ACCOUNT_NAV, ...EXTRA_PAGES]
   .filter((it, i, all) => all.findIndex((x) => x.to === it.to) === i)
 
+/** Sell photos and its settings only while card/UPI payments work (server switch `payments`): guests can't buy without. */
+export const withSelling = <T extends { to: string | null }>(items: T[], payments: boolean): T[] =>
+  payments ? items : items.filter((it) => !it.to?.startsWith('/sell'))
+
 /** True when `pathname` belongs to this nav item. */
 export function isActive(item: { to: string | null; match?: string[] }, pathname: string) {
   if (item.to === '/') return pathname === '/'

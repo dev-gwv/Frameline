@@ -1,16 +1,20 @@
-import { ScanFace } from 'lucide-react'
+import { Images, ScanFace } from 'lucide-react'
 import { fmt, tone, toneCss } from '@frameline/shared'
 import { PhotoTile } from '@frameline/ui'
+import { useServerFeatures } from '../../../lib/api'
+import { GALLERY_URL } from '../../../lib/url'
 import { isHex, type SetupDraft } from './draft'
 
 /** Live guest view of the gallery on a phone, driven by the wizard draft. */
 export function PhonePreview({ draft }: { draft: SetupDraft }) {
+  const { ai } = useServerFeatures()
   const color = isHex(draft.brandColor) ? draft.brandColor : '#B8862B'
   const name = draft.name.trim() || 'Your studio'
   const eventName = draft.eventName.trim() || 'Your first event'
   const city = draft.eventCity.trim() || draft.city.trim() || 'City'
   const dateLine = draft.eventDate ? `${fmt.date(draft.eventDate)} · ${city}` : city
-  const address = `${draft.handle.trim() || 'yourstudio'}.frameline.in`
+  // Galleries live at the gallery site's address (no per-studio subdomains yet).
+  const address = `${GALLERY_URL.replace(/^https?:\/\//, '')}/ABC1234`
   return (
     <div className="flex flex-col items-center gap-3">
       <div className="w-[260px] overflow-hidden rounded-[30px] border-[7px] border-inverse bg-surface shadow-float ring-1 ring-inverse-line" aria-label="Preview of your guest gallery" role="img">
@@ -29,7 +33,7 @@ export function PhonePreview({ draft }: { draft: SetupDraft }) {
         </div>
         <div className="flex flex-col gap-2.5 p-3.5">
           <span className="flex h-10 items-center justify-center gap-2 rounded-[10px] text-[13px] font-bold text-white" style={{ background: color }}>
-            <ScanFace size={15} aria-hidden /> Find my photos
+            {ai ? <><ScanFace size={15} aria-hidden /> Find my photos</> : <><Images size={15} aria-hidden /> See the photos</>}
           </span>
           <div className="grid grid-cols-3 gap-1">
             {[0, 2, 6, 7, 10, 11].map((t) => <PhotoTile key={t} tone={tone(t)} aspect="1 / 1" rounded="rounded-[3px]" />)}

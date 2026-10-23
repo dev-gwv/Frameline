@@ -41,17 +41,23 @@ export function NotificationsTab() {
 
   return (
     <div>
-    <SectionTitle title="Notifications" description="Emails we send you. Payment and invoice emails always go out." />
+    <SectionTitle title="Notifications" description={FEATURES.reminderEmails ? 'Emails we send you. Payment and invoice emails always go out.' : 'Emails we send you.'} />
     <Card className="max-w-[720px]">
       {!prefs ? <Skeleton className="h-64" /> : <>
         {FEATURES.website && <SettingRow icon={<Mail size={15} />} title="Enquiries also go to"
           description={prefs.enquiryEmails.length ? prefs.enquiryEmails.join(', ') : 'Only your studio email'}
           control={<Button size="sm" onClick={() => setEditing(true)}>Edit list</Button>} />}
-        <SettingRow icon={<CalendarClock size={15} />} title={LABELS.eventExpiry} description="Before and after an event expires" control={toggle('eventExpiry')} />
-        <SettingRow icon={<BellRing size={15} />} title={LABELS.planExpiry} description="Before and after your plan renews" control={toggle('planExpiry')} />
-        <SettingRow icon={<Mail size={15} />} title={LABELS.weeklySummary} description="Visits, face searches and sales, every Monday" control={toggle('weeklySummary')} />
-        <SettingRow icon={<CreditCard size={15} />} title="Payment and invoice emails" description="Receipts, payouts and failed payments. Needed for your records, so they can’t be turned off."
-          control={<Chip tone="ok">Always on</Chip>} />
+        {/* Nothing sends these yet (FEATURES.reminderEmails); the stored choices stay for when something does. */}
+        {FEATURES.reminderEmails ? <>
+          <SettingRow icon={<CalendarClock size={15} />} title={LABELS.eventExpiry} description="Before and after an event expires" control={toggle('eventExpiry')} />
+          <SettingRow icon={<BellRing size={15} />} title={LABELS.planExpiry} description="Before and after your plan renews" control={toggle('planExpiry')} />
+          <SettingRow icon={<Mail size={15} />} title={LABELS.weeklySummary} description="Visits, face searches and sales, every Monday" control={toggle('weeklySummary')} />
+          <SettingRow icon={<CreditCard size={15} />} title="Payment and invoice emails" description="Receipts, payouts and failed payments. Needed for your records, so they can’t be turned off."
+            control={<Chip tone="ok">Always on</Chip>} />
+        </> : (
+          <SettingRow icon={<Mail size={15} />} title="What we email you" description="Sign-in codes, team invites and links to ZIP downloads. Reminder emails (event expiry, plan renewal, a weekly summary) aren’t sent yet."
+            control={<Chip tone="neutral">Always on</Chip>} />
+        )}
         <EmailListModal open={editing} onOpenChange={setEditing} value={prefs.enquiryEmails} saving={save.isPending}
           onSave={(list) => save.mutate({ enquiryEmails: list }, { onSuccess: () => setEditing(false) })} />
       </>}

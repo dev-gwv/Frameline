@@ -73,6 +73,10 @@ export interface Env {
   AI_FEATURES?: string
   /** Where gallery-changed notices go (Studio AutoPilot's /webhooks/frameline). Unset: no notices are queued. */
   STUDIOAUTOPILOT_WEBHOOK_URL?: string
+  /** The company on studios' GST invoices. Name and GSTIN both unset: no invoices are offered (see GET /v1/meta). */
+  SELLER_NAME?: string
+  SELLER_GSTIN?: string
+  SELLER_ADDRESS?: string
 }
 
 export interface AuthUser { id: string; email: string; name: string; familyId?: string }

@@ -24,7 +24,7 @@ export function PlanCard() {
       <h2 className={title}>Plan and photos</h2>
       {!u ? <div className="mt-2 flex flex-col gap-2"><Skeleton className="h-3.5 w-1/2" /><Skeleton className="h-1.5" /><Skeleton className="h-3.5 w-2/3" /></div> : (
         <>
-          <p className="mb-2.5 mt-0.5 text-[13px] text-ink-2">{plan?.name ?? 'Your plan'} · renews {fmt.date(u.validTill)}</p>
+          <p className="mb-2.5 mt-0.5 text-[13px] text-ink-2">{u.trial ? `Free trial till ${fmt.date(u.validTill)}` : `${plan?.name ?? 'Your plan'} · valid till ${fmt.date(u.validTill)}`}</p>
           <Meter value={u.photosUsed} max={u.photosLimit} tone={pct >= 1 ? 'bad' : pct >= 0.9 ? 'warn' : 'gold'} label="Photos used" />
           <div className="mt-2 flex items-center justify-between gap-2 text-[12.5px]">
             <span className="text-ink-2 tnum">{fmt.count(u.photosUsed)} of {fmt.count(u.photosLimit)} used</span>

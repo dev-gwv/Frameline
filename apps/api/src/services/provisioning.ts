@@ -35,7 +35,7 @@ export async function createStudio(db: DB, userId: string, name: string, email: 
   await db.batch([
     db.insert(schema.studios).values({
       id, name, handle, email, followCode: followCode(), createdAt: now,
-      validTill: new Date(Date.now() + 14 * 86_400_000).toISOString(), planId: 'starter', photosLimit: 50_000,
+      validTill: new Date(Date.now() + 14 * 86_400_000).toISOString(), onTrial: true, planId: 'starter', photosLimit: 50_000,
     }),
     db.insert(schema.memberships).values({ id: newId('mem'), studioId: id, userId, role: 'owner', eventIds: [], createdAt: now }),
     db.insert(schema.watermarks).values({ studioId: id, settings: { ...defaults.watermark, text: name }, updatedAt: now }),

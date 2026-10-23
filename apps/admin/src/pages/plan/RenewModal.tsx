@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Copy, MessageCircle, ScanFace } from 'lucide-react'
 import { BASE_RENEWAL, EXPIRY_GRACE_DAYS, FACE_RETENTION_DAYS, fmt, RENEWAL_CREDIT_DISCOUNT, type PhotoEvent, type RenewalLink } from '@frameline/shared'
 import { Button, Input, Modal, RadioCardGroup, Skeleton, useToast } from '@frameline/ui'
-import { useApi } from '../../lib/api'
+import { useApi, useServerFeatures } from '../../lib/api'
 import { useAction, useEvents, useUsage, useWalletBalance } from '../../lib/queries'
 import { useAuth } from '../../lib/auth'
 import { copyText } from '../wallet/lib'
@@ -21,8 +21,11 @@ function clientWord(e: PhotoEvent) {
  * or send the client a link to pay your price. Opened from Home "Needs you" / search with /plan?renew=<id>[&faces=1].
  * Exported so Home can mount it too.
  */
-export function RenewModal({ eventId, faces, onClose }: { eventId: string | null; faces?: boolean; onClose: () => void }) {
+export function RenewModal({ eventId, faces: facesAsked, onClose }: { eventId: string | null; faces?: boolean; onClose: () => void }) {
   const api = useApi()
+  // Face search copy only while the AI features are on; payment links and UPI/card only while payments are.
+  const { ai, payments } = useServerFeatures()
+  const faces = facesAsked && ai
   const toast = useToast()
   const { user } = useAuth()
   const events = useEvents()
@@ -54,9 +57,9 @@ export function RenewModal({ eventId, faces, onClose }: { eventId: string | null
   let primary
   if (mode === 'link') primary = link
     ? <Button variant="primary" onClick={onClose}>Done</Button>
-    : <Button variant="primary" disabled={!ev} loading={create.isPending} onClick={() => ev && create.mutate(ev.id)}>Create the link</Button>
+    : <Button variant="primary" disabled={!ev || !payments} loading={create.isPending} onClick={() => ev && create.mutate(ev.id)}>Create the link</Button>
   else primary = short
-    ? <Button variant="primary" disabled={!ev} loading={renew.isPending} onClick={() => ev && renew.mutate({ id: ev.id, payWith: 'card' })}>Pay {fmt.rupees(cardPrice)} by UPI or card</Button>
+    ? <Button variant="primary" disabled={!ev || !payments} loading={renew.isPending} onClick={() => ev && renew.mutate({ id: ev.id, payWith: 'card' })}>Pay {fmt.rupees(cardPrice)} by UPI or card</Button>
     : <Button variant="primary" disabled={!ev || !wallet.data} loading={renew.isPending} onClick={() => ev && renew.mutate({ id: ev.id, payWith: 'credits' })}>Renew for {fmt.rupees(walletPrice)}</Button>
 
   return (
@@ -77,12 +80,14 @@ export function RenewModal({ eventId, faces, onClose }: { eventId: string | null
         )}
         <RadioCardGroup label="How to renew" columns={2} value={mode} onChange={setMode} options={[
           { value: 'self', title: 'Renew it myself', description: short ? `One more year · ${fmt.rupees(cardPrice)} by UPI or card` : `One more year · ${fmt.rupees(walletPrice)} from your wallet` },
-          { value: 'link', title: `Send ${client} a link`, description: `They pay ${fmt.rupees(clientPrice)}. You keep ${fmt.rupees(Math.max(0, clientPrice - BASE_RENEWAL))}.` },
+          { value: 'link', title: `Send ${client} a link`, disabled: !payments, description: payments ? `They pay ${fmt.rupees(clientPrice)}. You keep ${fmt.rupees(Math.max(0, clientPrice - BASE_RENEWAL))}.` : 'Needs card and UPI payments, which aren’t switched on yet' },
         ]} />
         {mode === 'self' && (
           <div className="rounded-control bg-sunk px-3.5 py-3 text-[14px]">
             <div className="flex justify-between gap-3"><span>Wallet</span><b className="tnum">{wallet.data ? fmt.rupees(Math.round(balance)) : wallet.isError ? '—' : '…'}</b></div>
-            {short && <p className="mt-1 text-[13px] text-ink-2">Your wallet has less than {fmt.rupees(walletPrice)}, so you pay {fmt.rupees(cardPrice)} by UPI or card. Add money to renew for half.</p>}
+            {short && <p className="mt-1 text-[13px] text-ink-2">{payments
+              ? <>Your wallet has less than {fmt.rupees(walletPrice)}, so you pay {fmt.rupees(cardPrice)} by UPI or card. Add money to renew for half.</>
+              : <>Your wallet has less than {fmt.rupees(walletPrice)}, and card and UPI payments aren’t switched on yet. Redeem a code to add money, or book a call from Help.</>}</p>}
           </div>
         )}
         {mode === 'link' && (link ? (

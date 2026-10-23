@@ -4,9 +4,9 @@ import {
   ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Eye, FolderInput, ImageIcon, Info, MoreHorizontal, Pause, Play,
   Plus, RotateCw, Share2, Trash2, Wand2, X, ZoomIn, ZoomOut,
 } from 'lucide-react'
-import { ENHANCE_COST, FEATURES, fmt, type Album, type Photo } from '@frameline/shared'
+import { ENHANCE_COST, FEATURES, displayUrl, fmt, type Album, type Photo } from '@frameline/shared'
 import { Button, EmptyState, Menu, Modal, PhotoTile, Skeleton, useToast } from '@frameline/ui'
-import { errorMessage, useApi } from '../../lib/api'
+import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { useAlbums, useEvent, usePeople, usePhoto, usePhotos, useStudio, useWatermark } from '../../lib/queries'
 import { GALLERY_URL, copyText, downloadBlob, liveUrl, parseSort, photosLabel } from '../workspace/lib'
 import { trashWithUndo, usePendingDeletes } from '../workspace/pending'
@@ -29,7 +29,9 @@ export default function PhotoViewer() {
   const api = useApi()
   const toast = useToast()
   const albumParam = params.get('album') ?? undefined
-  const sort = parseSort(params.get('sort'))
+  const { ai } = useServerFeatures()
+  const asked = parseSort(params.get('sort'))
+  const sort = !ai && asked === 'people' ? 'newest' : asked
   const personId = params.get('person') ?? undefined
   const infoOpen = params.get('info') === '1'
   const setInfo = (v: boolean) => setParams((p) => { const n = new URLSearchParams(p); if (v) n.set('info', '1'); else n.delete('info'); return n }, { replace: true })
@@ -47,7 +49,7 @@ export default function PhotoViewer() {
   const studio = useStudio().data
   const wm = useWatermark().data
   const album = albums.find((a) => a.id === photo?.albumId)
-  const url = liveUrl(photo?.url)
+  const url = liveUrl(photo && displayUrl(photo))
   const move = useMovePhotos(eventParam)
 
   /* ---------- Navigation ---------- */
@@ -152,7 +154,8 @@ export default function PhotoViewer() {
     if (!photo) return
     setDownloading(true)
     try {
-      const size = await downloadPhoto(api, photo, kind, { url, watermark: event?.settings.watermarkOff ? undefined : `© ${wm?.text || studio?.name || 'Studio'}`, save: downloadBlob })
+      // The original from its own file; web size may start from the 2048 px web copy.
+      const size = await downloadPhoto(api, photo, kind, { url: kind === 'original' ? liveUrl(photo.url) : url, watermark: event?.settings.watermarkOff ? undefined : `© ${wm?.text || studio?.name || 'Studio'}`, save: downloadBlob })
       toast.success(kind === 'web' ? 'Web size downloaded' : 'Original downloaded', `${fmt.bytes(size)} · ${photo.filename}`)
     } catch (e) { toast.error('Download failed', errorMessage(e)) } finally { setDownloading(false) }
   }, [api, photo, url, event?.settings.watermarkOff, wm?.text, studio?.name, toast])
@@ -319,7 +322,7 @@ function CoverGuard({ open, onOpenChange, eventId, albumId, currentId, onPicked 
           {photos.map((p) => (
             <button key={p.id} type="button" disabled={!!busy} onClick={async () => { setBusy(p.id); await onPicked(p); setBusy(null) }}
               aria-label={`Use ${p.filename} as the cover`} className="rounded-[8px] outline-offset-2 hover:outline hover:outline-2 hover:outline-accent disabled:opacity-60">
-              <PhotoTile tone={p.tone} url={liveUrl(p.url)} alt={p.filename} rounded="rounded-[8px]" />
+              <PhotoTile tone={p.tone} url={liveUrl(displayUrl(p))} alt={p.filename} rounded="rounded-[8px]" />
             </button>
           ))}
         </div>

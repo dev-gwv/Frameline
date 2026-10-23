@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
+import { EVENT_PHOTO_LIMIT } from '@frameline/shared'
 import { getDb, schema } from '../src/db/client'
 import { call, expectProblem, freshIp, uniqueEmail } from './helpers'
 
@@ -25,6 +26,17 @@ describe('upload limits', () => {
     await getDb(env.DB).update(schema.events).set({ photoLimit: 2 }).where(eq(schema.events.id, ev.id)).run()
     expectProblem(await call(`/v1/events/${ev.id}/uploads`, { token, body: { albumId: album.id, files: files(3) } }), 402, 'event_limit_reached')
     expect((await call(`/v1/events/${ev.id}/uploads`, { token, body: { albumId: album.id, files: files(2) } })).status).toBe(201)
+  })
+
+  it('cannot be raised by editing the event: photo limit, expiry and plan change only by paying', async () => {
+    const { token, ev } = await studioWithAlbum()
+    expect(ev.photoLimit).toBe(EVENT_PHOTO_LIMIT)
+    for (const body of [{ photoLimit: 1_000_000 }, { expiresAt: '2099-01-01' }, { plan: 'subscription' }, { name: 'Renamed', photoLimit: 1_000_000 }]) {
+      expectProblem(await call(`/v1/events/${ev.id}`, { token, method: 'PATCH', body }), 422, 'validation_failed')
+    }
+    const after = (await call(`/v1/events/${ev.id}`, { token })).json
+    expect(after).toMatchObject({ name: 'Small event', photoLimit: ev.photoLimit, expiresAt: ev.expiresAt, plan: ev.plan })
+    expect((await call(`/v1/events/${ev.id}`, { token, method: 'PATCH', body: { name: 'Renamed' } })).json.name).toBe('Renamed')
   })
 
   it('do not lock out a lapsed plan while payments are off (it could not be renewed)', async () => {

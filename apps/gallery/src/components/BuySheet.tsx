@@ -3,7 +3,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Clock, Lock, Minus, Plus } from '
 import { Field, Input, PhotoTile, Skeleton } from '@frameline/ui'
 import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { fmt, type Order, type OrderItemInput, type Photo, type PublicEvent, type PublicStudio, type ShippingAddress } from '@frameline/shared'
+import { displayUrl, fmt, type Order, type OrderItemInput, type Photo, type PublicEvent, type PublicStudio, type ShippingAddress } from '@frameline/shared'
 import { payWithRazorpay } from '../lib/razorpay'
 import { isLiveApi, useApi } from '../lib/api'
 
@@ -226,7 +226,7 @@ export function BuySheet({ open, onOpenChange, photos, mode, event, studio, sess
           <LoadError error={pricesQ.error} title="Prices didn’t load" onRetry={() => void pricesQ.refetch()} />
         ) : (
           <div className="flex flex-col gap-3">
-            {mode === 'photo' && photos[0] && <PhotoTile tone={photos[0].tone} url={photos[0].url} rotation={photos[0].rotation} aspect="16 / 9" rounded="rounded-[10px]" alt={photos[0].filename} />}
+            {mode === 'photo' && photos[0] && <PhotoTile tone={photos[0].tone} url={displayUrl(photos[0])} rotation={photos[0].rotation} aspect="16 / 9" rounded="rounded-[10px]" alt={photos[0].filename} />}
             <div role="radiogroup" aria-label="What to buy" className="flex flex-col gap-2">
               {options.map((o) => (
                 <RadioCard key={o.id} checked={choice === o.id} onSelect={() => setChoice(o.id)} title={o.label} detail={o.detail}>

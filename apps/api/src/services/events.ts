@@ -1,5 +1,5 @@
 import { and, eq, isNull, or, sql } from 'drizzle-orm'
-import { PRESETS, defaultSettings, hash, tone } from '@frameline/shared'
+import { EVENT_PHOTO_LIMIT, PRESETS, defaultSettings, hash, tone } from '@frameline/shared'
 import type { DB } from '../db/client'
 import { schema } from '../db/client'
 import { NotFound } from '../lib/errors'
@@ -80,7 +80,7 @@ export async function createEvent(db: DB, studioId: string, input: NewEvent): Pr
   }
   const row: typeof schema.events.$inferInsert = {
     id, studioId, shortId, name: input.name, type: input.type, date: date.toISOString(), city: input.city,
-    status: 'draft', photoCount: 0, photoLimit: 2000, visits: { web: 0, android: 0, ios: 0 }, faceMatches: 0,
+    status: 'draft', photoCount: 0, photoLimit: EVENT_PHOTO_LIMIT, visits: { web: 0, android: 0, ios: 0 }, faceMatches: 0,
     expiresAt: new Date(date.getTime() + 365 * 86_400_000).toISOString(), createdAt: now,
     coverTones: [tone(t), tone(t + 3), tone(t + 7)],
     settings: defaultSettings({ ...PRESETS[input.preset].settings, ...input.overrides, guestUploadLimit: input.guestUploadLimit, pin: newPin() }),

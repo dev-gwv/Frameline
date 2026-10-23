@@ -25,7 +25,7 @@ import { publicRoutes } from './routes/public'
 import { realtimeRoutes } from './routes/realtime'
 import { studioRoutes } from './routes/studio'
 import { uploadRoutes } from './routes/uploads'
-import { aiOn } from './lib/features'
+import { aiOn, paymentsOn } from './lib/features'
 
 export const API_MAJOR = 'v1'
 const JSON_LIMIT = 1024 * 1024 // 1 MiB for JSON bodies
@@ -89,7 +89,8 @@ export function createApp() {
   v1.use('*', async (c, next) => {
     const isPart = c.req.method === 'PUT' && c.req.path.includes('/uploads/') && c.req.path.includes('/parts/')
     const isAsset = c.req.method === 'POST' && c.req.path === '/v1/assets'
-    const max = isPart ? PART_LIMIT : isAsset ? ASSET_LIMIT : JSON_LIMIT
+    const isWebCopy = c.req.method === 'PUT' && /^\/v1\/photos\/[^/]+\/web$/.test(c.req.path)
+    const max = isPart ? PART_LIMIT : isAsset || isWebCopy ? ASSET_LIMIT : JSON_LIMIT
     return bodyLimit({ maxSize: max, onError: () => { throw new PayloadTooLarge(max) } })(c, next)
   })
   v1.use('*', peekUser)
@@ -102,13 +103,29 @@ export function createApp() {
         name: z.string(), apiVersion: z.string(), version: z.string(), build: z.string(), environment: z.string(),
         docs: z.string(), openapi: z.string(), time: z.string(),
         /** Server switches the apps follow at run time (lib/features.ts). */
-        features: z.object({ ai: z.boolean(), supportWhatsapp: z.string().optional(), supportCallUrl: z.string().optional() }),
+        features: z.object({
+          ai: z.boolean(),
+          /** Card/UPI payments work (Razorpay keys set, or simulated in dev/test): selling, top-ups, plan purchases. */
+          payments: z.boolean(),
+          supportWhatsapp: z.string().optional(),
+          supportCallUrl: z.string().optional(),
+          /** The company on GST invoices (SELLER_* vars); absent until it is set, and then no invoices are offered. */
+          seller: z.object({ name: z.string(), gstin: z.string(), address: z.string().optional() }).optional(),
+        }),
       })),
     },
   }), (c) => c.json({
     name: 'frameline-api', apiVersion: API_MAJOR, version: c.env.API_VERSION, build: c.env.BUILD_SHA, environment: c.env.ENVIRONMENT,
     docs: '/v1/docs', openapi: '/v1/openapi.json', time: new Date().toISOString(),
-    features: { ai: aiOn(c.env), ...(c.env.SUPPORT_WHATSAPP ? { supportWhatsapp: c.env.SUPPORT_WHATSAPP } : {}), ...(c.env.SUPPORT_CALL_URL ? { supportCallUrl: c.env.SUPPORT_CALL_URL } : {}) },
+    features: {
+      ai: aiOn(c.env),
+      payments: paymentsOn(c.env),
+      ...(c.env.SUPPORT_WHATSAPP ? { supportWhatsapp: c.env.SUPPORT_WHATSAPP } : {}),
+      ...(c.env.SUPPORT_CALL_URL ? { supportCallUrl: c.env.SUPPORT_CALL_URL } : {}),
+      ...(c.env.SELLER_NAME && c.env.SELLER_GSTIN
+        ? { seller: { name: c.env.SELLER_NAME, gstin: c.env.SELLER_GSTIN, ...(c.env.SELLER_ADDRESS ? { address: c.env.SELLER_ADDRESS } : {}) } }
+        : {}),
+    },
   }, 200))
 
   v1.route('/auth', authRoutes)

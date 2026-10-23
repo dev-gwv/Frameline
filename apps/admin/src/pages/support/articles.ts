@@ -7,9 +7,9 @@ export const TOPICS: { label: string; query: string; article?: string }[] = [
   { label: 'Change a PIN', query: 'pin' },
   { label: 'Camera FTP setup', query: 'ftp', article: 'ftp' },
   { label: 'Google Drive import limits', query: 'drive', article: 'drive' },
-  { label: 'Refund an order', query: 'refund' },
-  { label: 'GST invoice', query: 'gst' },
-  { label: 'Video tutorials · English / हिन्दी', query: 'video' },
+  { label: 'Refund an order', query: 'refund', article: 'refund' },
+  { label: 'GST invoice', query: 'gst', article: 'gst' },
+  { label: 'Your first event', query: 'start', article: 'quickstart' },
 ]
 
 /** Guides matching a search, among `list` (availableArticles: only features that are switched on). */

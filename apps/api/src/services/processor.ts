@@ -27,6 +27,8 @@ export interface ProcessResult {
   exif?: { camera?: string; lens?: string; exposure?: string }
   /** Rendition URL to show in galleries; falls back to the original's media URL. */
   previewUrl?: string
+  /** Set here (not by the processor) when the processor wrote the renditions, so galleries show the 2048 px copy. */
+  renditions?: boolean
   faces: { box: [number, number, number, number]; embedding?: number[]; personId?: string }[]
 }
 
@@ -68,7 +70,8 @@ export class HttpProcessor implements PhotoProcessor {
       if (body?.error === 'busy') throw new ProcessorBusy(Number(res.headers.get('retry-after')) || 30)
     }
     if (!res.ok) throw new Error(`processor responded ${res.status}`)
-    return (await res.json()) as ProcessResult
+    // A full run (not a face re-index) writes …/renditions/2048.jpg and 3072.jpg next to the original.
+    return { ...((await res.json()) as ProcessResult), ...(job.reindex ? {} : { renditions: true }) }
   }
 }
 
@@ -136,6 +139,7 @@ export async function applyResult(env: Env, job: ProcessPhotoJob, result: Proces
       status: 'ready',
       facesIndexedAt: new Date().toISOString(),
       url: result.previewUrl ?? photo.url,
+      ...(result.renditions ? { webCopy: true } : {}),
       capturedAt: result.capturedAt ?? photo.capturedAt,
       exif: { ...photo.exif, ...result.exif, width: result.width, height: result.height, sizeBytes: result.sizeBytes ?? photo.exif.sizeBytes },
       faces: faceRows.filter((f) => f.personId).map((f) => ({ personId: f.personId!, box: f.box })),

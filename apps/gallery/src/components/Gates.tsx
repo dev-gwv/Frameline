@@ -157,6 +157,8 @@ export function PinGate({ event, studio, session }: { event: PublicEvent; studio
 /* ---------------------------------------------------------------- Registration */
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+/** The privacy policy lives on the studio site (apps/admin/public/privacy.html); VITE_ADMIN_URL is set by CI. */
+const PRIVACY_URL = `${(import.meta.env.VITE_ADMIN_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/privacy`
 export const validPhone = (v: string) => { const d = v.replace(/[\s()-]/g, ''); return /^\+?\d{10,13}$/.test(d) }
 
 /** Registration gate: api.registerGuest adds the guest to the studio's Guests list and returns a session. */
@@ -224,7 +226,10 @@ export function RegistrationGate({ event, studio, session }: { event: PublicEven
         )}
         {formError && <p role="alert" className="rounded-card bg-bad-soft p-3 text-[13px] font-semibold text-bad">{formError}</p>}
         <PrimaryButton type="submit" loading={busy}>Continue</PrimaryButton>
-        <p className="text-center text-[12px] text-ink-3">Only {studio.name} and the host see your details.</p>
+        <p className="text-center text-[12px] text-ink-3">
+          Only {studio.name} and the host see your details. Frameline keeps them to run this gallery and never sells them.{' '}
+          <a href={PRIVACY_URL} target="_blank" rel="noreferrer noopener" className="underline hover:text-ink-2">Privacy policy</a>
+        </p>
       </form>
     </GateFrame>
   )

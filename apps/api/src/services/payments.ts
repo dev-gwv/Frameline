@@ -75,7 +75,7 @@ export async function grantStudioPurchase(db: DB, studioId: string, p: StudioPur
     case 'plan': {
       const plan = PLANS.find((x) => x.id === p.planId)!
       await db.update(schema.studios).set({
-        planId: p.planId, planPeriod: p.period, photosLimit: plan.photos,
+        planId: p.planId, planPeriod: p.period, photosLimit: plan.photos, onTrial: false,
         validTill: new Date(Date.now() + PERIOD_DAYS[p.period] * 86_400_000).toISOString(),
       }).where(eq(schema.studios.id, studioId)).run()
       return p.totalPaise > 0 ? recordPurchase(db, studioId, { description: p.label, kind: 'plan', amountPaise: p.totalPaise, method }) : null

@@ -3,7 +3,7 @@ import { Outlet, useOutletContext, useParams, useSearchParams } from 'react-rout
 import { useQueryClient } from '@tanstack/react-query'
 import { Archive, BellRing, CalendarX, EyeOff, ImageIcon, MessageCircle, Phone, SearchX, WifiOff } from 'lucide-react'
 import { Field, Input, Skeleton } from '@frameline/ui'
-import type { Photo, PublicBlockReason, PublicEvent, PublicStudio } from '@frameline/shared'
+import { FEATURES, type Photo, type PublicBlockReason, type PublicEvent, type PublicStudio } from '@frameline/shared'
 import { useMatches, useMyOrders, usePublicEvent } from '../lib/queries'
 import { guest, rememberEvent, useGuest, useSession, type EventSession } from '../lib/guest'
 import { waLink } from '../lib/brand'
@@ -182,6 +182,14 @@ function NotYet({ event, studio, session }: { event: PublicEvent; studio: Public
       const f = friendlyError(err, 'We couldn’t stop the message')
       setError(`${f.title}. ${f.body}`)
     } finally { setBusy(false) }
+  }
+  // No SMS/WhatsApp sender yet (FEATURES.guestNotify): promise nothing, offer a reload.
+  if (!FEATURES.guestNotify) {
+    return (
+      <StateBlock icon={<ImageIcon size={24} />} tone="neutral" title="Photos are on their way" body={`${studio.name} is still uploading. Check back a little later.`}>
+        <WideButton onClick={reload}>Check again</WideButton>
+      </StateBlock>
+    )
   }
   if (session.notify) {
     return (

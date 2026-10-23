@@ -1,0 +1,1 @@
+ALTER TABLE `photos` ADD `web_copy` integer DEFAULT false NOT NULL;

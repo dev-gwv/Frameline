@@ -1,5 +1,5 @@
 import {
-  BASE_RENEWAL, COUPONS, ENHANCE_COST, PACKS, PERIOD_DAYS, PLANS, PRESETS, RENEWAL_CREDIT_DISCOUNT, STORE_COMMISSION,
+  BASE_RENEWAL, COUPONS, ENHANCE_COST, EVENT_PHOTO_LIMIT, PACKS, PERIOD_DAYS, PLANS, PRESETS, RENEWAL_CREDIT_DISCOUNT, STORE_COMMISSION,
   createSeed, defaultSettings, generatePhotos, hash, planPrice, tone, type SeedState,
 } from './seed'
 import type {
@@ -771,7 +771,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     t.assistant = 'thinking'
     setTimeout(() => {
       const words = text.toLowerCase().split(/\W+/).filter((w) => w.length > 3)
-      const best = availableArticles({ ai: true })
+      const best = availableArticles({ ai: true, payments: true })
         .map((a) => ({ a, n: words.filter((w) => `${a.title} ${a.tags.join(' ')}`.toLowerCase().includes(w)).length }))
         .sort((x, y) => y.n - x.n)[0]
       const found = best && best.n > 0
@@ -915,7 +915,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       const t = hash(id)
       const event: PhotoEvent = {
         id, shortId, name: input.name, type: input.type, date: new Date(input.date).toISOString(), city: input.city,
-        status: 'draft', photoCount: 0, photoLimit: 2000, visits: { web: 0, android: 0, ios: 0 }, faceMatches: 0,
+        status: 'draft', photoCount: 0, photoLimit: EVENT_PHOTO_LIMIT, visits: { web: 0, android: 0, ios: 0 }, faceMatches: 0,
         expiresAt: new Date(new Date(input.date).getTime() + 365 * DAY).toISOString(), createdAt: new Date().toISOString(),
         coverTones: [tone(t), tone(t + 3), tone(t + 7)],
         settings: defaultSettings({ ...PRESETS[input.preset].settings, guestUploadLimit: input.guestUploadLimit, pin: String(1000 + (t % 9000)) }),
@@ -941,6 +941,9 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
         patch = { ...patch, hosts: patch.hosts.map((h) => normHost(h, before.get(h.id))) }
         for (const h of patch.hosts!) if (!before.has(h.id)) console.info(`[frameline mock] Host invite to ${h.email || h.phone} for ${e.name}`)
       }
+      // Like the server: the photo limit, expiry and plan change only by paying.
+      patch = { ...patch }
+      delete patch.photoLimit; delete patch.expiresAt; delete patch.plan
       Object.assign(e, patch)
       emit('events')
       return clone(e)

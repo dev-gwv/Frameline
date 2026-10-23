@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'r
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, createHttpApi, createMockApi, localStoragePersistence, storageGuestTokenStore, storageTokenStore, type ChangeTopic, type FramelineApi, type FramelineHttpApi, fetchServerFeatures, type ServerFeatures } from '@frameline/shared'
 import { payStudioCheckout } from './razorpay'
+import { makeWebCopy } from './webCopy'
 
 const STORAGE_KEY = 'frameline.mock.v1'
 /** Set to the API origin (e.g. http://localhost:8787) to use the real backend instead of sample data. */
@@ -33,6 +34,7 @@ export function createApi(): FramelineApi {
     tokens: tokenStore,
     guestTokens: storageGuestTokenStore(),
     payCheckout: payStudioCheckout,
+    makeWebCopy,
     onUnauthorized: () => {
       if (!location.pathname.startsWith('/login')) location.assign(`/login?expired=1&from=${encodeURIComponent(location.pathname + location.search)}`)
     },
@@ -113,7 +115,7 @@ export function useHttpApi(): FramelineHttpApi | null {
   return 'auth' in api ? (api as FramelineHttpApi) : null
 }
 
-/** The server's run-time switches (AI features on or off), asked once per visit. */
+/** The server's run-time switches (AI features, payments, invoice seller), asked once per visit. */
 export function useServerFeatures(): ServerFeatures {
-  return useQuery({ queryKey: ['server-features'], queryFn: () => fetchServerFeatures(API_URL), staleTime: Infinity }).data ?? { ai: false }
+  return useQuery({ queryKey: ['server-features'], queryFn: () => fetchServerFeatures(API_URL), staleTime: Infinity }).data ?? { ai: false, payments: false }
 }

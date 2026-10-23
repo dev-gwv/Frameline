@@ -145,7 +145,7 @@ export function useApi() {
   return api
 }
 
-/** The server's run-time switches (AI features on or off), asked once per visit. */
+/** The server's run-time switches (AI features, payments), asked once per visit. */
 export function useServerFeatures(): ServerFeatures {
-  return useQuery({ queryKey: ['server-features'], queryFn: () => fetchServerFeatures(API_URL), staleTime: Infinity }).data ?? { ai: false }
+  return useQuery({ queryKey: ['server-features'], queryFn: () => fetchServerFeatures(API_URL), staleTime: Infinity }).data ?? { ai: false, payments: false }
 }

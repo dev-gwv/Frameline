@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Download } from 'lucide-react'
 import { Button, Card, Page, Skeleton, TabBar } from '@frameline/ui'
+import { useServerFeatures } from '../../lib/api'
 import { useEvents, useStudio, useStudioStats, useUsage } from '../../lib/queries'
 import { QueryError } from '../system'
 import { eventsCsv, EventsReport, filterRows, toRows, type Bucket } from './EventsReport'
@@ -13,8 +14,9 @@ type Tab = 'events' | 'usage'
 /** The "this month" numbers that used to be on Home: a small row above the tabs. */
 function MonthSummary() {
   const q = useStudioStats()
+  const { ai, payments } = useServerFeatures()
   if (q.isError) return null
-  const stats = q.data ? monthStats(q.data) : undefined
+  const stats = q.data ? monthStats(q.data, { ai, payments }) : undefined
   const month = q.data ? labelOf(q.data.month) : monthLabel()
   return (
     <section aria-label={`${month} so far`} className="mb-5">

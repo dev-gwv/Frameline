@@ -1,6 +1,7 @@
 import { createExecutionContext, createMessageBatch, env, getQueueResult } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import worker from '../src/index'
+import { guestPhotoOut } from '../src/db/mappers'
 import type { PhotoJob } from '../src/env'
 import { call, expectProblem, tokenFor } from './helpers'
 
@@ -152,6 +153,30 @@ describe('uploads (proxy mode) + queue consumer', () => {
     const photo = await call(`/v1/photos/${file.photoId}`, { token })
     expect(photo.json.status).toBe('ready')
     expect(photo.json.url).toContain('/v1/media/')
+    expect(photo.json.webUrl).toBeUndefined()
+
+    // The browser's 2048 px web copy goes next to the original; the photo then offers it for showing.
+    const putWeb = (body: Uint8Array, type = 'image/jpeg') => SELF.fetch(`https://api.test/v1/photos/${file.photoId}/web`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': type }, body })
+    expect((await putWeb(new TextEncoder().encode('not a jpeg'))).status).toBe(422)
+    expect((await putWeb(new Uint8Array([0xff, 0xd8, 0xff]), 'image/png')).status).toBe(415)
+    expect((await putWeb(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]))).status).toBe(204)
+    expect(await env.MEDIA.head(file.key.replace(/\/[^/]+$/, '/renditions/2048.jpg'))).not.toBeNull()
+    const withCopy = await call(`/v1/photos/${file.photoId}`, { token })
+    expect(withCopy.json.webUrl).toMatch(/\/renditions\/2048\.jpg/)
+    expect(withCopy.json.url).not.toBe(withCopy.json.webUrl)
+    // Uploaders can't send web copies for photos in events they aren't assigned to.
+    const other = await call('/v1/events/ev_riya/photos?limit=1', { token: await tokenFor('editor') })
+    const riyaPhoto = other.json.items[0].id as string
+    expect((await SELF.fetch(`https://api.test/v1/photos/${riyaPhoto}/web`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'image/jpeg' }, body: new Uint8Array([0xff, 0xd8, 0xff]) })).status).toBe(404)
+  })
+
+  it('gives guests the web copy, and the original only when the gallery offers full-size downloads', () => {
+    const row = { id: 'ph_x', eventId: 'ev_x', albumId: 'al_x', studioId: 'st_x', filename: 'a.jpg', index: 1, capturedAt: '2026-01-01T00:00:00.000Z', tone: { angle: 0, stops: ['#000', '#111', '#222'] }, url: null, r2Key: 'studios/st_x/events/ev_x/originals/ph_x/a.jpg', status: 'ready', hidden: false, favourites: 0, downloads: 0, faces: [], exif: { width: 1, height: 1, sizeBytes: 1 }, uploadedBy: 'x', source: 'web', quality: 'web', createdAt: '2026-01-01T00:00:00.000Z', reviewStatus: null, enhancedFrom: null, views: 0, rotation: 0, facesIndexedAt: null, deletedAt: null, copiedFrom: null, webCopy: true } as unknown as Parameters<typeof guestPhotoOut>[0]
+    const web = guestPhotoOut(row, undefined, false)
+    expect(web.url).toBe(web.webUrl)
+    expect(web.url).toMatch(/renditions\/2048\.jpg$/)
+    expect(guestPhotoOut(row, undefined, true).url).toMatch(/ph_x\/a\.jpg$/)
+    expect(guestPhotoOut({ ...row, webCopy: false }, undefined, false).webUrl).toBeUndefined()
   })
 })
 

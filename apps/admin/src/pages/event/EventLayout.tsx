@@ -3,7 +3,7 @@ import { NavLink, Outlet, useMatch, useNavigate, useOutletContext, useParams } f
 import { Archive, Eye, Film, HardDriveDownload, MoreHorizontal, ScanFace, Share2, Upload } from 'lucide-react'
 import { FEATURES, fmt, type EventStats, type PhotoEvent } from '@frameline/shared'
 import { Button, CountBadge, EventStatusChip, Menu, Skeleton, cn, useToast } from '@frameline/ui'
-import { errorMessage, useApi } from '../../lib/api'
+import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { useEvent, useEventStats, useGuestsAttention } from '../../lib/queries'
 import { BackLink, galleryUrl, useModalParam } from '../../lib/url'
 import { EventModals } from '../workspace/EventModals'
@@ -62,7 +62,8 @@ function EventHeader({ event }: { event: PhotoEvent }) {
   const toast = useToast()
   const badge = useGuestsAttention(event.id)
   const stats = useEventStats(event.id).data
-  const finding = findingFaces(event, stats)
+  const { ai } = useServerFeatures()
+  const finding = ai ? findingFaces(event, stats) : null
 
   const archive = async () => {
     const before = event.status
@@ -89,7 +90,7 @@ function EventHeader({ event }: { event: PhotoEvent }) {
               <h1 className="font-display text-[20px] font-semibold leading-tight sm:text-[24px]">{event.name}</h1>
               <EventStatusChip status={event.status} expiresInDays={fmt.daysUntil(event.expiresAt)} />
             </div>
-            <p className="mt-0.5 text-[12.5px] text-ink-2 tnum">{eventFacts(event, stats)}</p>
+            <p className="mt-0.5 text-[12.5px] text-ink-2 tnum">{eventFacts(event, ai ? stats : undefined)}</p>
           </div>
           <div className="flex w-full items-center gap-2 sm:w-auto">
             <Menu
@@ -98,7 +99,7 @@ function EventHeader({ event }: { event: PhotoEvent }) {
                 { label: 'Preview as a guest', description: 'Opens the gallery in a new tab', icon: <Eye size={16} />, onSelect: () => window.open(galleryUrl(event.shortId), '_blank', 'noopener') },
                 ...(FEATURES.driveImport ? [{ label: 'Import from Google Drive', description: 'Bring in a finished shoot', icon: <HardDriveDownload size={16} />, onSelect: () => m.open('import') }] : []),
                 { label: 'Films', description: 'Add YouTube videos to the gallery', icon: <Film size={16} />, onSelect: () => m.open('films') },
-                { label: 'Face finding', description: !event.settings.faceSearch ? 'Off for this event' : finding ? finding[0].toUpperCase() + finding.slice(1) : `${fmt.count(stats?.faces.total ?? event.photoCount)} photos done`, icon: <ScanFace size={16} />, onSelect: () => m.open('faces') },
+                ...(ai ? [{ label: 'Face finding', description: !event.settings.faceSearch ? 'Off for this event' : finding ? finding[0].toUpperCase() + finding.slice(1) : `${fmt.count(stats?.faces.total ?? event.photoCount)} photos done`, icon: <ScanFace size={16} />, onSelect: () => m.open('faces') }] : []),
                 'separator',
                 event.status === 'archived'
                   ? { label: 'Restore event', description: 'Guests can open it again', icon: <Archive size={16} />, onSelect: () => void restore() }

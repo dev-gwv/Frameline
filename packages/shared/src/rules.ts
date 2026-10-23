@@ -1,4 +1,4 @@
-import type { EventSettings, HandleCheck, PayoutCheck, Price, WatermarkPosition } from './types'
+import type { EventSettings, HandleCheck, PayoutCheck, Photo, Price, WatermarkPosition } from './types'
 
 /*
  * Contract v5 business rules shared by the mock API and apps/api, so both answer the same way
@@ -9,6 +9,12 @@ import type { EventSettings, HandleCheck, PayoutCheck, Price, WatermarkPosition 
 export const TRASH_DAYS = 30
 /** GST added to Frameline's own charges (plans, card-paid packs). Wallet payments include it in the amount taken. */
 export const GST_RATE = 0.18
+
+/** What to show for a photo in grids and viewers: its 2048 px web copy when there is one, else the file itself. */
+export const displayUrl = (p: Pick<Photo, 'url' | 'webUrl'>): string | undefined => p.webUrl ?? p.url
+
+/** Long side of the web copy the studio's browser makes at upload (and the processor's download rendition). */
+export const WEB_COPY_PX = 2048
 
 /**
  * An event's settings as guests get them while the AI features (face finding, selfie search) are switched off

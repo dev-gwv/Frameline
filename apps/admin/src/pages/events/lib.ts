@@ -86,7 +86,7 @@ export const audience = (ai: boolean): { value: PresetId; title: string; descrip
     ? { value: 'private-family', title: 'Only the people in them', description: 'Guests take a selfie to see their own photos. PIN required.' }
     : { value: 'private-family', title: 'Private, with a PIN', description: 'Only people with the link and PIN can open it.' },
   { value: 'open-corporate', title: 'Everyone with the link', description: 'Good for company events and parties.' },
-  { value: 'race', title: 'Buyers (race or sports)', description: 'Guests find their photos and buy them.' },
+  { value: 'race', title: 'Buyers (race or sports)', description: ai ? 'Guests find their photos and buy them.' : 'Guests browse all the photos, and can buy them when selling is on.' },
 ]
 
 // ── Recently deleted ──────────────────────────────────────────────────────────

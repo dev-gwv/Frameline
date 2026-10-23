@@ -1,5 +1,6 @@
 import { SELF, createExecutionContext, createScheduledController, env, waitOnExecutionContext } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
+import { EVENT_PHOTO_LIMIT } from '@frameline/shared'
 import worker from '../src/index'
 import { BASE, call, expectProblem, freshIp, tokenFor, uniqueEmail } from './helpers'
 
@@ -204,7 +205,7 @@ describe('studio side', () => {
     const ev = (await call('/v1/events', { token, body: { name: 'Pack', date: '2026-12-01', city: 'Goa', type: 'other', preset: 'open-corporate', guestUploadLimit: 0 } })).json
     expectProblem(await call(`/v1/events/${ev.id}/packs`, { token, body: { photos: 1000, payWith: 'credits' } }), 402, 'insufficient_credits')
     const bought = await call(`/v1/events/${ev.id}/packs`, { token, body: { photos: 1000, payWith: 'card' } })
-    expect(bought.json).toMatchObject({ charged: 700, event: { photoLimit: 3000 }, purchase: { kind: 'pack', amount: 700, method: 'card' } })
+    expect(bought.json).toMatchObject({ charged: 700, event: { photoLimit: EVENT_PHOTO_LIMIT + 1000 }, purchase: { kind: 'pack', amount: 700, method: 'card' } })
     expect((await call('/v1/studio/usage', { token })).json.walletCredits).toBe(500)
     expectProblem(await call(`/v1/events/${ev.id}/packs`, { token, body: { photos: 1234, payWith: 'card' } }), 422, 'validation_failed')
 

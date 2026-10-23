@@ -8,6 +8,7 @@ import {
 } from '../db/mappers'
 import { Conflict, NotFound, ServiceUnavailable, ValidationFailed } from '../lib/errors'
 import { hashPassword, randomInt } from '../lib/crypto'
+import { effectiveSettings } from '../lib/features'
 import { toMajor, toMinor } from '../lib/money'
 import { addLedger, payoutBalance, walletOf } from '../services/billing'
 import { newId, nowIso } from '../lib/ids'
@@ -915,7 +916,9 @@ businessRoutes.openapi(createRoute({
       .where(and(eq(p.studioId, m.studioId), inArray(p.eventId, part), eq(p.reviewStatus, 'pending'), isNull(p.deletedAt))).groupBy(p.eventId)
     pendingUploads.push(...rows.map((r) => ({ eventId: r.eventId, count: Number(r.count), latestAt: r.latestAt })))
   }
-  return c.json({ items: buildNeedsYou({ events, accessRequests, pendingUploads }) }, 200)
+  // With the AI features off there is no face search data to lapse, so no "renew to keep face search" item.
+  const effective = events.map((x) => ({ ...x, settings: effectiveSettings(c.env, x.settings) }))
+  return c.json({ items: buildNeedsYou({ events: effective, accessRequests, pendingUploads }) }, 200)
 })
 
 /** Sends the refund to Razorpay when keys exist and the order was paid through it. Returns the refund id, or null when simulated. */

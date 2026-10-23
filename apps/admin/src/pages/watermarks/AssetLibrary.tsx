@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus, Trash2, Type, Upload } from 'lucide-react'
 import { fmt } from '@frameline/shared'
 import { Button, Card, CardHeader, cn, EmptyState, Field, Input, Meter, Modal, Select, useToast } from '@frameline/ui'
+import { useStudio } from '../../lib/queries'
 import { FONTS, fontStack, readAsDataUrl, uid } from './lib'
 import { ASSET_STORAGE, AssetMark, MAX_ASSET_FILE, MAX_ASSETS, type Asset } from './advanced'
 import { PhotoFrame, SAMPLES } from './samples'
@@ -74,7 +75,10 @@ export function AssetLibrary({ assets, onAdd, onRemove, studioName }: { assets: 
 }
 
 function TextMarkModal({ open, onOpenChange, onCreate }: { open: boolean; onOpenChange: (v: boolean) => void; onCreate: (a: Asset) => void }) {
-  const [text, setText] = useState('© Northlight')
+  const studioName = useStudio().data?.name
+  const [text, setText] = useState(`© ${studioName ?? 'Your studio'}`)
+  // Start from the studio's own name each time the modal opens.
+  useEffect(() => { if (open) setText(`© ${studioName ?? 'Your studio'}`) }, [open, studioName])
   const [font, setFont] = useState<string>('Fraunces')
   const [color, setColor] = useState('#FFFFFF')
   const ok = text.trim().length > 0

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ApiError, BASE_RENEWAL, fmt } from '@frameline/shared'
+import { ApiError, BASE_RENEWAL, FEATURES, fmt } from '@frameline/shared'
 import { Button, Field, Input, Meter, Modal, RadioCardGroup, Segmented, Skeleton } from '@frameline/ui'
-import { errorMessage, useApi } from '../../lib/api'
+import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { useAction, useUsageBreakdown } from '../../lib/queries'
 import { QueryError } from '../system'
 import { withGst } from './usePlanState'
@@ -10,17 +10,24 @@ type ModalProps = { open: boolean; onOpenChange: (v: boolean) => void }
 
 /* ---------------- How to pay ---------------- */
 export type PayWith = 'upi' | 'card' | 'wallet'
-/** UPI / Card / Wallet as radio cards. Wallet is disabled when it holds less than `needed`. */
+/**
+ * UPI / Card / Wallet as radio cards. Wallet is disabled when it holds less than `needed`; UPI and Card while
+ * card payments aren't switched on (GET /v1/meta `payments`), and the wallet is picked when it can pay.
+ */
 export function PayMethods({ value, onChange, wallet, needed }: { value: PayWith; onChange: (v: PayWith) => void; wallet?: number; needed?: number }) {
+  const { payments } = useServerFeatures()
   const withWallet = wallet !== undefined && needed !== undefined
+  const walletCan = withWallet && wallet! >= needed!
+  useEffect(() => { if (!payments && value !== 'wallet' && walletCan) onChange('wallet') }, [payments, value, walletCan]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-[12.5px] font-bold text-ink-2">Pay with</span>
       <RadioCardGroup label="Pay with" value={value} onChange={onChange} columns={withWallet ? 3 : 2} options={[
-        { value: 'upi', title: 'UPI', description: 'GPay, PhonePe, Paytm' },
-        { value: 'card', title: 'Card', description: 'Credit or debit' },
-        ...(withWallet ? [{ value: 'wallet' as const, title: 'Wallet', description: wallet! >= needed! ? `${fmt.rupees(Math.floor(wallet!))} in it` : `Only ${fmt.rupees(Math.floor(wallet!))}`, disabled: wallet! < needed! }] : []),
+        { value: 'upi', title: 'UPI', description: payments ? 'GPay, PhonePe, Paytm' : 'Not switched on yet', disabled: !payments },
+        { value: 'card', title: 'Card', description: payments ? 'Credit or debit' : 'Not switched on yet', disabled: !payments },
+        ...(withWallet ? [{ value: 'wallet' as const, title: 'Wallet', description: walletCan ? `${fmt.rupees(Math.floor(wallet!))} in it` : `Only ${fmt.rupees(Math.floor(wallet!))}`, disabled: !walletCan }] : []),
       ]} />
+      {!payments && <span className="text-[12.5px] text-ink-3">Card and UPI payments aren’t switched on yet.{withWallet ? ' You can pay from your wallet.' : ''}</span>}
     </div>
   )
 }
@@ -71,6 +78,7 @@ export function CapacityModal({ open, onOpenChange }: ModalProps) {
 const PRESETS = [500, 1000, 5000]
 export function AddMoneyModal({ open, onOpenChange }: ModalProps) {
   const api = useApi()
+  const { payments } = useServerFeatures()
   const [amount, setAmount] = useState('1000')
   const [pay, setPay] = useState<PayWith>('upi')
   useEffect(() => { if (open) { setAmount('1000'); setPay('upi') } }, [open])
@@ -81,8 +89,8 @@ export function AddMoneyModal({ open, onOpenChange }: ModalProps) {
     onSuccess: () => onOpenChange(false),
   })
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Add money to your wallet" description="Pays for event packs, renewals and AI enhance." width={480}
-      footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" disabled={!!error} loading={buy.isPending} onClick={() => buy.mutate(n)}>Pay {error ? '' : fmt.rupees(withGst(n), true)}</Button></>}>
+    <Modal open={open} onOpenChange={onOpenChange} title="Add money to your wallet" description={`Pays for event packs and renewals${FEATURES.aiEnhance ? ' and AI enhance' : ''}.`} width={480}
+      footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" disabled={!!error || !payments} loading={buy.isPending} onClick={() => buy.mutate(n)}>Pay {error ? '' : fmt.rupees(withGst(n), true)}</Button></>}>
       <Field label="Amount" error={amount && error} htmlFor="add-amount">
         <Input id="add-amount" autoFocus inputMode="numeric" className="tnum" icon={<span>₹</span>} value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, ''))} />
       </Field>
