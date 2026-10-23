@@ -1,7 +1,7 @@
 # Studio AutoPilot integration
 
 Frameline is the gallery add-on of **Studio AutoPilot**, the studio-management app
-(repo IPC-Studios/platform, live at studioautopilot.in). The two apps stay separate.
+(repo dev-gwv/platform, live at studioautopilot.in). The two apps stay separate.
 They are joined by single sign-in and one gallery per project, and are never
 merged. Billing stays Frameline's own: a studio pays for the add-on from its
 Frameline wallet.

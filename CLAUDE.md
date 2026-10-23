@@ -2,7 +2,7 @@
 
 Frameline is a Kamero-style event photo gallery for Indian wedding and event studios: the studio uploads, guests
 open a link (+ PIN), browse, download and buy. It is also **Studio AutoPilot's gallery add-on** (the studio CRM at
-studioautopilot.in, repo IPC-Studios/platform, local `E:\BuildOurs\IPC Studios CRM`), joined by sign-in and links,
+studioautopilot.in, repo dev-gwv/platform, local `E:\BuildOurs\IPC Studios CRM`), joined by sign-in and links,
 never merged. Billing stays Frameline's own (its wallet and plans).
 
 Read this before changing anything. When the owner gives a standing instruction, add it here.
@@ -50,7 +50,7 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
 - **Smart App Control** on the owner's PC (since 19 Oct 2026) blocks `git.exe`; node works. If git fails with "An
   Application Control policy has blocked this file", the owner has to switch Smart App Control off (Windows
   Security → App & browser control) or git must run elsewhere.
-- **Both GitHub repos are public** (checked 17 Oct: dev-gwv/Frameline and IPC-Studios/platform). No secret is in code or
+- **Both GitHub repos are public** (checked 17 Oct: dev-gwv/Frameline and dev-gwv/platform). No secret is in code or
   history; keep it that way: every key is a Cloudflare secret (`wrangler secret put NAME --env production`),
   never a file. The owner was asked to make both private.
 
