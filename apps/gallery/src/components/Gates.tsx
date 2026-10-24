@@ -6,6 +6,7 @@ import { useApi } from '../lib/api'
 import { authFrom, guest, useGuest, type EventSession } from '../lib/guest'
 import { attemptsRemaining, errorCode, friendlyError, retrySeconds } from '../lib/errors'
 import { isIOS, promptInstall, useCanInstall } from '../lib/pwa'
+import { telLink } from '../lib/brand'
 import { EventHero, PrimaryButton, TextButton, WideButton } from './common'
 import { Sheet } from './Sheet'
 
@@ -127,7 +128,7 @@ export function PinGate({ event, studio, session }: { event: PublicEvent; studio
   }
 
   const mins = Math.max(1, Math.ceil(lockedFor / 60_000))
-  const tel = `tel:${studio.phone.replace(/\s/g, '')}`
+  const tel = telLink(studio)
 
   return (
     <GateFrame event={event}>
@@ -148,7 +149,9 @@ export function PinGate({ event, studio, session }: { event: PublicEvent; studio
         )}
         <div id="pin-help" aria-live="polite" className={cn('min-h-5 text-[13px]', error ? 'font-bold text-bad' : 'text-ink-3')}>{!locked && error}</div>
         <PrimaryButton type="submit" disabled={locked} loading={busy}>Open gallery</PrimaryButton>
-        <p className="text-[12.5px] text-ink-3">No PIN? Ask the host, or <a className="font-bold text-accent-text underline-offset-2 hover:underline" href={tel}>call {studio.name}</a>.</p>
+        <p className="text-[12.5px] text-ink-3">{tel
+          ? <>No PIN? Ask the host, or <a className="font-bold text-accent-text underline-offset-2 hover:underline" href={tel}>call {studio.name}</a>.</>
+          : <>No PIN? Ask the host or {studio.name}.</>}</p>
       </form>
     </GateFrame>
   )

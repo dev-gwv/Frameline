@@ -67,6 +67,16 @@ export const purchaseAmount = (p: StudioPurchase): number =>
  * (already paid from the wallet), the simulated path, and a confirmed card/UPI payment alike.
  * Returns the purchase row (null for a zero-amount plan change).
  */
+/** Keeps an event open to guests for another year (from today when it has already closed). False if it's gone. */
+export async function extendEvent(db: DB, studioId: string, eventId: string): Promise<boolean> {
+  const [ev] = await db.select().from(schema.events).where(and(eq(schema.events.id, eventId), eq(schema.events.studioId, studioId))).limit(1)
+  if (!ev) return false
+  const expiresAt = new Date(Math.max(Date.now(), Date.parse(ev.expiresAt)) + 365 * 86_400_000).toISOString()
+  await db.update(schema.events).set({ expiresAt, ...(ev.status === 'expiring' || ev.status === 'archived' ? { status: 'live' as const } : {}) })
+    .where(eq(schema.events.id, ev.id)).run()
+  return true
+}
+
 export async function grantStudioPurchase(db: DB, studioId: string, p: StudioPurchase, method: PayMethod) {
   switch (p.kind) {
     case 'credits':
@@ -81,11 +91,7 @@ export async function grantStudioPurchase(db: DB, studioId: string, p: StudioPur
       return p.totalPaise > 0 ? recordPurchase(db, studioId, { description: p.label, kind: 'plan', amountPaise: p.totalPaise, method }) : null
     }
     case 'renewal': {
-      const [ev] = await db.select().from(schema.events).where(and(eq(schema.events.id, p.eventId), eq(schema.events.studioId, studioId))).limit(1)
-      if (!ev) throw new AppError(409, 'event_gone', 'Event gone', 'This event no longer exists. Contact support for a refund.')
-      const expiresAt = new Date(Math.max(Date.now(), Date.parse(ev.expiresAt)) + 365 * 86_400_000).toISOString()
-      await db.update(schema.events).set({ expiresAt, ...(ev.status === 'expiring' || ev.status === 'archived' ? { status: 'live' as const } : {}) })
-        .where(eq(schema.events.id, ev.id)).run()
+      if (!await extendEvent(db, studioId, p.eventId)) throw new AppError(409, 'event_gone', 'Event gone', 'This event no longer exists. Contact support for a refund.')
       if (p.linkId) await db.update(schema.renewalLinks).set({ paidAt: nowIso() }).where(eq(schema.renewalLinks.id, p.linkId)).run()
       const by = p.linkId ? ' (paid by your client)' : ''
       return recordPurchase(db, studioId, { description: `Event renewal · ${p.eventName}${by}`, kind: 'renewal', amountPaise: p.chargedPaise, method })

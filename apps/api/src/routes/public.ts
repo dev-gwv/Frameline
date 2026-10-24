@@ -1,11 +1,14 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import type { Context } from 'hono'
-import { and, asc, count, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm'
 import { DOWNLOAD_ALL_LIMIT, STORE_COMMISSION, displayUrl, effectivePrices, selfieHasNoFace } from '@frameline/shared'
 import type { AppEnv, GuestClaims } from '../env'
 import { getDb, schema } from '../db/client'
-import { albumOut, enquiryOut, filmOut, guestPhotoOut, hostOut, orderOut, photoOut, priceOut, publicStudioOut, storeSettingsOut, studioOut, watermarkOut, zipOut } from '../db/mappers'
+import { albumOut, enquiryOut, filmOut, hostOut, orderOut, priceOut, publicStudioOut, storeSettingsOut, studioOut, watermarkOut, zipOut } from '../db/mappers'
 import { sha256Hex, timingSafeEqual } from '../lib/crypto'
+import { guestPhotosOut, studioPhotosOut } from '../lib/media-sign'
+import { zipFileSize, zipParts, zipPhotos } from '../services/zips'
+import { emailOn } from '../services/mailer'
 import { AppError, Forbidden, NotConfigured, NotFound, RateLimited, Unauthorized, ValidationFailed } from '../lib/errors'
 import { background, clientIp } from '../lib/http'
 import { newId, nowIso } from '../lib/ids'
@@ -17,7 +20,7 @@ import { IdempotencyHeader, NoContent, body, createRouter, json, problems } from
 import { afterCursor, encodeCursor } from '../lib/pagination'
 import { guestFromRequest } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
-import { limits, storeFor } from '../middleware/rate-limit'
+import { limits } from '../middleware/rate-limit'
 import {
   DownloadAllowance, Enquiry, FaceSearchInput, FaceSearchResult, GuestLinkPayload, GuestSession, NotifyRequest, Order, Photo, Price, PublicEvent, PublicEventSummary, PublicStudio,
   PublicWatermark, ShippingAddressInput, StudioProfile, ZipRequest,
@@ -48,6 +51,10 @@ publicRoutes.use('*', limits.publicGallery)
 const GUEST_TTL_SEC = 12 * 3600
 const PIN_MAX_TRIES = 5
 const PIN_LOCK_SEC = 900
+/** Largest photo a guest may add (phone photos are a few MB). */
+const GUEST_FILE_BYTES = 40 * 1024 ** 2
+/** Wrong PINs per gallery per hour from all devices together. */
+const PIN_GALLERY_MAX_TRIES = 100
 
 const ShortIdParam = z.object({ shortId: z.string().regex(/^[0-9A-Za-z]{7}$/, 'Gallery codes are 7 characters').openapi({ param: { name: 'shortId', in: 'path' }, example: '6402F9F' }) })
 const CodeParam = z.object({ code: z.string().min(3).max(64).openapi({ param: { name: 'code', in: 'path' }, example: 'FA-KCGWHY' }) })
@@ -134,7 +141,7 @@ publicRoutes.openapi(createRoute({
   if (e.coverPhotoId) {
     // A cover the studio has since hidden is not shown to guests.
     const [cp] = await db.select().from(schema.photos).where(and(eq(schema.photos.id, e.coverPhotoId), visible())).limit(1)
-    if (cp) coverUrl = displayUrl(photoOut(cp, c.env.PUBLIC_MEDIA_BASE))
+    if (cp) coverUrl = displayUrl((await guestPhotosOut(c.env, [cp], false))[0])
   }
   const { pin: _pin, fullAccessPin: _full, ...settings } = e.settings
   const blocked = blockedReason(e)
@@ -148,18 +155,28 @@ publicRoutes.openapi(createRoute({
 
 /** Checks a typed PIN: 'full' for the full-access PIN, 'event' for the event PIN; anything else counts as a wrong try. */
 async function checkPin(c: Context<AppEnv>, e: EventRow, pin: string): Promise<'full' | 'event'> {
-  const key = `pin-fail:${clientIp(c)}:${e.id}`
-  const lock = await c.env.RATE_LIMITER.get(c.env.RATE_LIMITER.idFromName(key)).peek(PIN_MAX_TRIES, PIN_LOCK_SEC * 1000)
-  if (!lock.success) throw new RateLimited(lock.reset, 'Too many wrong PINs. Try again in 15 minutes, or ask the photographer.', 'pin_locked')
-  const full = e.settings.fullAccessPin
-  if (full && timingSafeEqual(pin, full)) return 'full'
-  if (!timingSafeEqual(pin, e.settings.pin)) {
-    const d = await storeFor(c.env, { windowSec: PIN_LOCK_SEC }).hit(key, PIN_MAX_TRIES, PIN_LOCK_SEC)
-    const left = Math.max(0, d.remaining)
-    if (left === 0) throw new RateLimited(d.reset, 'Too many wrong PINs. Try again in 15 minutes, or ask the photographer.', 'pin_locked')
-    throw new Unauthorized(`That PIN is wrong. ${left} ${left === 1 ? 'try' : 'tries'} left.`, 'invalid_pin', { attemptsRemaining: left })
+  // Every try is counted before the PIN is compared (a Durable Object counts atomically), so a burst of parallel
+  // guesses can't all slip past the lock; a correct PIN takes its try back. The per-gallery count stops guessing
+  // spread over many IPs.
+  const limiter = (key: string) => c.env.RATE_LIMITER.get(c.env.RATE_LIMITER.idFromName(key))
+  const device = limiter(`pin-fail:${clientIp(c)}:${e.id}`)
+  const gallery = limiter(`pin-fail-event:${e.id}`)
+  const d = await device.hit(PIN_MAX_TRIES, PIN_LOCK_SEC * 1000)
+  if (!d.success) throw new RateLimited(d.reset, 'Too many wrong PINs. Try again in 15 minutes, or ask the photographer.', 'pin_locked')
+  const g = await gallery.hit(PIN_GALLERY_MAX_TRIES, 3_600_000)
+  if (!g.success) {
+    await device.forgive()
+    throw new RateLimited(g.reset, 'Too many wrong PINs have been tried on this gallery. Try again later, or ask the photographer.', 'pin_locked')
   }
-  return 'event'
+  const full = e.settings.fullAccessPin
+  const kind = full && timingSafeEqual(pin, full) ? 'full' : timingSafeEqual(pin, e.settings.pin) ? 'event' : undefined
+  if (kind) {
+    await Promise.all([device.forgive(), gallery.forgive()])
+    return kind
+  }
+  const left = Math.max(0, d.remaining)
+  if (left === 0) throw new RateLimited(PIN_LOCK_SEC, 'Too many wrong PINs. Try again in 15 minutes, or ask the photographer.', 'pin_locked')
+  throw new Unauthorized(`That PIN is wrong. ${left} ${left === 1 ? 'try' : 'tries'} left.`, 'invalid_pin', { attemptsRemaining: left })
 }
 
 publicRoutes.openapi(createRoute({
@@ -305,7 +322,7 @@ publicRoutes.openapi(createRoute({
   const [{ total }] = await db.select({ total: count() }).from(p).where(where)
   if (q.highlights) {
     const rows = await db.select().from(p).where(where).orderBy(desc(p.favourites), asc(p.id)).limit(q.limit).offset(q.offset ?? 0)
-    return c.json({ items: rows.map((r) => guestPhotoOut(r, c.env.PUBLIC_MEDIA_BASE, e.settings.originalDownloads)), total, nextCursor: null }, 200)
+    return c.json({ items: await guestPhotosOut(c.env, rows, e.settings.originalDownloads), total, nextCursor: null }, 200)
   }
   const sortCol = q.sort === 'name' ? p.filename : q.sort === 'sequence' ? p.index : p.capturedAt
   const dir = q.sort === 'newest' ? 'desc' : 'asc'
@@ -316,7 +333,7 @@ publicRoutes.openapi(createRoute({
   const items = rows.slice(0, q.limit)
   const last = items[items.length - 1]
   const lastKey = last ? (q.sort === 'name' ? last.filename : q.sort === 'sequence' ? last.index : last.capturedAt) : ''
-  return c.json({ items: items.map((r) => guestPhotoOut(r, c.env.PUBLIC_MEDIA_BASE, e.settings.originalDownloads)), total, nextCursor: more && last ? encodeCursor(lastKey, last.id) : null }, 200)
+  return c.json({ items: await guestPhotosOut(c.env, items, e.settings.originalDownloads), total, nextCursor: more && last ? encodeCursor(lastKey, last.id) : null }, 200)
 })
 
 publicRoutes.openapi(createRoute({
@@ -393,7 +410,7 @@ publicRoutes.openapi(createRoute({
   for (const part of chunk(ids)) rows.push(...await db.select().from(schema.photos).where(and(inArray(schema.photos.id, part), eq(schema.photos.eventId, e.id), visible())))
   const order = new Map(ids.map((id, i) => [id, i]))
   rows.sort((a, b) => order.get(a.id)! - order.get(b.id)!)
-  return c.json({ items: rows.map((r) => guestPhotoOut(r, c.env.PUBLIC_MEDIA_BASE, e.settings.originalDownloads)) }, 200)
+  return c.json({ items: await guestPhotosOut(c.env, rows, e.settings.originalDownloads) }, 200)
 })
 
 publicRoutes.openapi(createRoute({
@@ -520,6 +537,8 @@ publicRoutes.openapi(createRoute({
   const input = c.req.valid('json')
   const st = e.settings
   if (st.downloads === 'none') throw new Forbidden('Downloads are turned off for this gallery.', 'downloads_disabled')
+  // The ZIP's link goes by email: without email it would never arrive.
+  if (!emailOn(c.env)) throw new AppError(409, 'email_not_configured', 'Save one by one', 'We can’t email a ZIP right now. Save the photos one by one instead.')
   const needOwn = st.downloads === 'own' || (st.facePrivacy && st.faceSearch && g?.all !== true)
   if (needOwn && (!input.personId || !input.photoIds?.length)) {
     throw new Forbidden('You can download only the photos you’re in. Find yours with a selfie first.', 'downloads_own_only')
@@ -614,8 +633,16 @@ publicRoutes.openapi(createRoute({
 }), async (c) => {
   const { e, g, album } = await guestUploadTarget(c, c.req.valid('param').shortId)
   const input = c.req.valid('json')
-  const [{ n }] = await getDb(c.env.DB).select({ n: count() }).from(schema.photos).where(and(eq(schema.photos.albumId, album.id), isNull(schema.photos.deletedAt)))
-  const room = Math.max(0, e.settings.guestUploadLimit - n)
+  const tooBig = input.files.filter((f) => f.size > GUEST_FILE_BYTES || !/^image\//.test(f.contentType))
+  if (tooBig.length) {
+    throw new ValidationFailed(tooBig.map((f) => ({ field: 'files', in: 'body' as const, message: `${f.filename}: guests can add photos up to ${GUEST_FILE_BYTES / 1024 ** 2} MB`, code: 'file_not_allowed' })))
+  }
+  const db = getDb(c.env.DB)
+  const [{ n }] = await db.select({ n: count() }).from(schema.photos).where(and(eq(schema.photos.albumId, album.id), isNull(schema.photos.deletedAt)))
+  // Uploads started but not finished hold their room too, or a gallery's limit could be passed many times over.
+  const open = await db.select({ files: schema.uploads.files }).from(schema.uploads)
+    .where(and(eq(schema.uploads.albumId, album.id), eq(schema.uploads.status, 'pending'), gt(schema.uploads.expiresAt, nowIso())))
+  const room = Math.max(0, e.settings.guestUploadLimit - n - open.reduce((s, u) => s + u.files.length, 0))
   if (input.files.length > room) {
     throw new AppError(409, 'guest_upload_limit', 'Upload limit reached', `This gallery takes ${e.settings.guestUploadLimit} guest photos and has room for ${room} more.`, { extensions: { remaining: room } })
   }
@@ -1031,10 +1058,13 @@ publicRoutes.openapi(createRoute({
 publicRoutes.openapi(createRoute({
   method: 'get', path: '/zips/{id}', tags: ['Public gallery'], summary: 'Download links for a ready ZIP request',
   request: { params: z.object({ id: z.string().max(64).openapi({ param: { name: 'id', in: 'path' } }) }) },
-  responses: { 200: json(z.object({ eventName: z.string(), photos: z.array(z.object({ id: z.string(), filename: z.string(), url: z.string().nullable() })) })), ...problems(404) },
+  responses: { 200: json(z.object({ eventName: z.string(), parts: z.number().int(), photos: z.array(z.object({ id: z.string(), filename: z.string(), url: z.string().nullable() })) })), ...problems(404) },
 }), async (c) => {
-  const { ev, rows } = await readyZip(c, c.req.valid('param').id)
-  return c.json({ eventName: ev?.name ?? '', photos: rows.map((r) => ({ id: r.id, filename: r.filename, url: photoOut(r, c.env.PUBLIC_MEDIA_BASE).url ?? null })) }, 200)
+  const { z0, ev, rows } = await readyZip(c, c.req.valid('param').id)
+  // A studio export links the originals; a guest ZIP the files the gallery gives guests.
+  const out = z0.requestedBy === 'guest' ? await guestPhotosOut(c.env, rows, ev.settings.originalDownloads) : await studioPhotosOut(c.env, rows)
+  const parts = zipParts(rows, (r) => zipFileSize(z0, ev, r)).length
+  return c.json({ eventName: ev?.name ?? '', parts, photos: out.map((r) => ({ id: r.id, filename: r.filename, url: r.url ?? null })) }, 200)
 })
 
 /** A ready ZIP request (links last 7 days) and the photos it covers right now. */
@@ -1044,27 +1074,23 @@ async function readyZip(c: Context<AppEnv>, id: string) {
   if (!z0 || z0.status !== 'ready' || Date.parse(z0.readyAt ?? z0.requestedAt) < Date.now() - 7 * 86_400_000) throw new NotFound('Download')
   const [ev] = await db.select().from(schema.events).where(and(eq(schema.events.id, z0.eventId), isNull(schema.events.deletedAt))).limit(1)
   if (!ev) throw new NotFound('Download')
-  const p = schema.photos
-  // A guest ZIP follows the gallery: a photo hidden, trashed or unreviewed since the request is left out.
-  // A studio export takes every photo that isn't deleted.
-  const allowed = z0.requestedBy === 'guest' ? visible(p) : and(isNull(p.deletedAt), eq(p.status, 'ready'))
-  const rows: (typeof p.$inferSelect)[] = []
-  if (z0.photoIds?.length) {
-    for (const part of chunk(z0.photoIds)) rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), inArray(p.id, part), allowed)))
-  } else {
-    rows.push(...await db.select().from(p).where(and(eq(p.eventId, z0.eventId), allowed,
-      z0.albumId ? eq(p.albumId, z0.albumId) : sql`${p.albumId} IN (SELECT id FROM albums WHERE event_id = ${z0.eventId} AND kind = 'album' AND deleted_at IS NULL)`)).orderBy(asc(p.capturedAt)).limit(5000))
-  }
-  return { z0, ev, rows }
+  return { z0, ev, rows: await zipPhotos(db, z0) }
 }
 
 publicRoutes.openapi(createRoute({
   method: 'get', path: '/zips/{id}/download', tags: ['Public gallery'], summary: 'Download a ready ZIP (streamed)',
-  description: 'The link in the "your photos are ready" email. Streams a ZIP of the files (stored, not recompressed). A studio export holds the originals. A guest ZIP follows the gallery: full size (3072 px) or web size (2048 px), with the watermark burned in by the image processor when downloads carry one; without a processor, 409 `watermark_required` for those galleries. Photos with no file to give are left out. Plain ZIP: up to 65,535 files and 4 GiB; anything past that is left out.',
-  request: { params: z.object({ id: z.string().max(64).openapi({ param: { name: 'id', in: 'path' } }) }) },
+  description: 'The link in the "your photos are ready" email. Streams a ZIP of the files (stored, not recompressed). A studio export holds the originals. A guest ZIP follows the gallery: full size (3072 px) or web size (2048 px), with the watermark burned in by the image processor when downloads carry one; without a processor, 409 `watermark_required` for those galleries. Photos with no file to give are left out. A big request comes in numbered parts (`?part=2`; GET /zips/{id} says how many), each under 2 GB and 400 files.',
+  request: {
+    params: z.object({ id: z.string().max(64).openapi({ param: { name: 'id', in: 'path' } }) }),
+    query: z.object({ part: z.coerce.number().int().min(1).default(1) }),
+  },
   responses: { 200: { description: 'application/zip' }, ...problems(404, 409) },
 }), async (c) => {
-  const { z0, ev, rows } = await readyZip(c, c.req.valid('param').id)
+  const { z0, ev, rows: all } = await readyZip(c, c.req.valid('param').id)
+  const { part } = c.req.valid('query')
+  const parts = zipParts(all, (r) => zipFileSize(z0, ev, r))
+  if (part > Math.max(1, parts.length)) throw new NotFound('Download')
+  const rows = parts[part - 1] ?? []
   const guestZip = z0.requestedBy === 'guest'
   const size = ev.settings.originalDownloads ? '3072' as const : '2048' as const
   const watermark = guestZip ? await watermarkFor(c.env, ev, size) : null
@@ -1103,7 +1129,7 @@ publicRoutes.openapi(createRoute({
     await writer.abort(e).catch(() => undefined)
   })
   background(c, build)
-  const name = `${ev.name.replace(/[^\p{L}\p{N} _-]+/gu, '').trim().slice(0, 60) || 'photos'}.zip`
+  const name = `${ev.name.replace(/[^\p{L}\p{N} _-]+/gu, '').trim().slice(0, 60) || 'photos'}${parts.length > 1 ? ` part ${part} of ${parts.length}` : ''}.zip`
   return new Response(readable, {
     headers: {
       'Content-Type': 'application/zip',

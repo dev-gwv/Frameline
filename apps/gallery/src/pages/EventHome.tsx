@@ -118,8 +118,10 @@ export function EventHome() {
             <ActionRow icon={<ImagePlus size={17} />} title="Add your photos" body={`Share what you shot at ${event.name}`} onClick={() => setUpload(true)} />
           )}
           <ActionRow icon={<Store size={17} />} title={`More from ${studio.name}`} body="Their galleries, services and contact" onClick={() => navigate(`/studio/${studio.followCode.toLowerCase()}`)} />
-          <ActionRow icon={<MessageCircle size={17} />} title="Message on WhatsApp" body={`Ask ${studio.name} a question`}
-            href={waLink(studio, `Hi ${studio.name}, I have a question about ${event.name} (${event.shortId}).`)} />
+          {waLink(studio, '') && (
+            <ActionRow icon={<MessageCircle size={17} />} title="Message on WhatsApp" body={`Ask ${studio.name} a question`}
+              href={waLink(studio, `Hi ${studio.name}, I have a question about ${event.name} (${event.shortId}).`)} />
+          )}
         </section>
 
         <footer className="pb-4 text-center text-[12px] text-ink-3">

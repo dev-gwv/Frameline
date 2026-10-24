@@ -81,6 +81,9 @@ export function getMailer(env: Env): Mailer {
   return new UnconfiguredMailer()
 }
 
+/** Whether email really goes out (production without SMTP or Resend refuses to send). */
+export const emailOn = (env: Env): boolean => getMailer(env).name !== 'none'
+
 export function otpEmail(code: string): Omit<MailMessage, 'to'> {
   const text = `Your Frameline sign-in code is ${code}.\n\nIt expires in 10 minutes. If you didn't ask for it, you can ignore this email.`
   const html = `<div style="font-family:system-ui,sans-serif;font-size:16px;color:#1b1712">

@@ -26,6 +26,7 @@ import { realtimeRoutes } from './routes/realtime'
 import { studioRoutes } from './routes/studio'
 import { uploadRoutes } from './routes/uploads'
 import { aiOn, paymentsOn } from './lib/features'
+import { emailOn } from './services/mailer'
 
 export const API_MAJOR = 'v1'
 const JSON_LIMIT = 1024 * 1024 // 1 MiB for JSON bodies
@@ -107,6 +108,8 @@ export function createApp() {
           ai: z.boolean(),
           /** Card/UPI payments work (Razorpay keys set, or simulated in dev/test): selling, top-ups, plan purchases. */
           payments: z.boolean(),
+          /** Email goes out (SMTP or Resend). Off: no emailed ZIPs or sign-in codes; invites are saved but not mailed. */
+          email: z.boolean(),
           supportWhatsapp: z.string().optional(),
           supportCallUrl: z.string().optional(),
           /** The company on GST invoices (SELLER_* vars); absent until it is set, and then no invoices are offered. */
@@ -120,6 +123,7 @@ export function createApp() {
     features: {
       ai: aiOn(c.env),
       payments: paymentsOn(c.env),
+      email: emailOn(c.env),
       ...(c.env.SUPPORT_WHATSAPP ? { supportWhatsapp: c.env.SUPPORT_WHATSAPP } : {}),
       ...(c.env.SUPPORT_CALL_URL ? { supportCallUrl: c.env.SUPPORT_CALL_URL } : {}),
       ...(c.env.SELLER_NAME && c.env.SELLER_GSTIN

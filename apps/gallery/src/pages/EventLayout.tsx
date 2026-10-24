@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Outlet, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { Archive, BellRing, CalendarX, EyeOff, ImageIcon, MessageCircle, Phone, SearchX, WifiOff } from 'lucide-react'
+import { Archive, BellRing, CalendarX, EyeOff, ImageIcon, Mail, MessageCircle, Phone, SearchX, WifiOff } from 'lucide-react'
 import { Field, Input, Skeleton } from '@frameline/ui'
 import { FEATURES, type Photo, type PublicBlockReason, type PublicEvent, type PublicStudio } from '@frameline/shared'
 import { useMatches, useMyOrders, usePublicEvent } from '../lib/queries'
 import { guest, rememberEvent, useGuest, useSession, type EventSession } from '../lib/guest'
-import { waLink } from '../lib/brand'
+import { telLink, waLink } from '../lib/brand'
 import { canSeeAll, needsAppChoice, needsPin, needsRegistration } from '../lib/access'
 import { errorCode, friendlyError, isNetwork, isNotFound } from '../lib/errors'
 import { useApi } from '../lib/api'
@@ -109,8 +109,7 @@ export function EventLayout() {
 
 /* ---------------------------------------------------------------- Closed galleries */
 
-export { waLink }
-export const telLink = (studio: PublicStudio) => `tel:${studio.phone.replace(/\s/g, '')}`
+export { telLink, waLink }
 
 function BlockedFrame({ event, children }: { event: PublicEvent; children: ReactNode }) {
   return (
@@ -125,12 +124,22 @@ function BlockedFrame({ event, children }: { event: PublicEvent; children: React
 
 /** Expired, turned off, archived, or no photos yet: why, and a way forward. */
 function Blocked({ event, studio, reason, session }: { event: PublicEvent; studio: PublicStudio; reason: PublicBlockReason; session: EventSession }) {
+  // Whatever ways the studio can be reached (a phone number is optional at sign-up); email when there's no number.
+  const wa = waLink(studio, `Hi ${studio.name}, I’d like to see the photos from ${event.name} (${event.shortId}).`)
+  const tel = telLink(studio)
   const contact = (
     <>
-      <a href={waLink(studio, `Hi ${studio.name}, I’d like to see the photos from ${event.name} (${event.shortId}).`)} target="_blank" rel="noreferrer noopener" className={linkBtn('primary')}>
-        <MessageCircle size={17} />Message on WhatsApp
-      </a>
-      <a href={telLink(studio)} className={linkBtn()}><Phone size={16} />Call the studio</a>
+      {wa && (
+        <a href={wa} target="_blank" rel="noreferrer noopener" className={linkBtn('primary')}>
+          <MessageCircle size={17} />Message on WhatsApp
+        </a>
+      )}
+      {tel && <a href={tel} className={linkBtn(wa ? undefined : 'primary')}><Phone size={16} />Call the studio</a>}
+      {!wa && !tel && studio.email && (
+        <a href={`mailto:${studio.email}?subject=${encodeURIComponent(`Photos from ${event.name} (${event.shortId})`)}`} className={linkBtn('primary')}>
+          <Mail size={16} />Email the studio
+        </a>
+      )}
     </>
   )
   if (reason === 'empty') return <BlockedFrame event={event}><NotYet event={event} studio={studio} session={session} /></BlockedFrame>

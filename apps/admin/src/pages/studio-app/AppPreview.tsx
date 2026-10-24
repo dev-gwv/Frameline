@@ -14,7 +14,7 @@ export function AppPreview({ studio, events, config }: { studio: Studio; events:
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="h-[540px] w-[262px] overflow-hidden rounded-[36px] border-[7px] border-line-2 bg-line-2 shadow-card" aria-label="Preview of your studio in the app" role="img">
+      <div className="h-[540px] w-[262px] overflow-hidden rounded-[36px] border-[7px] border-line-2 bg-line-2 shadow-card" aria-label="Preview of your studio page" role="img">
         <div className="relative h-full overflow-y-auto rounded-[29px] bg-paper scrollbar-thin" aria-hidden>
           <div className="flex items-center justify-between px-5 pb-1 pt-2.5 text-[10px] font-bold text-ink tnum">
             <span>9:41</span><span className="h-3.5 w-16 rounded-full bg-line-2" /><span>5G</span>

@@ -84,6 +84,15 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
   carry `needs` and are hidden for switched-off features.
 - Photos get a 2048 px web copy from the studio's browser at upload (`PUT /v1/photos/:id/web`, `photos.web_copy`,
   `Photo.webUrl`); show photos with `displayUrl(photo)`, download originals from `photo.url`.
+- **Photo files open only with a signature** (24 Oct, `lib/media-sign.ts`): never hand out a bare `/v1/media/...`
+  photo address. Studio routes use `studioPhotosOut`, guest routes `guestPhotosOut` (web copy only, the original
+  only when the gallery offers full-size downloads; a guest signature dies when the photo is hidden). Previews are
+  not watermarked (only downloads, drawn in the guest's browser); the Watermark page says so.
+- `features.email` (`/v1/meta`): false without SMTP/Resend. Then the gallery offers no emailed ZIP, sign-in shows
+  Google + password only, and team invites are saved with `emailSent: false`.
+- `FEATURES.phoneApp` off: no "Get the app" page, no QR "opens in the app", "studio page" not "studio app".
+- While payments are off: renewing a gallery is free, events hold 25,000 photos (0015), and a gallery stays open a
+  year from creation even for a past date (0014, `galleryExpiry`). Big ZIPs come in parts (`services/zips.ts`).
 
 ## PINs
 
@@ -139,7 +148,8 @@ hidden or says so: selling, payouts, card/UPI, invoices without a seller, "Notif
   (production vars in `apps/api/wrangler.jsonc`). Until then no invoice downloads.
 - SMTP secrets (`SMTP_USER`, `SMTP_PASS`) so email really goes out.
 - Razorpay keys. **Before adding them, extend trial studios' `valid_till`**: a lapsed trial is only enforced once
-  payments are live, so every old trial would be locked out of uploads the moment the keys go in.
+  payments are live, so every old trial would be locked out of uploads the moment the keys go in. Renewals stop
+  being free at the same moment.
 - Legal review of `apps/admin/public/terms.html` and `privacy.html` (both drafts; operator Grateful World Ventures
   (OPC) Private Limited, address and GSTIN still "to be added").
 - A real domain.
@@ -156,3 +166,9 @@ full-access 2378) in the owner's studio, with 23 screenshots and test guests. De
   live testing, Support page 422 fix (`e3eb4d6`), full-access PIN (`2f0d9f2`), Studio AutoPilot reads + notices
   (`eef85ad`), AI switch (`9299785`, `2a50d19`), processor load limits (`7795314`), support desk + Gmail SMTP
   (`fdf51ed`), Book a call replaces the Sheet (19 Oct). Studio AutoPilot side: `6b7a02a` (galleries list, Settings → Gallery, photos bell, 0264).
+- 24 Oct 2026: launch review (security, API, both apps). Fixed: guests could fetch every original unwatermarked,
+  PIN lock could be raced, past-dated galleries opened expired, 10k event cap, ZIPs cut at 4 GB, email-less
+  failures, unbounded guest uploads/SVG, studio "guest" quota bypass, app/selfie/WhatsApp copy. Still open (not
+  asked yet): `_headers` CSP on both Pages sites, thumbnails smaller than 2048 px for grids, index on
+  `photos.copied_from`, guest Terms link + consent line, KYC files served by URL, help `expiry` guide
+  (renewal links), latent Razorpay international-order confirm check (before payments go live).

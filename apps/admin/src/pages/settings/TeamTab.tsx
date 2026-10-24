@@ -153,7 +153,9 @@ function InviteModal({ open, onOpenChange, events, members, full, seats }: {
   useEffect(() => { if (open) { setEmail(''); setRole('uploader'); setIds([]); setError('') } }, [open])
   const invite = useAction((v: { email: string; role: Role; eventIds: ID[] }) => api.inviteMember(v.email, v.role, v.role === 'uploader' ? v.eventIds : undefined), {
     errorToast: false,
-    success: (_, v) => `Invite sent to ${v.email}`,
+    success: (r, v) => r.emailSent === false
+      ? `Invite saved. We couldn’t email ${v.email}: ask them to sign in to Frameline with this email to join`
+      : `Invite sent to ${v.email}`,
     onSuccess: () => onOpenChange(false),
     onError: (err) => setError(errorMessage(err)),
   })

@@ -48,7 +48,7 @@ export default function StudioApp() {
 
   const canAdd = !!events.data && config.featuredEventIds.length < MAX_FEATURED && featurable(events.data, config.featuredEventIds).length > 0
   const page = (children: ReactNode) => (
-    <Page title="Your studio app" subtitle="What guests see when they follow your studio in the Frameline app. Changes save as you make them."
+    <Page title="Your studio page" subtitle="What guests see on your studio page when they open your follow code or link. Changes save as you make them."
       actions={<Button variant="primary" icon={<Plus size={15} />} disabled={!canAdd} onClick={() => setAdding(true)}>Add a featured gallery</Button>}>
       {children}
     </Page>
@@ -67,11 +67,11 @@ export default function StudioApp() {
       <div className="flex min-w-0 flex-col gap-4">
         <FollowCodeCard studio={s} />
         <Card>
-          <CardHeader title="Show in your app" description="Turn sections of your studio page on or off." />
+          <CardHeader title="Show on your studio page" description="Turn sections of your studio page on or off." />
           <SettingRow icon={<Tag size={15} />} title="Services and prices" description={`${s.services.length} from your studio profile`}
-            control={<Toggle label="Services and prices" checked={config.showServices} onCheckedChange={(v) => patch({ showServices: v }, v ? 'Services shown in your app' : 'Services hidden from your app')} />} />
+            control={<Toggle label="Services and prices" checked={config.showServices} onCheckedChange={(v) => patch({ showServices: v }, v ? 'Services shown on your studio page' : 'Services hidden from your studio page')} />} />
           <SettingRow icon={<HelpCircle size={15} />} title="Questions and answers" description={`${s.faq.length} answered`}
-            control={<Toggle label="Questions and answers" checked={config.showFaq} onCheckedChange={(v) => patch({ showFaq: v }, v ? 'Questions shown in your app' : 'Questions hidden from your app')} />} />
+            control={<Toggle label="Questions and answers" checked={config.showFaq} onCheckedChange={(v) => patch({ showFaq: v }, v ? 'Questions shown on your studio page' : 'Questions hidden from your studio page')} />} />
           <SettingRow icon={<Lock size={15} />} title="Private events in the list" description={`Cover and name only, guests still need the PIN · ${privateCount} private`}
             control={<Toggle label="Private events in the list" checked={config.showPrivate} onCheckedChange={(v) => patch({ showPrivate: v }, v ? 'Private events listed' : 'Private events hidden')} />} />
           <p className="mt-2 text-[12.5px] text-ink-3">Edit services and questions in <Link to="/settings/profile" className="font-bold text-accent-text hover:underline">Studio profile</Link>.</p>

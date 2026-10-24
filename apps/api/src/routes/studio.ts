@@ -266,12 +266,14 @@ studioRoutes.openapi(createRoute({
   }).run()
   const studio = await loadStudio(db, m.studioId)
   const link = `${c.env.APP_URL.replace(/\/$/, '')}/login?email=${encodeURIComponent(email)}`
-  await getMailer(c.env).send({
+  // The invite is saved either way; it is accepted at sign-in with this email, so a failed email only means the
+  // owner tells the person (it used to answer 503, and a retry then hit "already has a pending invite").
+  const emailSent = await getMailer(c.env).send({
     to: email,
     subject: `${me.name || 'A colleague'} invited you to ${studio.name} on Frameline`,
     text: `You've been invited to join ${studio.name} on Frameline as ${role}.\n\nSign in with this email address to accept: ${link}\n\nThe invite expires in 14 days.`,
-  })
+  }).then(() => true, (e) => { console.error(JSON.stringify({ level: 'error', msg: 'invite email failed', error: String(e) })); return false })
   audit(c, 'team.invited', { type: 'invite', id }, { email, role })
   emit(c, m.studioId, 'misc')
-  return c.json({ id, name: email.split('@')[0], email, role, access: `${accessLabel(role, [])} · invite pending`, lastActive: '', eventIds: assigned, pending: true }, 201)
+  return c.json({ id, name: email.split('@')[0], email, role, access: `${accessLabel(role, [])} · invite pending`, lastActive: '', eventIds: assigned, pending: true, emailSent }, 201)
 })

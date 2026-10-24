@@ -52,6 +52,21 @@ describe('public event + PIN', () => {
     expect(photos.status).toBe(200)
     expect(photos.json.items).toHaveLength(3)
   })
+
+  it('counts every try before checking it, so parallel guesses get no more than 5', async () => {
+    const ip = freshIp()
+    const tries = await Promise.all(Array.from({ length: 20 }, (_, i) =>
+      call(`/v1/public/events/${RIYA}/pin`, { body: { pin: String(1000 + i) }, ip })))
+    expect(tries.filter((r) => r.status === 401)).toHaveLength(4)
+    expect(tries.filter((r) => r.status === 429)).toHaveLength(16)
+  })
+
+  it('doesn’t count a correct PIN, so a family on one Wi-Fi isn’t locked out', async () => {
+    const ip = freshIp()
+    for (let i = 0; i < 8; i++) expect((await call(`/v1/public/events/${RIYA}/pin`, { body: { pin: '5211' }, ip })).status).toBe(200)
+    const r = await call(`/v1/public/events/${RIYA}/pin`, { body: { pin: '0000' }, ip })
+    expect(r.json.attemptsRemaining).toBe(4)
+  })
 })
 
 describe('guests, photos, faces, favourites', () => {

@@ -88,7 +88,21 @@ export async function renderPhoto(photo: Photo, opts: RenderOptions): Promise<Bl
   ctx.restore()
 
   const wm = opts.watermark
-  if (opts.applyWatermark && wm) {
+  // Logo mode draws the studio's logo; with no logo, or one that won't load, the studio name in its place.
+  const logo = opts.applyWatermark && wm?.mode === 'logo' && wm.logoUrl ? await loadImage(wm.logoUrl).catch(() => null) : null
+  if (opts.applyWatermark && wm && logo) {
+    const base = Math.min(W, H) * (wm.size === 'subtle' ? 0.028 : wm.size === 'bold' ? 0.055 : 0.04)
+    const h = base * 2.2
+    const w = (logo.width / logo.height) * h
+    const pad = Math.min(W, H) * ((wm.edgeOffset ?? 3) / 100 || 0.04)
+    const anchor = watermarkAnchor(wm.position)
+    const x = anchor.x === 'right' ? W - pad - w : anchor.x === 'center' ? (W - w) / 2 : pad
+    const y = anchor.y === 'bottom' ? H - pad - h : pad
+    ctx.save()
+    ctx.globalAlpha = Math.min(1, Math.max(0.1, wm.opacity / 100))
+    ctx.drawImage(logo, x, y, w, h)
+    ctx.restore()
+  } else if (opts.applyWatermark && wm) {
     const text = wm.mode === 'logo' ? opts.studio.name : wm.text || opts.studio.name
     const base = Math.min(W, H) * (wm.size === 'subtle' ? 0.028 : wm.size === 'bold' ? 0.055 : 0.04)
     const font = wm.font || 'Fraunces'

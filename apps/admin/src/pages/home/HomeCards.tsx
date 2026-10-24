@@ -59,7 +59,7 @@ export function FollowCard() {
   return (
     <Card>
       <h2 className={title}>Let guests follow you</h2>
-      <p className="mb-2.5 mt-0.5 text-[13px] text-ink-2">Anyone with this code sees all your events in the app.</p>
+      <p className="mb-2.5 mt-0.5 text-[13px] text-ink-2">Anyone with this code can open your studio page and follow your studio.</p>
       {!studio ? <Skeleton className="h-8 w-full" /> : (
         <div className="flex flex-wrap items-center gap-2">
           <b className="mr-auto text-[17px] tracking-[.08em] tnum">{code}</b>

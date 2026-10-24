@@ -101,6 +101,12 @@ export async function completeUploadSession(c: Context<AppEnv>, a: {
         throw new ValidationFailed([{ field: `files.${f.photoId}.parts`, in: 'body', message: `Expected ${f.partCount} parts, got ${parts.length}`, code: 'parts_mismatch' }])
       }
       await completeMultipart(c.env, up.mode, f.key, f.multipartId, parts)
+      // Part URLs don't bind a length, so check what really arrived against the size declared (and checked) at start.
+      const stored = await c.env.MEDIA.head(f.key)
+      if (!stored || stored.size > f.size) {
+        if (stored) await c.env.MEDIA.delete(f.key)
+        continue
+      }
     }
     done.push(f)
   }
@@ -150,7 +156,8 @@ const MAX_FILES = 100
 export const UploadFileInput = z.object({
   filename: z.string().trim().min(1).max(255),
   size: z.number().int().min(0).max(MAX_FILE_BYTES),
-  contentType: z.string().regex(/^(image|video)\/[\w.+-]+$/, 'Only image or video files').default('image/jpeg'),
+  // Not SVG: it can carry script, and /v1/media serves files from the API's own origin.
+  contentType: z.string().regex(/^(image\/(?!svg)[\w.+-]+|video\/[\w.+-]+)$/, 'Only photo or video files').default('image/jpeg'),
   width: z.number().int().min(0).max(100_000).optional(),
   height: z.number().int().min(0).max(100_000).optional(),
   capturedAt: z.string().optional(),
@@ -195,7 +202,10 @@ uploadRoutes.openapi(createRoute({
   if (!album) throw new ValidationFailed([{ field: 'albumId', in: 'body', message: 'Album not found in this event', code: 'unknown_album' }])
 
   const [studio] = await db.select().from(schema.studios).where(eq(schema.studios.id, m.studioId)).limit(1)
-  const guestUpload = (input.source ?? (album.kind === 'guest' ? 'guest' : 'web')) === 'guest'
+  // Guest uploads (free of the plan quota) are only those in the guest album; the client's `source` can't make
+  // a studio's own photos free.
+  const guestUpload = album.kind === 'guest'
+  const source = guestUpload ? 'guest' as const : input.source === 'guest' ? 'web' as const : input.source
   const cost = guestUpload ? 0 : input.files.length * (input.quality === 'original' ? 2 : 1)
   // A lapsed plan or trial stops new uploads (galleries stay open). Only while card/UPI payments are switched on:
   // without them a studio would have no way to renew, so nothing is enforced that can't be paid for.
@@ -213,7 +223,7 @@ uploadRoutes.openapi(createRoute({
 
   const session = await createUploadSession(c, {
     studioId: m.studioId, eventId: ev.id, albumId: album.id, userId: me.id, quality: input.quality, files: input.files,
-    options: { source: input.source, uploadedBy: input.uploadedBy, watermark: input.watermark, fast: input.fast },
+    options: { source, uploadedBy: input.uploadedBy, watermark: input.watermark, fast: input.fast },
   })
   return c.json(session, 201)
 })
@@ -294,10 +304,10 @@ uploadRoutes.openapi(createRoute({
 const PHOTO_KEY = /^studios\/[^/]+\/events\/([^/]+)\/originals\/([^/]+)\//
 
 /**
- * Serves R2 objects. A photo's file (original or rendition) is public only while a guest could see the photo
- * -- some copy of it visible, in an event that isn't in the trash. Otherwise it needs the signature the studio
- * API adds (lib/media-sign.ts). Public files are cached for an hour, not a year, so hiding a photo takes hold
- * in caches within the hour. Studio assets (logos, covers) stay public.
+ * Serves R2 objects. A photo's file (original or rendition) needs a signature (lib/media-sign.ts): the studio
+ * API's opens it, the guest API's only while a guest could see the photo -- some copy of it visible, in an
+ * event that isn't in the trash. Files are cached privately for an hour, so hiding a photo takes hold within
+ * the hour. Studio assets (logos, covers) stay public.
  */
 uploadRoutes.get('/media/:key{.+}', async (c) => {
   const key = decodeURIComponent(c.req.param('key'))
@@ -310,10 +320,12 @@ uploadRoutes.get('/media/:key{.+}', async (c) => {
     const rows = await getDb(c.env.DB).select({ hidden: p.hidden, deletedAt: p.deletedAt, reviewStatus: p.reviewStatus, status: p.status, eventDeleted: schema.events.deletedAt })
       .from(p).innerJoin(schema.events, eq(schema.events.id, p.eventId))
       .where(and(eq(p.eventId, eventId), or(eq(p.id, photoId), eq(p.copiedFrom, photoId)))).limit(50)
-    const publicNow = rows.some((r) => !r.eventDeleted && guestCanSee(r))
-    if (publicNow) cache = 'public, max-age=3600'
-    else if (rows.length && await verifyMediaSig(c.env.JWT_SECRET, key, c.req.query('exp'), c.req.query('sig'))) cache = 'private, max-age=3600'
-    else throw new NotFound('File')
+    const [exp, sig] = [c.req.query('exp'), c.req.query('sig')]
+    const guestsSeeIt = rows.some((r) => !r.eventDeleted && guestCanSee(r))
+    const ok = rows.length > 0 && (await verifyMediaSig(c.env.JWT_SECRET, key, exp, sig)
+      || (guestsSeeIt && await verifyMediaSig(c.env.JWT_SECRET, key, exp, sig, Date.now(), 'guest')))
+    if (!ok) throw new NotFound('File')
+    cache = 'private, max-age=3600'
   }
   const obj = await c.env.MEDIA.get(key, { range: c.req.raw.headers, onlyIf: c.req.raw.headers })
   if (!obj) throw new NotFound('File')
@@ -321,6 +333,9 @@ uploadRoutes.get('/media/:key{.+}', async (c) => {
   obj.writeHttpMetadata(headers)
   headers.set('ETag', obj.httpEtag)
   headers.set('Cache-Control', cache)
+  // Files are shown as images, never run: even a file that slipped in as HTML or SVG can't run script here.
+  headers.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+  headers.set('X-Content-Type-Options', 'nosniff')
   if (!('body' in obj) || !obj.body) return new Response(null, { status: 304, headers })
   return new Response(obj.body, { status: c.req.header('range') ? 206 : 200, headers })
 })

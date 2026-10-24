@@ -19,7 +19,7 @@ export const ARTICLES: Article[] = [
   { id: 'gst', needs: 'invoices', title: 'Get a GST invoice', tags: ['gst', 'invoice', 'billing'],
     answer: 'Add your GSTIN in Settings → Billing and GST. Every plan, pack and wallet top-up then has a tax invoice under Settings → Invoices.' },
   { id: 'watermark', title: 'Watermark missing on downloads', tags: ['watermark', 'downloads'],
-    answer: 'Check Watermark (in More) → Apply to. “Guest downloads” must be on for downloads to carry the watermark. Existing photos update within an hour after you change it.' },
+    answer: 'Check Watermark (in More) → More options → Add it to. “Guest downloads” must be on for downloads to carry the watermark (and “Full-size downloads” when the gallery lets guests save full-size files). A change applies to the next download. Photos shown while guests browse aren’t watermarked.' },
   { id: 'expiry', title: 'What happens when an event expires', tags: ['expiry', 'renew', 'plan'],
     answer: 'Guests see an “expired” page but nothing is deleted for 7 days. Renew it from Home (half price from your wallet) or send your client a renewal link so they pay for it.' },
   { id: 'limit', title: 'Increase an event’s photo limit', tags: ['limit', 'pack', 'photos'],

@@ -1,4 +1,4 @@
-import { DOWNLOAD_ALL_LIMIT, type Photo, type PublicEvent } from '@frameline/shared'
+import { DOWNLOAD_ALL_LIMIT, FEATURES, type Photo, type PublicEvent } from '@frameline/shared'
 import { authValid, type EventSession } from './guest'
 
 /**
@@ -21,7 +21,7 @@ export function needsRegistration(e: PublicEvent, s: EventSession) {
   return e.settings.access === 'registered' && !(authValid(s) && s.auth?.guestId)
 }
 
-export const needsAppChoice = (e: PublicEvent, s: EventSession) => !e.settings.skipAppLanding && !s.webChosen && !s.vip?.skipLogin
+export const needsAppChoice = (e: PublicEvent, s: EventSession) => FEATURES.phoneApp && !e.settings.skipAppLanding && !s.webChosen && !s.vip?.skipLogin
 
 /**
  * Whether the guest may browse every photo. With face privacy on, only their own matches are visible —

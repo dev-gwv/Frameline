@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Eye, EyeOff, Info, Lock, Mail } from 'lucide-react'
 import { Button, Field, Input, LogoMark } from '@frameline/ui'
 import { useAuth, type VerifyResult } from '../../../lib/auth'
+import { useServerFeatures } from '../../../lib/api'
 import { CodeStep, type CodeSent } from './CodeStep'
 import { ForgotPassword } from './ForgotPassword'
 import { clock, demoRateLimit, describeAuthError, isEmail, useCountdown } from './authHelpers'
@@ -56,7 +57,10 @@ export function SignInForm({ onDone, onGoogle, googleBusy, expired, googleError,
   const [view, setView] = useState<SignInView>('start')
   const [email, setEmail] = useState('')
   const [emailError, setEmailError] = useState<string | null>(null)
-  const [usePassword, setUsePassword] = useState(false)
+  // Without email on the server there are no sign-in codes: Google, or a password set up earlier.
+  const { email: emailWorks } = useServerFeatures()
+  const [pickedPassword, setUsePassword] = useState(false)
+  const usePassword = pickedPassword || !emailWorks
   const [password, setPassword] = useState('')
   const [pwError, setPwError] = useState<string | null>(null)
   const [show, setShow] = useState(false)
@@ -146,12 +150,16 @@ export function SignInForm({ onDone, onGoogle, googleBusy, expired, googleError,
       <Button type="submit" variant="primary" size="lg" className="justify-center" loading={busy} disabled={wait.left > 0}>
         {wait.left > 0 ? `Try again in ${clock(wait.left)}` : usePassword ? 'Sign in' : 'Email me a sign-in code'}
       </Button>
-      <div className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
-        <button type="button" className="min-h-[36px] font-bold text-accent-text hover:underline" onClick={() => { setUsePassword((v) => !v); setPwError(null) }}>
-          {usePassword ? 'Email me a code instead' : 'Use a password instead'}
-        </button>
-        <button type="button" className="min-h-[36px] text-ink-3 hover:text-ink" onClick={() => setView('forgot')}>Forgot password?</button>
-      </div>
+      {emailWorks ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
+          <button type="button" className="min-h-[36px] font-bold text-accent-text hover:underline" onClick={() => { setUsePassword((v) => !v); setPwError(null) }}>
+            {usePassword ? 'Email me a code instead' : 'Use a password instead'}
+          </button>
+          <button type="button" className="min-h-[36px] text-ink-3 hover:text-ink" onClick={() => setView('forgot')}>Forgot password?</button>
+        </div>
+      ) : (
+        <p className="text-[13px] text-ink-2">New here, or no password yet? Use Continue with Google. Email sign-in codes aren’t switched on yet.</p>
+      )}
       {auth.mode === 'demo' && usePassword && <p className="rounded-control bg-sunk px-3 py-1.5 text-[12px] text-ink-2">Sample data: any password with 6 or more characters works.</p>}
       <p className="mt-2 text-[12px] text-ink-3">
         By continuing you agree to the <a className="underline hover:text-ink" href="/terms" target="_blank" rel="noreferrer">Terms of Use</a> and{' '}

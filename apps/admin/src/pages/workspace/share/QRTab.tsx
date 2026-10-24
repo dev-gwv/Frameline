@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, Download, ImagePlus, Printer, X } from 'lucide-react'
-import type { PhotoEvent, Studio } from '@frameline/shared'
+import { FEATURES, type PhotoEvent, type Studio } from '@frameline/shared'
 import { Button, Segmented, Toggle, cn, useToast } from '@frameline/ui'
 import { appLink, displayUrl, downloadBlob, galleryLink, slug } from '../lib'
 import { StyledQR, buildPoster, downloadSvg, svgString, svgToPng, type QRCorner, type QRStyle } from './qr'
@@ -92,10 +92,12 @@ export function useQRTab(event: PhotoEvent, studio?: Studio): { body: ReactNode;
                 <div className="mb-1.5 text-[12.5px] font-bold text-ink-2">Corners</div>
                 <Segmented<QRCorner> value={corner} onChange={setCorner} options={[{ value: 'rounded', label: 'Rounded' }, { value: 'circle', label: 'Circle' }, { value: 'square', label: 'Square' }]} />
               </div>
-              <div>
-                <div className="mb-1.5 text-[12.5px] font-bold text-ink-2">Opens</div>
-                <Segmented value={target} onChange={setTarget} options={[{ value: 'web', label: 'Web gallery' }, { value: 'app', label: 'Frameline app' }]} />
-              </div>
+              {FEATURES.phoneApp && (
+                <div>
+                  <div className="mb-1.5 text-[12.5px] font-bold text-ink-2">Opens</div>
+                  <Segmented value={target} onChange={setTarget} options={[{ value: 'web', label: 'Web gallery' }, { value: 'app', label: 'Frameline app' }]} />
+                </div>
+              )}
             </div>
           )}
         </div>

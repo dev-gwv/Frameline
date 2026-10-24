@@ -55,7 +55,9 @@ export function RenewModal({ eventId, faces: facesAsked, onClose }: { eventId: s
   const expired = ev ? Date.parse(ev.expiresAt) < Date.now() : false
 
   let primary
-  if (mode === 'link') primary = link
+  // Until payments are switched on, renewing is free (the API doesn't charge).
+  if (!payments) primary = <Button variant="primary" disabled={!ev} loading={renew.isPending} onClick={() => ev && renew.mutate({ id: ev.id, payWith: 'credits' })}>Renew for a year · free</Button>
+  else if (mode === 'link') primary = link
     ? <Button variant="primary" onClick={onClose}>Done</Button>
     : <Button variant="primary" disabled={!ev || !payments} loading={create.isPending} onClick={() => ev && create.mutate(ev.id)}>Create the link</Button>
   else primary = short
@@ -78,6 +80,9 @@ export function RenewModal({ eventId, faces: facesAsked, onClose }: { eventId: s
             <span>Guests find their photos with a selfie using face data we keep for {FACE_RETENTION_DAYS} days after the event. Renewing keeps the gallery and face search working for another year; nothing needs to be set up again.</span>
           </div>
         )}
+        {!payments ? (
+          <p className="rounded-control bg-sunk px-3.5 py-3 text-[14px]">Renewing is free while we’re starting out. Guests can open the gallery for another year.</p>
+        ) : <>
         <RadioCardGroup label="How to renew" columns={2} value={mode} onChange={setMode} options={[
           { value: 'self', title: 'Renew it myself', description: short ? `One more year · ${fmt.rupees(cardPrice)} by UPI or card` : `One more year · ${fmt.rupees(walletPrice)} from your wallet` },
           { value: 'link', title: `Send ${client} a link`, disabled: !payments, description: payments ? `They pay ${fmt.rupees(clientPrice)}. You keep ${fmt.rupees(Math.max(0, clientPrice - BASE_RENEWAL))}.` : 'Needs card and UPI payments, which aren’t switched on yet' },
@@ -100,6 +105,7 @@ export function RenewModal({ eventId, faces: facesAsked, onClose }: { eventId: s
             <p className="text-[12.5px] text-ink-3">The link works till {fmt.date(link.expiresAt)}. Change your price under Plan and billing → What clients pay to renew.</p>
           </div>
         ) : <p className="text-[13px] text-ink-2">We make a payment link you can send on WhatsApp. When {client === 'your client' ? 'they pay' : `${client} pays`}, the event is renewed and {fmt.rupees(Math.max(0, clientPrice - BASE_RENEWAL))} comes to your wallet.</p>)}
+        </>}
       </>}
     </Modal>
   )

@@ -5,7 +5,7 @@ import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
 import { accessRequestOut, eventOut, filmOut, guestOut, personOut } from '../db/mappers'
 import { Conflict, Forbidden, NotFound, ValidationFailed } from '../lib/errors'
-import { aiOn } from '../lib/features'
+import { aiOn, paymentsOn } from '../lib/features'
 import { newId, nowIso } from '../lib/ids'
 import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, problems, security } from '../lib/openapi'
 import { PageQuery, afterCursor, pageOf, toPage } from '../lib/pagination'
@@ -16,14 +16,14 @@ import {
 } from '../schemas/domain'
 import { getMailer } from '../services/mailer'
 import { debitWallet } from '../services/billing'
-import { grantStudioPurchase, openStudioPayment, paymentMode } from '../services/payments'
+import { extendEvent, grantStudioPurchase, openStudioPayment, paymentMode } from '../services/payments'
 import { matchFaces } from '../services/faces'
 import { purchaseOut } from '../db/mappers'
 import { sql } from 'drizzle-orm'
 import { createSignedLink } from '../services/guest-links'
 import { toMinor } from '../lib/money'
 import { audit } from '../services/audit'
-import { createEvent, eventForMember, newPin } from '../services/events'
+import { createEvent, eventForMember, galleryExpiry, newPin } from '../services/events'
 import { emit } from '../services/realtime'
 import { queuePartnerNotice } from '../services/partner-notify'
 import { background } from '../lib/http'
@@ -91,6 +91,8 @@ eventRoutes.openapi(createRoute({
   }
   const norm = { ...patch }
   for (const k of ['date', 'endDate'] as const) if (norm[k]) norm[k] = new Date(norm[k]!).toISOString()
+  // A later date keeps the gallery open a year past it; an earlier one never shortens what the studio has.
+  const expiresAt = norm.date ? galleryExpiry(norm.date, ev.expiresAt) : undefined
   let invited: Host[] = []
   if (patch.hosts) {
     // Clients may add/remove hosts and change `access`; `status` and `invitedAt` stay server-owned.
@@ -104,7 +106,7 @@ eventRoutes.openapi(createRoute({
       return fresh
     })
   }
-  if (Object.keys(norm).length) await db.update(schema.events).set(norm).where(eq(schema.events.id, ev.id)).run()
+  if (Object.keys(norm).length) await db.update(schema.events).set({ ...norm, ...(expiresAt ? { expiresAt } : {}) }).where(eq(schema.events.id, ev.id)).run()
   if (invited.length) await inviteHosts(c.env, ev, invited).catch(() => undefined)
   audit(c, 'event.update', { type: 'event', id: ev.id }, { fields: Object.keys(patch) })
   // Archived or back: Studio AutoPilot shows the gallery's state, so tell it.
@@ -489,7 +491,7 @@ eventRoutes.openapi(createRoute({
 // ── Renewals & personal links ──────────────────────────────────────────────
 eventRoutes.openapi(createRoute({
   method: 'post', path: '/events/{id}/renew', tags: ['Events'], summary: 'Renew an event for another year — owner', security,
-  description: `Base price ₹${BASE_RENEWAL}. Paying from the wallet (\`payWith: credits\`) costs half. \`card\` with Razorpay keys answers 202 with a pending \`payment\`; the event is renewed only when POST /v1/studio/payments/:id/confirm (or the webhook) proves it. Without keys: 503 \`payments_not_configured\` in production, simulated in development/test.`,
+  description: `Base price ₹${BASE_RENEWAL}. Paying from the wallet (\`payWith: credits\`) costs half. \`card\` with Razorpay keys answers 202 with a pending \`payment\`; the event is renewed only when POST /v1/studio/payments/:id/confirm (or the webhook) proves it. Without keys: 503 \`payments_not_configured\` in production, simulated in development/test. While payments are off (no keys in production), renewing is free.`,
   middleware: [requireStudio('owner', 'renew events'), idempotent] as const,
   request: { params: IdParam, headers: IdempotencyHeader, body: body(z.object({ payWith: z.enum(['credits', 'card']) })) },
   responses: {
@@ -502,6 +504,13 @@ eventRoutes.openapi(createRoute({
   const db = getDb(c.env.DB)
   const ev = await eventForMember(db, m, c.req.valid('param').id)
   const { payWith } = c.req.valid('json')
+  if (!paymentsOn(c.env)) {
+    // Until payments are switched on, renewing is free: there is no way to pay for it.
+    await extendEvent(db, m.studioId, ev.id)
+    audit(c, 'event.renewed', { type: 'event', id: ev.id }, { payWith, charged: 0 })
+    emit(c, m.studioId, 'events', 'usage', 'misc')
+    return c.json({ event: eventOut(await eventForMember(db, m, ev.id)), charged: 0, payWith }, 200)
+  }
   const charged = payWith === 'credits' ? BASE_RENEWAL * (1 - RENEWAL_CREDIT_DISCOUNT) : BASE_RENEWAL
   const renewal = { kind: 'renewal' as const, eventId: ev.id, eventName: ev.name, chargedPaise: toMinor(charged) }
   if (payWith === 'card' && paymentMode(c.env) === 'razorpay') {

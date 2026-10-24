@@ -14,11 +14,12 @@ function Step({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
+// Only what really gets the watermark: guests' downloads (web size, and full size when the gallery offers it).
+// `previews` and `guestUploads` are kept in the settings but not offered: nothing draws them yet (photos shown
+// while browsing would need the image processor).
 const APPLY_TO: { key: keyof WatermarkSettings['applyTo']; title: string; hint: string }[] = [
-  { key: 'previews', title: 'Gallery previews', hint: 'What guests see while browsing' },
-  { key: 'downloads', title: 'Guest downloads', hint: 'Files guests save to their phone' },
-  { key: 'guestUploads', title: 'Guest uploads', hint: 'Photos guests add to your events' },
-  { key: 'originals', title: 'Your originals', hint: 'Full-size files you upload as originals' },
+  { key: 'downloads', title: 'Guest downloads', hint: 'Web-size files guests save. Photos shown while browsing aren’t watermarked.' },
+  { key: 'originals', title: 'Full-size downloads', hint: 'When a gallery lets guests save full-size files' },
 ]
 
 /** Left column: 1 · Where, 2 · What, 3 · How big, and the rare options folded under "More options". */

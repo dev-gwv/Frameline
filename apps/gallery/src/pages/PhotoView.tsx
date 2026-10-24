@@ -202,12 +202,12 @@ export function PhotoView() {
             <Action label="Share" onClick={() => void share()} icon={<Share2 size={21} />} />
             {store && <Action label="Buy print" onClick={() => setBuy(true)} icon={<Printer size={21} />} />}
           </div>
-          <a href={waLink(studio, `Hi ${studio.name}, I have a question about a photo from ${event.name} (${event.shortId}).`)} target="_blank" rel="noreferrer noopener"
+          {waLink(studio, '') && <a href={waLink(studio, `Hi ${studio.name}, I have a question about a photo from ${event.name} (${event.shortId}).`)} target="_blank" rel="noreferrer noopener"
             className="mx-3 mb-1 mt-2 flex w-[calc(100%-24px)] items-center gap-2 rounded-card border border-side-line bg-side-2 px-3.5 py-2.5 text-left text-[12.5px] text-side-ink-2 hover:border-side-ink-2/40">
             <MessageCircle size={15} className="shrink-0 text-side-gold" />
             <span className="flex-1">Questions about this photo? <b className="text-side-gold">Message on WhatsApp</b></span>
             <ChevronRight size={15} />
-          </a>
+          </a>}
         </div>
       )}
 

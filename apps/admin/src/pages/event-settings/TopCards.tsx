@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CheckCheck, Download, Droplet, EyeOff, ImageIcon, KeyRound, ScanFace, ShieldCheck, Smartphone, Upload, UserCheck, Users } from 'lucide-react'
-import { fmt, withoutAi } from '@frameline/shared'
+import { FEATURES, fmt, withoutAi } from '@frameline/shared'
 import { Button, ConfirmDialog, Input, Meter, SettingRow, Toggle, useToast } from '@frameline/ui'
 import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { useEventStats, useGuests } from '../../lib/queries'
@@ -37,11 +37,13 @@ export function AccessCard({ event, set }: CardProps) {
         onChange={(v) => set({ requireRegistration: v })}
         description={signedUp === undefined ? 'Guests sign up before they see photos' : `${fmt.count(signedUp)} guest${signedUp === 1 ? '' : 's'} signed up`}
       />
-      <ToggleRow
-        icon={<Smartphone size={15} />} title="Skip the “get the app” page" checked={s.skipAppLanding}
-        onChange={(v) => set({ skipAppLanding: v })}
-        description={s.skipAppLanding ? 'Guests go straight to the photos' : 'Guests see an app download page first'}
-      />
+      {FEATURES.phoneApp && (
+        <ToggleRow
+          icon={<Smartphone size={15} />} title="Skip the “get the app” page" checked={s.skipAppLanding}
+          onChange={(v) => set({ skipAppLanding: v })}
+          description={s.skipAppLanding ? 'Guests go straight to the photos' : 'Guests see an app download page first'}
+        />
+      )}
       <MoreOptions>
         <ToggleRow
           icon={<UserCheck size={15} />} title="Only people you approve" checked={approving}

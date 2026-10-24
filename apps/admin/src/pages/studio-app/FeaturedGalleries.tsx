@@ -47,7 +47,7 @@ export function FeaturedGalleries({ events, featured, onReorder, onRemove, onAdd
 
   return (
     <Card>
-      <CardHeader title="Featured galleries" description={`The row at the top of your app. Drag to change the order. Up to ${MAX_FEATURED}.`} />
+      <CardHeader title="Featured galleries" description={`The row at the top of your studio page. Drag to change the order. Up to ${MAX_FEATURED}.`} />
       {rows.length === 0 ? (
         <EmptyState className="py-8" icon={<Star size={20} />} title="Nothing featured yet" body="Pick your best events so new followers see them first."
           action={canAdd ? <Button icon={<Plus size={14} />} onClick={onAddClick}>Add galleries</Button> : undefined} />

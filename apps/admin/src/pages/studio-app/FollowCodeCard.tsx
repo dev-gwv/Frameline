@@ -23,7 +23,7 @@ export function FollowCodeCard({ studio }: { studio: Studio }) {
   return (
     <Card>
       <CardHeader title="Let guests follow you"
-        description="Anyone with this code sees all your events in the Frameline app."
+        description="Anyone with this code can open your studio page and follow your studio."
         action={<span className="text-[12.5px] text-ink-3 tnum">{fmt.count(studio.followers)} {studio.followers === 1 ? 'follower' : 'followers'}</span>} />
       <div className="flex flex-wrap items-center gap-2">
         <b className="mr-auto basis-full text-[22px] tracking-[.08em] tnum sm:basis-auto">{studio.followCode}</b>

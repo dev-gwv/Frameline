@@ -33,7 +33,7 @@ export const MORE_NAV: NavItem[] = [
   { to: '/qr', label: 'Smart QR', icon: QrCode, description: 'One printed QR code for every event', keywords: 'poster print scan' },
   ...(FEATURES.broadcasts ? [{ to: '/messages', label: 'Messages to guests', icon: Megaphone, description: 'Send news to people who follow you', keywords: 'broadcast push notification announce' }] : []),
   ...(FEATURES.aiEnhance ? [{ to: '/enhance', label: 'AI enhance', icon: WandSparkles, description: 'Retouch one photo at a time', keywords: 'retouch edit ai improve', match: ['/enhance'] }] : []),
-  { to: '/studio-app', label: 'Your studio app', icon: Smartphone, description: 'Follow code and featured galleries', keywords: 'follow code featured app profile' },
+  { to: '/studio-app', label: 'Your studio page', icon: Smartphone, description: 'Follow code and featured galleries', keywords: 'follow code featured app profile' },
   { to: '/reports', label: 'Reports', icon: BarChart3, description: 'Events, usage and downloads', keywords: 'csv export usage statistics' },
   { to: '/settings/team', label: 'Team', icon: Users, description: 'Invite a second shooter or editor', keywords: 'members invite roles seats' },
 ]

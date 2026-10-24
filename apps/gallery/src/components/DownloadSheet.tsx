@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, Download, Lock, Mail, ShoppingBag } from 'lucide-react'
 import { Field, Input, Meter, Skeleton, useToast } from '@frameline/ui'
 import { fmt, type DownloadAllowance, type FramelineApi, type Photo, type PublicEvent, type PublicStudio, type PublicWatermark } from '@frameline/shared'
-import { useApi } from '../lib/api'
+import { useApi, useServerFeatures } from '../lib/api'
 import { ensureWatermark, fallbackWatermark, useWatermark } from '../lib/queries'
 import { guest, useGuest, type EventSession } from '../lib/guest'
 import { canDownloadAll, DIRECT_DOWNLOAD_LIMIT, MAX_DOWNLOAD_ALL } from '../lib/access'
@@ -105,8 +105,10 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
   const big = n > DIRECT_DOWNLOAD_LIMIT
   // The server burns the watermark into ZIPs when its image processor is connected. Without one it answers
   // `watermark_required`; then the photos save one by one here, each rendered with the watermark burned in.
+  // The ZIP's link comes by email, so there is no ZIP while the server can't send email.
+  const { email: emailWorks } = useServerFeatures()
   const [zipBlocked, setZipBlocked] = useState(false)
-  const zipAllowed = !zipBlocked
+  const zipAllowed = !zipBlocked && emailWorks
   const method = zipAllowed ? how : 'one'
   const word = n === 1 ? 'photo' : 'photos'
 
@@ -164,7 +166,7 @@ export function DownloadSheet({ open, onOpenChange, photos, event, studio, sessi
       guest.setProfile({ email: email.trim() })
       setStage('emailed')
     } catch (err) {
-      if (errorCode(err) === 'watermark_required') { setZipBlocked(true); return }
+      if (errorCode(err) === 'watermark_required' || errorCode(err) === 'email_not_configured') { setZipBlocked(true); return }
       const f = friendlyError(err, 'We couldn’t send the ZIP')
       setEmailError(`${f.title}. ${f.body}`)
     } finally { setZipBusy(false) }

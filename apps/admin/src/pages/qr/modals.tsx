@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import type { PhotoEvent, SmartQR } from '@frameline/shared'
+import { FEATURES, type PhotoEvent, type SmartQR } from '@frameline/shared'
 import { Button, cn, Field, Input, Modal, RadioCardGroup, Select } from '@frameline/ui'
 
 export interface ScheduledSwitch { eventId: string; at: string }
@@ -92,15 +92,18 @@ export function ChangeEventModal({ qr, events, busy, onOpenChange, onSave }: {
           {selectable(events, qr?.eventId).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
         </Select>
       </Field>
-      <button type="button" aria-expanded={more} onClick={() => setMore((v) => !v)}
-        className="flex items-center gap-1 self-start py-1 text-[13px] font-bold text-accent-text hover:underline">
-        More options: {TARGETS.find((t) => t.value === target)?.label}
-        <ChevronDown size={14} className={cn('transition-transform', more && 'rotate-180')} />
-      </button>
-      {more && (
-        <RadioCardGroup label="Where it opens" value={target} onChange={setTarget}
-          options={TARGETS.map((t) => ({ value: t.value, title: t.label, description: t.description }))} />
-      )}
+      {/* There is no Frameline app yet: every QR opens the web gallery, so there's nothing to choose. */}
+      {FEATURES.phoneApp && <>
+        <button type="button" aria-expanded={more} onClick={() => setMore((v) => !v)}
+          className="flex items-center gap-1 self-start py-1 text-[13px] font-bold text-accent-text hover:underline">
+          More options: {TARGETS.find((t) => t.value === target)?.label}
+          <ChevronDown size={14} className={cn('transition-transform', more && 'rotate-180')} />
+        </button>
+        {more && (
+          <RadioCardGroup label="Where it opens" value={target} onChange={setTarget}
+            options={TARGETS.map((t) => ({ value: t.value, title: t.label, description: t.description }))} />
+        )}
+      </>}
     </Modal>
   )
 }

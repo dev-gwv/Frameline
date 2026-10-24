@@ -115,8 +115,10 @@ export function UploadSheet({ open, onOpenChange, event, studio, guestAlbum, ses
         remaining === 0 ? (
           <StateBlock className="py-4" icon={<ImagePlus size={24} />} tone="neutral" title="This gallery is full"
             body={`It has reached its limit of ${fmt.count(event.settings.guestUploadLimit)} guest photos. Send extras to ${studio.name} directly.`}>
-            <a href={waLink(studio, `Hi ${studio.name}, I have photos from ${event.name} to share.`)}
-              target="_blank" rel="noreferrer noopener" className={linkBtn()}><MessageCircle size={16} />Message on WhatsApp</a>
+            {waLink(studio, '') && (
+              <a href={waLink(studio, `Hi ${studio.name}, I have photos from ${event.name} to share.`)}
+                target="_blank" rel="noreferrer noopener" className={linkBtn()}><MessageCircle size={16} />Message on WhatsApp</a>
+            )}
           </StateBlock>
         ) : (
           <div className="flex flex-col gap-3">

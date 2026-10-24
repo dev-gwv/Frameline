@@ -40,6 +40,14 @@ export class RateLimiter extends DurableObject<Env> {
     return { success: log.length < limit, limit, remaining: Math.max(0, limit - log.length), reset }
   }
 
+  /** Takes back the newest hit: a try that turned out fine (a correct PIN) shouldn't count against the caller. */
+  async forgive(): Promise<void> {
+    const log = (this.log ??= (await this.ctx.storage.get<number[]>('log')) ?? [])
+    if (!log.length) return
+    log.pop()
+    await this.ctx.storage.put('log', log)
+  }
+
   /** Clears the window (used by tests and support tooling). */
   async reset(): Promise<void> {
     this.log = []

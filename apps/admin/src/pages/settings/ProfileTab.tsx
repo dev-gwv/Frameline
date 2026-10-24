@@ -85,7 +85,7 @@ function ProfileForm({ studio }: { studio: Studio }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <SectionTitle title="Studio profile" description="Shown to guests in your galleries and studio app." />
+      <SectionTitle title="Studio profile" description="Shown to guests in your galleries and on your studio page." />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] [&>*]:min-w-0">
         <Card className="flex flex-col gap-3">
           <h3 className="font-sans text-[15px] font-extrabold">Studio and contact</h3>
@@ -130,7 +130,7 @@ function ProfileForm({ studio }: { studio: Studio }) {
               <input ref={logoRef} type="file" hidden accept={assetAccept('studio-logo')} onChange={(e) => { onImage(e.target.files?.[0], 'logo'); e.target.value = '' }} />
             </div>
           </Field>
-          <Field label="Cover photo" hint="16:9, up to 10 MB. Shown on your studio app page." error={coverUp.error}>
+          <Field label="Cover photo" hint="16:9, up to 10 MB. Shown on your studio page." error={coverUp.error}>
             <div className="relative aspect-video overflow-hidden rounded-card border border-line bg-sunk">
               {form.coverUrl ? <img src={form.coverUrl} alt="Cover" className="size-full object-cover" /> : <div className="grid size-full place-items-center text-[12px] text-ink-3">No cover yet</div>}
               <div className="absolute bottom-2 right-2 flex gap-1.5">

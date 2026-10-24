@@ -11,6 +11,8 @@
  *   (no SMS/WhatsApp yet).
  * - reminderEmails: Settings → Notifications offered event-expiry and plan reminders and a weekly summary; nothing
  *   sends them. (What does go out by email: sign-in codes, team and host invites, ZIP links, order emails.)
+ * - phoneApp: "Get the app" pages, QR codes that open "the Frameline app", "follow us in the app" copy; the phone app
+ *   (apps/mobile) is paused, so guests were sent to install something that doesn't exist.
  */
 export interface Features {
   /** Website builder, custom domain and the Enquiries inbox (admin), plus the guest "Enquire" entry points that feed it. */
@@ -21,6 +23,7 @@ export interface Features {
   broadcasts: boolean
   guestNotify: boolean
   reminderEmails: boolean
+  phoneApp: boolean
 }
 
 export const FEATURES: Readonly<Features> = {
@@ -31,6 +34,7 @@ export const FEATURES: Readonly<Features> = {
   broadcasts: false,
   guestNotify: false,
   reminderEmails: false,
+  phoneApp: false,
 }
 
 /**
@@ -42,6 +46,8 @@ export interface ServerFeatures {
   ai: boolean
   /** Card/UPI payments work (Razorpay keys set). Off: selling, payouts and card top-ups are hidden. */
   payments: boolean
+  /** Email goes out (SMTP or Resend). Off: no emailed ZIPs or sign-in codes. */
+  email: boolean
   /** Support's WhatsApp number (SUPPORT_WHATSAPP), when there is one: the Help page shows a chat link. */
   supportWhatsapp?: string
   /** Where Book a call goes (SUPPORT_CALL_URL), when there is one. */
@@ -54,7 +60,7 @@ export interface Seller { name: string; gstin: string; address?: string }
 
 /** Sample data (no API URL) shows everything; a server that can't be asked is treated as switched off, the safe side. */
 export async function fetchServerFeatures(apiUrl: string | undefined): Promise<ServerFeatures> {
-  if (!apiUrl) return { ai: true, payments: true }
+  if (!apiUrl) return { ai: true, payments: true, email: true }
   try {
     const res = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/meta`)
     const body = (await res.json()) as { features?: Partial<ServerFeatures> }
@@ -64,11 +70,13 @@ export async function fetchServerFeatures(apiUrl: string | undefined): Promise<S
     return {
       ai: body.features?.ai === true,
       payments: body.features?.payments === true,
+      // Older servers didn't say; they had email.
+      email: body.features?.email !== false,
       ...(typeof wa === 'string' && wa ? { supportWhatsapp: wa } : {}),
       ...(typeof call === 'string' && /^https:\/\//.test(call) ? { supportCallUrl: call } : {}),
       ...(seller && typeof seller.name === 'string' && typeof seller.gstin === 'string' ? { seller } : {}),
     }
   } catch {
-    return { ai: false, payments: false }
+    return { ai: false, payments: false, email: false }
   }
 }

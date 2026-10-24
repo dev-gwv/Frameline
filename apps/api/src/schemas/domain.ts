@@ -294,6 +294,8 @@ export const Ticket = z.object({
 export const TeamMember = z.object({
   id: Id, name: z.string(), email: z.string(), role: Role, access: z.string(), lastActive: z.string(),
   eventIds: z.array(z.string()).optional(), pending: z.boolean().optional(),
+  /** On a new invite: false when the email couldn't be sent (the invite is saved; tell the person yourself). */
+  emailSent: z.boolean().optional(),
 }).openapi('TeamMember')
 
 export const WatermarkSettings = z.object({

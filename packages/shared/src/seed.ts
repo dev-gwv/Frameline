@@ -58,10 +58,11 @@ export const STORE_COMMISSION = 0.1
 export const COUPONS: Record<string, number> = { WELCOME500: 500 }
 
 /**
- * Photos one new event may hold before it needs a pack. 10,000 while payments are off (23 Oct): a big wedding fits
- * and nobody hits a wall they can't pay past. The studio's plan quota still counts every photo.
+ * Photos one new event may hold before it needs a pack. 25,000 while payments are off (24 Oct; 10,000 from 23 Oct):
+ * originals count twice, so 10,000 was only 5,000 full-size photos, and a multi-day wedding hit a wall it couldn't
+ * pay past. The studio's plan quota still counts every photo.
  */
-export const EVENT_PHOTO_LIMIT = 10_000
+export const EVENT_PHOTO_LIMIT = 25_000
 
 export const PACKS = [
   { photos: 1000, price: 700 },

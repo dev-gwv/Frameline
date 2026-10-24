@@ -916,7 +916,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       const event: PhotoEvent = {
         id, shortId, name: input.name, type: input.type, date: new Date(input.date).toISOString(), city: input.city,
         status: 'draft', photoCount: 0, photoLimit: EVENT_PHOTO_LIMIT, visits: { web: 0, android: 0, ios: 0 }, faceMatches: 0,
-        expiresAt: new Date(new Date(input.date).getTime() + 365 * DAY).toISOString(), createdAt: new Date().toISOString(),
+        expiresAt: new Date(Math.max(new Date(input.date).getTime(), Date.now()) + 365 * DAY).toISOString(), createdAt: new Date().toISOString(),
         coverTones: [tone(t), tone(t + 3), tone(t + 7)],
         settings: defaultSettings({ ...PRESETS[input.preset].settings, guestUploadLimit: input.guestUploadLimit, pin: String(1000 + (t % 9000)) }),
         hosts: input.host?.email ? [normHost({ id: uid('h'), name: input.host.email.split('@')[0], email: input.host.email, phone: input.host.phone, role: 'client' })] : [],

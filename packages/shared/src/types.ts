@@ -384,6 +384,8 @@ export interface TeamMember {
   eventIds?: ID[]
   /** True while the invite hasn't been accepted. */
   pending?: boolean
+  /** On a new invite: false when the email couldn't be sent (the invite is saved; tell the person yourself). */
+  emailSent?: boolean
 }
 
 export interface WatermarkSettings {

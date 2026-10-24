@@ -9,7 +9,7 @@ import { setFollowing, useGuest } from '../lib/guest'
 import { friendlyError, isNotFound } from '../lib/errors'
 import { Container, linkBtn, StatePage, WideButton } from '../components/common'
 import { EnquirySheet } from '../components/EnquirySheet'
-import { useBrandColor, waLink } from '../lib/brand'
+import { telLink, useBrandColor, waLink } from '../lib/brand'
 
 /**
  * Studio profile from api.getStudioProfile(followCode | handle): featured galleries, services, questions and
@@ -57,7 +57,7 @@ export function StudioProfile() {
       } else {
         await api.followStudio(studio.followCode)
         setFollowing(studio.followCode, true)
-        toast({ title: `Following ${studio.name}`, body: 'New events from this studio will show up on your home screen.' })
+        toast({ title: `Following ${studio.name}`, body: 'Find this studio again from the Frameline home page on this device.' })
       }
       void profileQ.refetch()
     } catch (err) {
@@ -164,13 +164,15 @@ export function StudioProfile() {
 
         <section aria-labelledby="contact-h" className="rounded-card border border-line bg-surface p-4 shadow-card">
           <h2 id="contact-h" className="mb-2 text-[15px]">Contact</h2>
-          <ContactRow icon={<Phone size={15} />} label="Phone" value={studio.phone} href={`tel:${studio.phone.replace(/\s/g, '')}`} onCopy={() => copy(studio.phone, 'Phone number')} />
+          {telLink(studio) && <ContactRow icon={<Phone size={15} />} label="Phone" value={studio.phone} href={telLink(studio)!} onCopy={() => copy(studio.phone, 'Phone number')} />}
           <ContactRow icon={<Mail size={15} />} label="Email" value={studio.email} href={`mailto:${studio.email}`} onCopy={() => copy(studio.email, 'Email')} />
           {studio.website && <ContactRow icon={<Globe size={15} />} label="Website" value={studio.website.replace(/^https?:\/\//, '')} href={studio.website} external />}
           {studio.instagram && <ContactRow icon={<AtSign size={15} />} label="Instagram" value={studio.instagram} href={`https://instagram.com/${studio.instagram.replace('@', '')}`} external />}
-          <a href={waLink(studio, `Hi ${studio.name}, I found you on Frameline.`)} target="_blank" rel="noreferrer noopener" className={linkBtn('secondary', 'mt-3')}>
-            <MessageCircle size={16} />Message on WhatsApp
-          </a>
+          {waLink(studio, '') && (
+            <a href={waLink(studio, `Hi ${studio.name}, I found you on Frameline.`)} target="_blank" rel="noreferrer noopener" className={linkBtn('secondary', 'mt-3')}>
+              <MessageCircle size={16} />Message on WhatsApp
+            </a>
+          )}
         </section>
       </Container>
       {FEATURES.website && <EnquirySheet open={enquire} onOpenChange={setEnquire} studio={studio} source="Studio profile" />}

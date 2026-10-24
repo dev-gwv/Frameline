@@ -81,7 +81,7 @@ export async function createEvent(db: DB, studioId: string, input: NewEvent): Pr
   const row: typeof schema.events.$inferInsert = {
     id, studioId, shortId, name: input.name, type: input.type, date: date.toISOString(), city: input.city,
     status: 'draft', photoCount: 0, photoLimit: EVENT_PHOTO_LIMIT, visits: { web: 0, android: 0, ios: 0 }, faceMatches: 0,
-    expiresAt: new Date(date.getTime() + 365 * 86_400_000).toISOString(), createdAt: now,
+    expiresAt: galleryExpiry(date.toISOString()), createdAt: now,
     coverTones: [tone(t), tone(t + 3), tone(t + 7)],
     settings: defaultSettings({ ...PRESETS[input.preset].settings, ...input.overrides, guestUploadLimit: input.guestUploadLimit, pin: newPin() }),
     hosts: input.host ? [{ id: newId('h'), name: input.host.email.split('@')[0], email: input.host.email, phone: input.host.phone, role: 'client', access: 'full', status: 'invited', invitedAt: now }] : [],
@@ -92,6 +92,15 @@ export async function createEvent(db: DB, studioId: string, input: NewEvent): Pr
     db.insert(schema.albums).values({ id: `${id}_guest`, eventId: id, studioId, name: 'Guest uploads', order: 99, photoCount: 0, kind: 'guest', createdAt: now }),
   ])
   return id
+}
+
+/**
+ * When guests lose access: a year after the event, or a year from today for an event already past (a studio
+ * putting up last season's weddings), never earlier than `current`.
+ */
+export function galleryExpiry(date: string, current?: string): string {
+  const year = Math.max(Date.parse(date), Date.now()) + 365 * 86_400_000
+  return new Date(Math.max(year, current ? Date.parse(current) : 0)).toISOString()
 }
 
 /** Random 4-digit gallery PIN, never equal to `avoid` (the event's other PIN). */
