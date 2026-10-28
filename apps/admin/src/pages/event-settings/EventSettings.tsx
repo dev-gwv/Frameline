@@ -4,7 +4,7 @@ import { useEventContext } from '../event/EventLayout'
 import { AddPhotosModal } from './AddPhotosModal'
 import { DetailsModal } from './DetailsModal'
 import { DownloadLogModal, DownloadsModal } from './DownloadsModal'
-import { HostsCard, LimitCard, LookCard, SellingCard, TurnOffCard } from './LowerCards'
+import { HostsCard, LimitCard, LookCard, SellingCard, StorageCard, TurnOffCard } from './LowerCards'
 import { guestSentence, SaveIndicator, type CardProps } from './parts'
 import { AccessCard, DownloadsCard, FacesCard, GuestUploadsCard } from './TopCards'
 import { useEventSaver } from './useEventSaver'
@@ -56,6 +56,7 @@ export default function EventSettings() {
         <SellingCard {...props} />
         <HostsCard {...props} />
         <LimitCard {...props} onAdd={() => setDialog('add-photos')} onDetails={() => setDialog('details')} />
+        <StorageCard {...props} />
         <TurnOffCard {...props} />
       </div>
 

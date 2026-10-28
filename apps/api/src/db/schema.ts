@@ -183,6 +183,10 @@ export const events = sqliteTable('events', {
   highlights: bool('highlights').notNull().default(true),
   plan: text('plan', { enum: ['subscription', 'pack', 'trial'] }).notNull().default('subscription'),
   deletedAt: ts('deleted_at'),
+  /** Where new full-size files go: R2 (`frameline`) or the studio's connected Google Drive (`drive`). */
+  originalsIn: text('originals_in', { enum: ['frameline', 'drive'] }).notNull().default('frameline'),
+  /** The event's folder in the studio's Drive (Frameline / <event>), made on the first Drive upload. */
+  driveFolderId: text('drive_folder_id'),
 }, (t) => [uniqueIndex('events_short_uq').on(t.shortId), index('events_studio_idx').on(t.studioId, t.createdAt)])
 
 export const albums = sqliteTable('albums', {
@@ -198,6 +202,8 @@ export const albums = sqliteTable('albums', {
   lastCapture: ts('last_capture'),
   createdAt: ts('created_at').notNull(),
   deletedAt: ts('deleted_at'),
+  /** The album's folder inside the event's Drive folder (originals in Drive). */
+  driveFolderId: text('drive_folder_id'),
 }, (t) => [index('albums_event_idx').on(t.eventId, t.order), index('albums_deleted_idx').on(t.deletedAt)])
 
 export const photos = sqliteTable('photos', {
@@ -241,7 +247,15 @@ export const photos = sqliteTable('photos', {
    * browser at upload (PUT /photos/{id}/web) or by the processor. Galleries show it instead of the original.
    */
   webCopy: bool('web_copy').notNull().default(false),
+  /**
+   * `drive`: the full-size file lives in the studio's Google Drive (`driveFileId`), not in R2. `r2Key` still names
+   * where it would be, so the web copy (…/renditions/2048.jpg, in R2) and media signatures work the same.
+   */
+  storage: text('storage', { enum: ['r2', 'drive'] }).notNull().default('r2'),
+  /** The Drive file: the original for `storage: drive`, the source of an import for `source: drive`. */
+  driveFileId: text('drive_file_id'),
 }, (t) => [
+  index('photos_drive_file_idx').on(t.eventId, t.driveFileId),
   index('photos_deleted_idx').on(t.deletedAt),
   index('photos_r2key_idx').on(t.r2Key),
   index('photos_event_capture_idx').on(t.eventId, t.capturedAt, t.id),
@@ -285,7 +299,8 @@ export const uploads = sqliteTable('uploads', {
   albumId: text('album_id').notNull(),
   userId: text('user_id').notNull(),
   quality: text('quality', { enum: ['web', 'original'] }).notNull(),
-  mode: text('mode', { enum: ['s3', 'proxy'] }).notNull(),
+  /** `drive`: originals go straight to the studio's Google Drive (resumable upload sessions), web copies to R2. */
+  mode: text('mode', { enum: ['s3', 'proxy', 'drive'] }).notNull(),
   files: json<UploadFileRecord[]>('files').notNull(),
   options: json<UploadSessionOptions>('options'),
   status: text('status', { enum: ['pending', 'completed', 'aborted'] }).notNull().default('pending'),
@@ -308,6 +323,8 @@ export interface UploadFileRecord {
   height?: number
   capturedAt?: string
   url?: string
+  /** Drive uploads: the album folder the file must land in. */
+  driveParentId?: string
 }
 
 // ── Guests ──────────────────────────────────────────────────────────────────
@@ -670,3 +687,57 @@ export const notifyRequests = sqliteTable('notify_requests', {
   notifiedAt: ts('notified_at'),
   cancelledAt: ts('cancelled_at'),
 }, (t) => [uniqueIndex('notify_event_phone_uq').on(t.eventId, t.phone), index('notify_pending_idx').on(t.notifiedAt, t.cancelledAt)])
+
+// ── Google Drive (docs/GOOGLE_DRIVE_PLAN.md) ────────────────────────────────
+/** A studio's connected Google Drive: one per studio, scope drive.file only. The refresh token is AES-GCM sealed. */
+export const driveConnections = sqliteTable('drive_connections', {
+  studioId: text('studio_id').primaryKey().references(() => studios.id, { onDelete: 'cascade' }),
+  googleSub: text('google_sub').notNull(),
+  email: text('email').notNull(),
+  refreshTokenEnc: text('refresh_token_enc').notNull(),
+  scope: text('scope').notNull(),
+  /** The "Frameline" folder in their Drive, made on first use. */
+  rootFolderId: text('root_folder_id'),
+  /** `revoked`: Google refused the token (access removed, password changed); the studio must reconnect. */
+  status: text('status', { enum: ['ok', 'revoked'] }).notNull().default('ok'),
+  /** New events keep their originals in Drive. */
+  defaultForNewEvents: bool('default_for_new_events').notNull().default(false),
+  /** Drive files of this studio's photos found missing by the daily check (0 = all there). */
+  missingFiles: integer('missing_files').notNull().default(0),
+  checkedAt: ts('checked_at'),
+  connectedBy: text('connected_by').notNull(),
+  connectedAt: ts('connected_at').notNull(),
+})
+
+/** An import of picked Drive files into an event. Items are copied by the photo queue (`drive-import` jobs). */
+export const driveImports = sqliteTable('drive_imports', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  eventId: text('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull(),
+  name: text('name').notNull(),
+  quality: text('quality', { enum: ['web', 'original'] }).notNull(),
+  watermark: bool('watermark').notNull().default(false),
+  status: text('status', { enum: ['running', 'done', 'failed', 'cancelled'] }).notNull().default('running'),
+  total: integer('total').notNull(),
+  done: integer('done').notNull().default(0),
+  skipped: integer('skipped').notNull().default(0),
+  failed: integer('failed').notNull().default(0),
+  albumsCreated: integer('albums_created').notNull().default(0),
+  error: text('error'),
+  createdAt: ts('created_at').notNull(),
+  finishedAt: ts('finished_at'),
+}, (t) => [index('drive_imports_event_idx').on(t.eventId, t.createdAt)])
+
+export const driveImportItems = sqliteTable('drive_import_items', {
+  id: text('id').primaryKey(),
+  importId: text('import_id').notNull().references(() => driveImports.id, { onDelete: 'cascade' }),
+  fileId: text('file_id').notNull(),
+  name: text('name').notNull(),
+  size: integer('size').notNull(),
+  mimeType: text('mime_type').notNull(),
+  albumId: text('album_id').notNull(),
+  status: text('status', { enum: ['waiting', 'done', 'skipped', 'failed'] }).notNull().default('waiting'),
+  photoId: text('photo_id'),
+  error: text('error'),
+}, (t) => [index('drive_import_items_import_idx').on(t.importId, t.status)])

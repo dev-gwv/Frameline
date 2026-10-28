@@ -58,7 +58,7 @@ photoRoutes.openapi(createRoute({
   }
   await db.insert(a).values(album).run()
   emit(c, m.studioId, 'albums')
-  return c.json(albumOut({ ...album, coverPhotoId: null, firstCapture: null, lastCapture: null, deletedAt: null }), 201)
+  return c.json(albumOut({ ...album, coverPhotoId: null, firstCapture: null, lastCapture: null, deletedAt: null, driveFolderId: null }), 201)
 })
 
 photoRoutes.openapi(createRoute({

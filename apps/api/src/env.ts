@@ -39,6 +39,12 @@ export interface Env {
   RESEND_API_KEY?: string
   GOOGLE_CLIENT_ID?: string
   GOOGLE_CLIENT_SECRET?: string
+  /** Google Drive (docs/GOOGLE_DRIVE_PLAN.md): the browser key for the Google Picker (public, a wrangler var) and the
+   *  Cloud project number the Picker needs as appId. With GOOGLE_CLIENT_ID/SECRET and DRIVE_TOKEN_KEY: features.drive. */
+  GOOGLE_PICKER_API_KEY?: string
+  GOOGLE_PROJECT_NUMBER?: string
+  /** 32 random bytes, base64: seals stored Drive refresh tokens (AES-GCM). A Cloudflare secret, never a file. */
+  DRIVE_TOKEN_KEY?: string
   /** Comma-separated absolute redirect URIs native apps may use for Google sign-in (default frameline://sign-in). */
   GOOGLE_NATIVE_REDIRECTS?: string
   R2_ACCESS_KEY_ID?: string
@@ -95,7 +101,7 @@ export interface Variables {
 export type AppEnv = { Bindings: Env; Variables: Variables }
 
 /** Messages on the photo queue. */
-export type PhotoJob = ProcessPhotoJob | BuildZipJob
+export type PhotoJob = ProcessPhotoJob | BuildZipJob | DriveImportJob
 
 export interface ProcessPhotoJob {
   kind: 'process-photo'
@@ -110,6 +116,13 @@ export interface ProcessPhotoJob {
   reindex?: boolean
   /** Burn the studio watermark into the rendition (guest uploads with watermarkGuestUploads). */
   watermark?: boolean
+  /** `key` is the 2048 px web copy: the original is in the studio's Google Drive, not R2 (services/add-photos.ts). */
+  webOnly?: boolean
+  /** How many times a `webOnly` job has waited for its web copy to arrive. */
+  webWaits?: number
 }
 
 export interface BuildZipJob { kind: 'build-zip'; zipId: string; studioId: string }
+
+/** Copies picked Google Drive files into an event (services/drive-import.ts). */
+export interface DriveImportJob { kind: 'drive-import'; importId: string; studioId: string; itemIds: string[] }

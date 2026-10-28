@@ -35,6 +35,7 @@ import { markOrderPaid, sendReceipt, verifyCheckoutSignature, verifyReceiptToken
 import { createProviderOrder, grantStudioPurchase, openStudioPayment, paymentMode, settleStudioPayment } from '../services/payments'
 import { emit } from '../services/realtime'
 import { effectiveSettings } from '../lib/features'
+import { openOriginal } from '../services/originals'
 import { chunk } from './photos'
 import { UploadFileInput, completeUploadSession, createUploadSession } from './uploads'
 
@@ -629,7 +630,7 @@ publicRoutes.openapi(createRoute({
     params: ShortIdParam, headers: IdempotencyHeader,
     body: body(z.object({ files: z.array(UploadFileInput).min(1).max(50), uploadedBy: z.string().trim().min(1).max(120).optional(), albumId: z.string().max(128).optional() }).passthrough()),
   },
-  responses: { 201: json(z.object({ uploadId: z.string(), mode: z.enum(['s3', 'proxy']), partSize: z.number(), expiresAt: z.string(), files: z.array(z.object({ photoId: z.string(), filename: z.string(), key: z.string().nullable(), parts: z.array(z.object({ partNumber: z.number(), url: z.string() })) })) }), 'Upload started'), ...problems(401, 403, 404, 409, 422) },
+  responses: { 201: json(z.object({ uploadId: z.string(), mode: z.enum(['s3', 'proxy', 'drive']), partSize: z.number(), expiresAt: z.string(), files: z.array(z.object({ photoId: z.string(), filename: z.string(), key: z.string().nullable(), parts: z.array(z.object({ partNumber: z.number(), url: z.string() })) })) }), 'Upload started'), ...problems(401, 403, 404, 409, 422) },
 }), async (c) => {
   const { e, g, album } = await guestUploadTarget(c, c.req.valid('param').shortId)
   const input = c.req.valid('json')
@@ -1100,16 +1101,17 @@ publicRoutes.openapi(createRoute({
   /** One photo's file and its size (an estimate for files rendered on the fly), or null to leave it out. */
   const fileFor = async (r: typeof rows[number]): Promise<{ body: ReadableStream<Uint8Array>; size: number } | null> => {
     if (!r.r2Key) return null
-    if (!guestZip) { const o = await c.env.MEDIA.get(r.r2Key); return o && { body: o.body, size: o.size } }
+    if (!guestZip) return openOriginal(c.env, r)
     // Watermarked or turned by the studio: rendered now by the processor.
     if (watermark || (r.rotation && c.env.PROCESSOR_URL)) {
       const body = await downloadFile(c.env, r, size, watermark)
       return body && { body, size: 12 * 1024 * 1024 }
     }
     // Plain: full size is the original; web size the 2048 rendition, or the original when uploaded at web size.
-    const keys = size === '3072' ? [r.r2Key] : [r.r2Key.replace(/\/[^/]+$/, '/renditions/2048.jpg'), ...(r.quality === 'web' ? [r.r2Key] : [])]
-    for (const key of keys) { const o = await c.env.MEDIA.get(key); if (o) return { body: o.body, size: o.size } }
-    return null
+    if (size === '3072') return openOriginal(c.env, r)
+    const web = await c.env.MEDIA.get(r.r2Key.replace(/\/[^/]+$/, '/renditions/2048.jpg'))
+    if (web) return { body: web.body, size: web.size }
+    return r.quality === 'web' ? openOriginal(c.env, r) : null
   }
 
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()

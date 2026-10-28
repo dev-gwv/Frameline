@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react'
-import { NavLink, Outlet, useMatch, useNavigate, useOutletContext, useParams } from 'react-router-dom'
+import { Link, NavLink, Outlet, useMatch, useNavigate, useOutletContext, useParams } from 'react-router-dom'
 import { Archive, Eye, Film, HardDriveDownload, MoreHorizontal, ScanFace, Share2, Upload } from 'lucide-react'
-import { FEATURES, fmt, type EventStats, type PhotoEvent } from '@frameline/shared'
+import { fmt, type EventStats, type PhotoEvent } from '@frameline/shared'
 import { Button, CountBadge, EventStatusChip, Menu, Skeleton, cn, useToast } from '@frameline/ui'
 import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
-import { useEvent, useEventStats, useGuestsAttention } from '../../lib/queries'
+import { useDrive, useEvent, useEventStats, useGuestsAttention } from '../../lib/queries'
 import { BackLink, galleryUrl, useModalParam } from '../../lib/url'
 import { EventModals } from '../workspace/EventModals'
 import { QueryError } from '../system'
@@ -62,8 +62,11 @@ function EventHeader({ event }: { event: PhotoEvent }) {
   const toast = useToast()
   const badge = useGuestsAttention(event.id)
   const stats = useEventStats(event.id).data
-  const { ai } = useServerFeatures()
+  const { ai, drive: driveOn, driveImport } = useServerFeatures()
   const finding = ai ? findingFaces(event, stats) : null
+  // Originals in Drive while Google no longer lets Frameline in: uploads and full-size downloads need a reconnect.
+  const drive = useDrive(driveOn && event.originalsIn === 'drive').data
+  const driveLost = event.originalsIn === 'drive' && drive?.status === 'revoked'
 
   const archive = async () => {
     const before = event.status
@@ -97,7 +100,7 @@ function EventHeader({ event }: { event: PhotoEvent }) {
               width={300}
               items={[
                 { label: 'Preview as a guest', description: 'Opens the gallery in a new tab', icon: <Eye size={16} />, onSelect: () => window.open(galleryUrl(event.shortId), '_blank', 'noopener') },
-                ...(FEATURES.driveImport ? [{ label: 'Import from Google Drive', description: 'Bring in a finished shoot', icon: <HardDriveDownload size={16} />, onSelect: () => m.open('import') }] : []),
+                ...(driveImport ? [{ label: 'Import from Google Drive', description: 'Bring in a finished shoot', icon: <HardDriveDownload size={16} />, onSelect: () => m.open('import') }] : []),
                 { label: 'Films', description: 'Add YouTube videos to the gallery', icon: <Film size={16} />, onSelect: () => m.open('films') },
                 ...(ai ? [{ label: 'Face finding', description: !event.settings.faceSearch ? 'Off for this event' : finding ? finding[0].toUpperCase() + finding.slice(1) : `${fmt.count(stats?.faces.total ?? event.photoCount)} photos done`, icon: <ScanFace size={16} />, onSelect: () => m.open('faces') }] : []),
                 'separator',
@@ -111,6 +114,11 @@ function EventHeader({ event }: { event: PhotoEvent }) {
             <Button variant="primary" icon={<Share2 size={15} />} onClick={() => m.open('share', { tab: 'link' })} className="max-sm:h-11 max-sm:flex-1">Share</Button>
           </div>
         </div>
+        {driveLost && (
+          <p role="alert" className="mt-3 rounded-[10px] bg-bad-soft px-3 py-2.5 text-[12.5px] text-bad">
+            Google Drive is no longer connected, so this event can’t take uploads and guests get 2048 px copies instead of full-size photos. <Link to="/settings/drive" className="font-bold underline">Reconnect Google Drive</Link>
+          </p>
+        )}
         <nav aria-label="Event sections" className="mt-3 flex gap-[22px] overflow-x-auto scrollbar-none sm:mt-3.5">
           <Tab to={`/events/${event.id}`} end>Photos</Tab>
           <Tab to={`/events/${event.id}/guests`}>Guests{badge > 0 && <CountBadge n={badge} className="ml-1.5" />}</Tab>

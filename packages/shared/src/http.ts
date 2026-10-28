@@ -7,6 +7,7 @@ import type {
   Album, Broadcast, Camera, CameraUpload, Enquiry, EventSettings, Guest, GuestSession, LedgerEntry, NotificationPrefs, Order, Photo, PhotoEvent,
   Price, PublicEvent, Purchase, SmartQR, StoreSettings, Studio, StudioProfile, TeamMember, Ticket, Usage, UsageBreakdown, UsageReport,
   WatermarkSettings, Website, ZipRequest, WalletBalance, NeedsYouItem,
+  DriveExpandResult, DriveImport, DrivePickerConfig, DriveStatus,
   AccessRequest, EventStats, HandleCheck, NotifyRequest, PayoutCheck, StudioStats,
 } from './types'
 import type { SeedState } from './seed'
@@ -247,6 +248,8 @@ interface Page<T> { items: T[]; nextCursor: string | null }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const backoff = (attempt: number) => Math.min(8000, 300 * 2 ** attempt) * (0.5 + Math.random())
+/** Google Drive resumable uploads take pieces in multiples of 256 KiB. */
+const DRIVE_CHUNK = 8 * 1024 * 1024
 const uuid = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`)
 const pick = <T extends object, K extends keyof T>(o: T, keys: readonly K[]): Pick<T, K> => {
   const out = {} as Pick<T, K>
@@ -454,9 +457,50 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     }
   }
 
+  /**
+   * Sends a file to a Google Drive resumable upload session (events that keep originals in the studio's Drive), in
+   * 8 MiB pieces so a dropped connection resumes where it stopped. Returns the Drive file id.
+   */
+  async function putDrive(sessionUrl: string, blob: Blob, onProgress?: (loaded: number) => void): Promise<string> {
+    const total = blob.size
+    let offset = 0
+    for (let attempt = 0; ; ) {
+      try {
+        if (total === 0) {
+          const res = await fetchImpl(sessionUrl, { method: 'PUT', body: blob })
+          if (!res.ok) throw await ApiError.fromResponse(res)
+          return ((await res.json()) as { id: string }).id
+        }
+        const end = Math.min(total, offset + DRIVE_CHUNK) - 1
+        const res = await fetchImpl(sessionUrl, { method: 'PUT', body: blob.slice(offset, end + 1), headers: { 'Content-Range': `bytes ${offset}-${end}/${total}` } })
+        if (res.status === 308) {
+          // Google says how much it has; carry on from there.
+          const range = res.headers.get('range')
+          offset = range ? Number(range.split('-')[1]) + 1 : end + 1
+          onProgress?.(offset)
+          attempt = 0
+          continue
+        }
+        if (res.ok) {
+          onProgress?.(total)
+          return ((await res.json()) as { id: string }).id
+        }
+        if (res.status < 500 || attempt >= maxRetries) throw await ApiError.fromResponse(res)
+      } catch (e) {
+        if (e instanceof ApiError && e.status > 0 && e.status < 500) throw e
+        if (attempt >= maxRetries) throw e instanceof ApiError ? e : new ApiError({ status: 0, code: 'network_error', detail: 'Upload to Google Drive interrupted. Check your connection and try again.' })
+      }
+      await sleep(backoff(attempt++))
+      // After a failure, ask Google what arrived before sending more.
+      const probe = await fetchImpl(sessionUrl, { method: 'PUT', headers: { 'Content-Range': `bytes */${total}` } }).catch(() => null)
+      if (probe?.ok) return ((await probe.json()) as { id: string }).id
+      if (probe?.status === 308) { const range = probe.headers.get('range'); offset = range ? Number(range.split('-')[1]) + 1 : 0 }
+    }
+  }
+
   interface UploadSession {
-    uploadId: string; mode: 's3' | 'proxy'; partSize: number
-    files: { photoId: string; filename: string; key: string | null; parts: { partNumber: number; url: string }[] }[]
+    uploadId: string; mode: 's3' | 'proxy' | 'drive'; partSize: number
+    files: { photoId: string; filename: string; key: string | null; parts: { partNumber: number; url: string }[]; driveUploadUrl?: string }[]
   }
 
   interface UploadTarget { start: string; complete: (uploadId: string) => string; guest?: string }
@@ -476,7 +520,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
         })),
       },
     })
-    const results: { photoId: string; parts: { partNumber: number; etag: string }[] }[] = []
+    const results: { photoId: string; parts: { partNumber: number; etag: string }[]; driveFileId?: string }[] = []
     // Studio uploads only: the web copy is made while the files upload and sent once the photos exist.
     const makeWebCopy = t.guest === undefined ? options.makeWebCopy : undefined
     const webCopies = new Map<string, Blob>()
@@ -486,6 +530,15 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
       for (let item = queue.shift(); item; item = queue.shift()) {
         const { sf, blob } = item
         const parts: { partNumber: number; etag: string }[] = []
+        if (blob && sf.driveUploadUrl) {
+          const driveFileId = await putDrive(sf.driveUploadUrl, blob, (loaded) => options.onUploadProgress?.({ photoId: sf.photoId, filename: sf.filename, loaded, total: blob.size }))
+          if (makeWebCopy) {
+            const copy = await makeWebCopy(blob).catch(() => null)
+            if (copy) webCopies.set(sf.photoId, copy)
+          }
+          results.push({ photoId: sf.photoId, parts, driveFileId })
+          continue
+        }
         if (blob && sf.parts.length) {
           let loaded = 0
           for (const p of sf.parts) {
@@ -686,6 +739,18 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     updateWebsite: (patch) => request<Website>('PATCH', '/v1/website', { body: pick(patch, WEBSITE_KEYS) }),
     listEnquiries: () => listAll('/v1/enquiries'),
     addCredits: async (amount) => (await paid(await request<{ walletCredits: number } | { payment: PendingPaymentWire }>('POST', '/v1/studio/credits', { body: { amount }, idempotent: true }), 'Add money to your wallet')).walletCredits,
+
+    // ── Google Drive ────────────────────────────────────────────────────────
+    getDrive: () => get<DriveStatus>('/v1/drive'),
+    connectDrive: () => request<{ authorizationUrl: string }>('POST', '/v1/drive/connect'),
+    updateDrive: (patch) => request<DriveStatus>('PATCH', '/v1/drive', { body: { defaultForNewEvents: patch.defaultForNewEvents } }),
+    disconnectDrive: () => request<void>('DELETE', '/v1/drive'),
+    getDrivePicker: () => get<DrivePickerConfig>('/v1/drive/picker'),
+    expandDriveItems: (ids) => request<DriveExpandResult>('POST', '/v1/drive/expand', { body: { ids } }),
+    startDriveImport: (eventId, input) => request<DriveImport>('POST', `/v1/events/${enc(eventId)}/drive-imports`, { body: input, idempotent: true }),
+    listDriveImports: async (eventId) => (await get<{ items: DriveImport[] }>(`/v1/events/${enc(eventId)}/drive-imports`)).items,
+    cancelDriveImport: (id) => request<DriveImport>('DELETE', `/v1/drive-imports/${enc(id)}`),
+    setOriginalsIn: (eventId, where) => request<PhotoEvent>('PUT', `/v1/events/${enc(eventId)}/originals`, { body: { in: where } }),
 
     // ── Studio: usage, billing ──────────────────────────────────────────────
     getUsageBreakdown: () => get<UsageBreakdown>('/v1/studio/usage/breakdown'),

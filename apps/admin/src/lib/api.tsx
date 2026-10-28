@@ -76,11 +76,11 @@ const TOPIC_KEYS: Record<ChangeTopic, string[]> = {
   events: ['events', 'event', 'needs-you', 'event-stats', 'studio-stats'],
   albums: ['albums'],
   photos: ['photos', 'photo', 'needs-you', 'event-stats', 'studio-stats', 'downloads'],
-  studio: ['studio'],
+  studio: ['studio', 'drive'],
   usage: ['usage', 'wallet'],
   guests: ['guests', 'access-requests', 'needs-you', 'event-stats'],
   activity: ['activity', 'event-stats', 'studio-stats'],
-  misc: ['films', 'zips', 'downloads', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'website', 'enquiries', 'ledger', 'orders', 'wallet', 'studio-stats'],
+  misc: ['drive-imports', 'films', 'zips', 'downloads', 'cameras', 'qrs', 'broadcasts', 'tickets', 'team', 'watermark', 'website', 'enquiries', 'ledger', 'orders', 'wallet', 'studio-stats'],
 }
 
 function LiveUpdates({ api }: { api: FramelineApi }) {
@@ -117,5 +117,5 @@ export function useHttpApi(): FramelineHttpApi | null {
 
 /** The server's run-time switches (AI features, payments, invoice seller), asked once per visit. */
 export function useServerFeatures(): ServerFeatures {
-  return useQuery({ queryKey: ['server-features'], queryFn: () => fetchServerFeatures(API_URL), staleTime: Infinity }).data ?? { ai: false, payments: false, email: false }
+  return useQuery({ queryKey: ['server-features'], queryFn: () => fetchServerFeatures(API_URL), staleTime: Infinity }).data ?? { ai: false, payments: false, email: false, drive: false, driveImport: false }
 }

@@ -1,8 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { and, eq, isNull, max, or, sql } from 'drizzle-orm'
+import { and, eq, isNull, or, sql } from 'drizzle-orm'
 import type { Context } from 'hono'
-import { hash, tone } from '@frameline/shared'
-import type { AppEnv, PhotoJob } from '../env'
+import type { AppEnv } from '../env'
 import { getDb, schema } from '../db/client'
 import { webCopyKey } from '../db/mappers'
 import type { UploadFileRecord, UploadSessionOptions } from '../db/schema'
@@ -17,9 +16,12 @@ import { Photo } from '../schemas/domain'
 import { assertEventVisible } from '../services/access'
 import { audit } from '../services/audit'
 import { paymentsLive } from '../services/payments'
-import { eventForMember, recountStatements } from '../services/events'
+import { eventForMember } from '../services/events'
 import { emit } from '../services/realtime'
 import { queuePartnerNotice } from '../services/partner-notify'
+import { addPhotos, type StoredFile } from '../services/add-photos'
+import { openOriginal } from '../services/originals'
+import { DriveFileMissing, ensureAlbumFolder, getFile, startResumableUpload } from '../services/drive'
 import { background } from '../lib/http'
 import {
   PART_SIZE, PRESIGN_TTL_SEC, abortMultipart, completeMultipart, createMultipart, objectKey, presignPart, uploadMode, type UploadMode,
@@ -29,9 +31,13 @@ export const uploadRoutes = createRouter()
 
 type UploadInputFile = z.infer<typeof UploadFileInput>
 
-/** Opens R2 multipart uploads (or registers external files) and stores the upload session. */
+/**
+ * Opens R2 multipart uploads (or registers external files) and stores the upload session. With `drive`, each file
+ * instead gets a Google Drive resumable upload into the album's folder (originals kept in the studio's Drive).
+ */
 export async function createUploadSession(c: Context<AppEnv>, a: {
   studioId: string; eventId: string; albumId: string; userId: string; quality: 'web' | 'original'; files: UploadInputFile[]; options: UploadSessionOptions
+  drive?: { parentId: string }
 }) {
   const db = getDb(c.env.DB)
   const input = { files: a.files, quality: a.quality }
@@ -39,7 +45,7 @@ export async function createUploadSession(c: Context<AppEnv>, a: {
   const ev = { id: a.eventId }
   const album = { id: a.albumId }
   const me = { id: a.userId }
-  const mode: UploadMode = uploadMode(c.env)
+  const mode: UploadMode | 'drive' = a.drive ? 'drive' : uploadMode(c.env)
   const uploadId = newId('up')
   const expiresAt = new Date(Date.now() + PRESIGN_TTL_SEC * 1000).toISOString()
   const origin = (c.env.API_PUBLIC_URL || new URL(c.req.url).origin).replace(/\/$/, '')
@@ -53,6 +59,14 @@ export async function createUploadSession(c: Context<AppEnv>, a: {
       continue
     }
     const key = objectKey(m.studioId, ev.id, photoId, f.filename)
+    if (mode === 'drive') {
+      // The key names where the web copy goes (…/renditions/2048.jpg); the original itself never enters R2.
+      const appOrigin = c.req.header('origin') ?? new URL(c.env.APP_URL).origin
+      const driveUploadUrl = await startResumableUpload(c.env, m.studioId, { name: f.filename, mimeType: f.contentType, size: f.size, parentId: a.drive!.parentId, origin: appOrigin })
+      records.push({ photoId, filename: f.filename, size: f.size, contentType: f.contentType, key, multipartId: null, partSize: 0, partCount: 0, width: f.width, height: f.height, capturedAt: f.capturedAt, driveParentId: a.drive!.parentId })
+      out.push({ photoId, filename: f.filename, key, parts: [], driveUploadUrl })
+      continue
+    }
     const multipartId = await createMultipart(c.env, mode, key, f.contentType)
     const partCount = Math.max(1, Math.ceil(f.size / PART_SIZE))
     records.push({ photoId, filename: f.filename, size: f.size, contentType: f.contentType, key, multipartId, partSize: PART_SIZE, partCount, width: f.width, height: f.height, capturedAt: f.capturedAt })
@@ -77,7 +91,7 @@ export async function createUploadSession(c: Context<AppEnv>, a: {
 export async function completeUploadSession(c: Context<AppEnv>, a: {
   event: typeof schema.events.$inferSelect
   upload: typeof schema.uploads.$inferSelect
-  files: { photoId: string; parts: { partNumber: number; etag: string }[] }[]
+  files: { photoId: string; parts: { partNumber: number; etag: string }[]; driveFileId?: string }[]
   uploaderName: string
 }) {
   const db = getDb(c.env.DB)
@@ -85,22 +99,30 @@ export async function completeUploadSession(c: Context<AppEnv>, a: {
   const up = a.upload
   const m = { studioId: up.studioId }
   if (up.status !== 'pending') throw new Conflict('This upload was already completed or aborted.', 'upload_closed')
-  const wanted = new Map(a.files.map((f) => [f.photoId, f.parts]))
+  const wanted = new Map(a.files.map((f) => [f.photoId, f]))
   const unknown = [...wanted.keys()].filter((pid) => !up.files.some((f) => f.photoId === pid))
   if (unknown.length) throw new ValidationFailed(unknown.map((pid) => ({ field: 'files', in: 'body' as const, message: `Photo ${pid} is not part of this upload`, code: 'unknown_photo' })))
 
-  const done: UploadFileRecord[] = []
+  const done: StoredFile[] = []
   for (const f of up.files) {
-    const parts = wanted.get(f.photoId)
-    if (!parts) {
-      if (f.key && f.multipartId) await abortMultipart(c.env, up.mode, f.key, f.multipartId)
+    const sent = wanted.get(f.photoId)
+    if (!sent) {
+      if (f.key && f.multipartId && up.mode !== 'drive') await abortMultipart(c.env, up.mode, f.key, f.multipartId)
+      continue
+    }
+    if (f.driveParentId) {
+      // The browser uploaded straight to Drive: the file must be there, in the album's folder, no bigger than declared.
+      if (!sent.driveFileId) continue
+      const file = await getFile(c.env, up.studioId, sent.driveFileId).catch((e) => { if (e instanceof DriveFileMissing) return null; throw e })
+      if (!file || file.trashed || !file.parents?.includes(f.driveParentId) || Number(file.size ?? 0) > f.size) continue
+      done.push({ ...f, url: undefined, size: Number(file.size ?? f.size), storage: 'drive', driveFileId: file.id })
       continue
     }
     if (f.key && f.multipartId) {
-      if (parts.length !== f.partCount) {
-        throw new ValidationFailed([{ field: `files.${f.photoId}.parts`, in: 'body', message: `Expected ${f.partCount} parts, got ${parts.length}`, code: 'parts_mismatch' }])
+      if (sent.parts.length !== f.partCount) {
+        throw new ValidationFailed([{ field: `files.${f.photoId}.parts`, in: 'body', message: `Expected ${f.partCount} parts, got ${sent.parts.length}`, code: 'parts_mismatch' }])
       }
-      await completeMultipart(c.env, up.mode, f.key, f.multipartId, parts)
+      await completeMultipart(c.env, up.mode as UploadMode, f.key, f.multipartId, sent.parts)
       // Part URLs don't bind a length, so check what really arrived against the size declared (and checked) at start.
       const stored = await c.env.MEDIA.head(f.key)
       if (!stored || stored.size > f.size) {
@@ -112,35 +134,12 @@ export async function completeUploadSession(c: Context<AppEnv>, a: {
   }
 
   const p = schema.photos
-  const [{ top }] = await db.select({ top: max(p.index) }).from(p).where(eq(p.albumId, up.albumId))
-  const now = nowIso()
-  const [album] = await db.select({ kind: schema.albums.kind }).from(schema.albums).where(eq(schema.albums.id, up.albumId)).limit(1)
-  const opts = up.options ?? {}
-  const source = opts.source ?? (album?.kind === 'guest' ? 'guest' : 'web')
-  const reviewStatus = source === 'guest' ? (ev.settings.reviewGuestUploads ? 'pending' as const : 'approved' as const) : null
-  const rows: (typeof p.$inferInsert)[] = done.map((f, i) => ({
-    id: f.photoId, eventId: up.eventId, albumId: up.albumId, studioId: up.studioId, filename: f.filename, index: (top ?? 0) + i + 1,
-    capturedAt: f.capturedAt && !Number.isNaN(Date.parse(f.capturedAt)) ? new Date(f.capturedAt).toISOString() : now,
-    tone: tone(hash(f.filename)), url: f.url ?? null, r2Key: f.key, status: 'processing', hidden: false, favourites: 0, downloads: 0, faces: [],
-    exif: { width: f.width ?? 0, height: f.height ?? 0, sizeBytes: f.size }, uploadedBy: opts.uploadedBy ?? a.uploaderName,
-    source, quality: up.quality, createdAt: now, reviewStatus,
-  }))
-  const cost = source === 'guest' ? 0 : rows.length * (up.quality === 'original' ? 2 : 1)
-  if (rows.length) {
-    await db.batch([
-      db.update(schema.uploads).set({ status: 'completed' }).where(eq(schema.uploads.id, up.id)),
-      ...rows.map((r) => db.insert(p).values(r)),
-      db.update(schema.studios).set({ photosUsed: sql`${schema.studios.photosUsed} + ${cost}` }).where(eq(schema.studios.id, up.studioId)),
-      db.update(schema.events).set({ status: 'uploading' }).where(and(eq(schema.events.id, up.eventId), eq(schema.events.status, 'draft'))),
-      ...recountStatements(db, up.eventId),
-      // Camera sync: the camera feeding this album last sent something now.
-      ...(source === 'camera' ? [db.update(schema.cameras).set({ lastUploadAt: now }).where(and(eq(schema.cameras.eventId, up.eventId), eq(schema.cameras.albumId, up.albumId)))] : []),
-    ])
-    const jobs: { body: PhotoJob }[] = rows.map((r) => ({ body: { kind: 'process-photo', photoId: r.id, eventId: up.eventId, studioId: up.studioId, key: r.r2Key ?? null, quality: up.quality, ...(opts.watermark ? { watermark: true } : {}) } }))
-    for (let i = 0; i < jobs.length; i += 100) await c.env.PHOTO_QUEUE.sendBatch(jobs.slice(i, i + 100))
-  } else {
-    await db.update(schema.uploads).set({ status: 'aborted' }).where(eq(schema.uploads.id, up.id)).run()
-  }
+  // Claims the session first, so a second completion can't add the same photos again.
+  const claimed = await db.update(schema.uploads).set({ status: done.length ? 'completed' : 'aborted' }).where(and(eq(schema.uploads.id, up.id), eq(schema.uploads.status, 'pending'))).run()
+  if (!claimed.meta.changes) throw new Conflict('This upload was already completed or aborted.', 'upload_closed')
+  const rows = await addPhotos(c.env, {
+    event: ev, albumId: up.albumId, studioId: up.studioId, quality: up.quality, options: up.options ?? {}, uploaderName: a.uploaderName, files: done,
+  })
   audit(c, 'photos.upload', { type: 'event', id: up.eventId }, { count: rows.length, quality: up.quality })
   if (rows.length) background(c, queuePartnerNotice(c.env, up.eventId, 'photos'))
   emit(c, m.studioId, 'photos', 'albums', 'events', 'usage')
@@ -177,12 +176,13 @@ const CreateUploadBody = z.object({
 
 const UploadSession = z.object({
   uploadId: z.string(),
-  mode: z.enum(['s3', 'proxy']).openapi({ description: '`s3`: PUT parts to presigned R2 URLs. `proxy`: PUT parts to this API (dev).' }),
+  mode: z.enum(['s3', 'proxy', 'drive']).openapi({ description: '`s3`: PUT parts to presigned R2 URLs. `proxy`: PUT parts to this API (dev). `drive`: PUT each file to its `driveUploadUrl` (a Google Drive resumable upload; the event keeps originals in the studio’s Drive), then complete with each file’s `driveFileId`.' }),
   partSize: z.number().int(),
   expiresAt: z.string(),
   files: z.array(z.object({
     photoId: z.string(), filename: z.string(), key: z.string().nullable(),
     parts: z.array(z.object({ partNumber: z.number().int(), url: z.string() })),
+    driveUploadUrl: z.string().optional(),
   })),
 }).openapi('UploadSession')
 
@@ -221,9 +221,13 @@ uploadRoutes.openapi(createRoute({
     throw new AppError(402, 'event_limit_reached', 'Event photo limit reached', `${ev.name} has room for ${left} more ${left === 1 ? 'photo' : 'photos'}. Add a photo pack to this event to upload more.`)
   }
 
+  // Originals in the studio's Drive: guest uploads and registered URLs still go to R2.
+  const drive = ev.originalsIn === 'drive' && !guestUpload && input.files.some((f) => !f.url && !f.external)
+    ? { parentId: await ensureAlbumFolder(c.env, ev, album) }
+    : undefined
   const session = await createUploadSession(c, {
     studioId: m.studioId, eventId: ev.id, albumId: album.id, userId: me.id, quality: input.quality, files: input.files,
-    options: { source, uploadedBy: input.uploadedBy, watermark: input.watermark, fast: input.fast },
+    options: { source, uploadedBy: input.uploadedBy, watermark: input.watermark, fast: input.fast }, drive,
   })
   return c.json(session, 201)
 })
@@ -279,6 +283,8 @@ const CompleteBody = z.object({
   files: z.array(z.object({
     photoId: z.string().max(64),
     parts: z.array(z.object({ partNumber: z.number().int().min(1).max(10_000), etag: z.string().min(1).max(200) })).max(10_000).default([]),
+    /** Drive uploads: the id Google returned for the uploaded file. */
+    driveFileId: z.string().regex(/^[\w-]{10,200}$/).optional(),
   })).min(1).max(MAX_FILES),
 }).openapi('CompleteUpload')
 
@@ -314,10 +320,14 @@ uploadRoutes.get('/media/:key{.+}', async (c) => {
   if (!key.startsWith('studios/')) throw new NotFound('File')
   let cache = 'public, max-age=31536000, immutable'
   const photo = PHOTO_KEY.exec(key)
+  let inDrive: Parameters<typeof openOriginal>[1] | null = null
   if (photo) {
     const [, eventId, photoId] = photo
     const p = schema.photos
-    const rows = await getDb(c.env.DB).select({ hidden: p.hidden, deletedAt: p.deletedAt, reviewStatus: p.reviewStatus, status: p.status, eventDeleted: schema.events.deletedAt })
+    const rows = await getDb(c.env.DB).select({
+      hidden: p.hidden, deletedAt: p.deletedAt, reviewStatus: p.reviewStatus, status: p.status, eventDeleted: schema.events.deletedAt,
+      id: p.id, r2Key: p.r2Key, storage: p.storage, driveFileId: p.driveFileId, studioId: p.studioId, webCopy: p.webCopy,
+    })
       .from(p).innerJoin(schema.events, eq(schema.events.id, p.eventId))
       .where(and(eq(p.eventId, eventId), or(eq(p.id, photoId), eq(p.copiedFrom, photoId)))).limit(50)
     const [exp, sig] = [c.req.query('exp'), c.req.query('sig')]
@@ -326,6 +336,19 @@ uploadRoutes.get('/media/:key{.+}', async (c) => {
       || (guestsSeeIt && await verifyMediaSig(c.env.JWT_SECRET, key, exp, sig, Date.now(), 'guest')))
     if (!ok) throw new NotFound('File')
     cache = 'private, max-age=3600'
+    // Copies (picks albums) share the original's file, so any of them can say where it is.
+    inDrive = rows.find((r) => r.storage === 'drive' && r.r2Key === key && r.driveFileId) ?? null
+  }
+  if (inDrive) {
+    // The original is in the studio's Google Drive (the web copy, in R2, is served below like any file).
+    const f = await openOriginal(c.env, inDrive, { range: c.req.header('range') })
+    if (!f) throw new NotFound('File')
+    const headers = new Headers({ 'Content-Type': f.contentType ?? 'application/octet-stream', 'Cache-Control': cache })
+    if (f.size) headers.set('Content-Length', String(f.size))
+    headers.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+    headers.set('X-Content-Type-Options', 'nosniff')
+    if (f.fallback) headers.set('X-Frameline-Fallback', 'web-copy')
+    return new Response(f.body, { status: 200, headers })
   }
   const obj = await c.env.MEDIA.get(key, { range: c.req.raw.headers, onlyIf: c.req.raw.headers })
   if (!obj) throw new NotFound('File')

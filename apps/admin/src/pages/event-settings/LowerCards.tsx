@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Droplet, MoreHorizontal, Palette, Plus, ShoppingBag, Tag, Trash2, Upload, UserCog } from 'lucide-react'
+import { Droplet, HardDrive, MoreHorizontal, Palette, Plus, ShoppingBag, Tag, Trash2, Upload, UserCog } from 'lucide-react'
 import { fmt, type EventHost, type HostAccess } from '@frameline/shared'
 import { Avatar, Button, Chip, ConfirmDialog, Meter, Modal, SettingRow, Skeleton, Toggle, Menu, useToast } from '@frameline/ui'
 import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
-import { usePrices, useStoreSettings } from '../../lib/queries'
+import { useDrive, usePrices, useStoreSettings } from '../../lib/queries'
 import { PriceRows, pricesValid } from '../sell/Prices'
 import { AddHostModal } from './HostModal'
 import { SettingsCard, TextLink, ToggleRow, type CardProps } from './parts'
@@ -199,5 +199,44 @@ export function TurnOffCard({ event, set }: CardProps) {
         onConfirm={() => set({ disabled: true })}
         body="Guests will see a “this gallery is paused” message until you turn it back on. Nothing is deleted, and your links keep working afterwards." />
     </section>
+  )
+}
+
+/** Where this event's full-size files go: Frameline, or the studio's Google Drive (server has Drive set up). */
+export function StorageCard({ event }: CardProps) {
+  const api = useApi()
+  const navigate = useNavigate()
+  const toast = useToast()
+  const { drive: available } = useServerFeatures()
+  const drive = useDrive(available)
+  const [saving, setSaving] = useState(false)
+  if (!available) return null
+  const d = drive.data
+  const inDrive = event.originalsIn === 'drive'
+  const ready = d?.connected && d.status !== 'revoked'
+  const set = async (v: boolean) => {
+    setSaving(true)
+    try { await api.setOriginalsIn(event.id, v ? 'drive' : 'frameline') } catch (e) { toast.error('Couldn’t change it', errorMessage(e)) } finally { setSaving(false) }
+  }
+  return (
+    <SettingsCard id="storage" title="Full-size photos">
+      {ready ? (
+        <SettingRow
+          icon={<HardDrive size={15} />} title="Keep originals in Google Drive"
+          description={inDrive
+            ? <>New uploads go to Frameline → {event.name} in {d.email}’s Drive. Frameline keeps a 2048 px copy for the gallery. Photos uploaded before stay where they are.</>
+            : 'Off: Frameline keeps the full-size files.'}
+          control={<Toggle label="Keep originals in Google Drive" checked={inDrive} disabled={saving} onCheckedChange={(v) => void set(v)} />}
+        />
+      ) : (
+        <SettingRow
+          icon={<HardDrive size={15} />} title="Keep originals in Google Drive"
+          description={d?.status === 'revoked'
+            ? 'Google Drive needs reconnecting. Until then guests get the 2048 px copy of photos kept in Drive.'
+            : 'Connect your Google Drive to keep this event’s full-size photos there instead.'}
+          control={<Button size="sm" className="max-sm:h-10" onClick={() => navigate('/settings/drive')}>{d?.status === 'revoked' ? 'Reconnect' : 'Connect'}</Button>}
+        />
+      )}
+    </SettingsCard>
   )
 }

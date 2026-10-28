@@ -7,6 +7,7 @@ import { sendPartnerNotices } from './partner-notify'
 import { answerPendingTickets } from './support-ai'
 import { publishTopics } from './realtime'
 import { purgeTrashedItems } from './trash'
+import { checkDriveFiles } from './drive'
 
 /**
  * Every minute:
@@ -46,6 +47,9 @@ export async function runDaily(env: Env, now = Date.now()): Promise<{ purged: nu
 }
 
 export async function handleScheduled(controller: ScheduledController, env: Env): Promise<void> {
-  if (controller.cron === '0 3 * * *') await runDaily(env)
+  if (controller.cron === '0 3 * * *') {
+    await runDaily(env)
+    await checkDriveFiles(env).catch((e) => console.error(JSON.stringify({ level: 'error', msg: 'drive check failed', error: String(e) })))
+  }
   else await runEveryMinute(env, new Date(controller.scheduledTime))
 }

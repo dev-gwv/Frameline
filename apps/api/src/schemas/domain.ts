@@ -142,6 +142,8 @@ export const PhotoEvent = z.object({
   plan: z.enum(['subscription', 'pack', 'trial']),
   coverPhotoId: z.string().optional(),
   deletedAt: z.string().optional(),
+  /** Where new full-size files go: Frameline's storage, or the studio's connected Google Drive. */
+  originalsIn: z.enum(['frameline', 'drive']).optional(),
 }).openapi('PhotoEvent')
 
 export const NewEventInput = z.object({

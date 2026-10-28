@@ -53,7 +53,7 @@ export function eventOut(r: Row<typeof s.events>): PhotoEvent {
     id: r.id, shortId: r.shortId, name: r.name, type: r.type as PhotoEvent['type'], date: r.date, endDate: opt(r.endDate), city: r.city,
     status: r.status, photoCount: r.photoCount, photoLimit: r.photoLimit, visits: r.visits, faceMatches: r.faceMatches,
     expiresAt: r.expiresAt, createdAt: r.createdAt, coverTones: r.coverTones, settings: withSettingsDefaults(r.settings), hosts: r.hosts.map(hostOut),
-    highlights: r.highlights, plan: r.plan, coverPhotoId: opt(r.coverPhotoId), deletedAt: opt(r.deletedAt),
+    highlights: r.highlights, plan: r.plan, coverPhotoId: opt(r.coverPhotoId), deletedAt: opt(r.deletedAt), originalsIn: r.originalsIn,
   }
 }
 

@@ -146,6 +146,8 @@ export interface PhotoEvent {
   coverPhotoId?: ID
   /** Set while the event is in the trash (listDeletedEvents); purged 30 days later. */
   deletedAt?: string
+  /** Where new full-size files go: Frameline's storage (default) or the studio's Google Drive (setOriginalsIn). */
+  originalsIn?: 'frameline' | 'drive'
 }
 
 export interface Album {
@@ -645,3 +647,68 @@ export interface HandleCheck {
 
 /** "Notify me" on a gallery without photos yet (requestNotify). */
 export interface NotifyRequest { eventId: ID; phone: string; createdAt: string }
+
+// ── Google Drive (docs/GOOGLE_DRIVE_PLAN.md) ─────────────────────────────────
+/** The studio's Google Drive, as Settings → Google Drive shows it. */
+export interface DriveStatus {
+  /** The server is set up for Google Drive at all (GET /v1/meta features.drive). */
+  available: boolean
+  /** Choosing files to import works (the Google Picker's key is set). */
+  picker: boolean
+  connected: boolean
+  email?: string
+  /** `revoked`: Google no longer accepts Frameline's access; the studio must reconnect. */
+  status?: 'ok' | 'revoked'
+  connectedAt?: string
+  /** New events keep their originals in Drive. */
+  defaultForNewEvents: boolean
+  /** Originals of this studio's photos the daily check couldn't find in Drive. */
+  missingFiles: number
+}
+
+/** What the Google Picker needs in the studio's browser. */
+export interface DrivePickerConfig { accessToken: string; expiresAt: string; apiKey: string; appId?: string }
+
+/** A picked Drive file, or one found inside a picked folder. */
+export interface DriveItem {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  /** The folders it sits in under the picked folder ("Reception/Candids"); absent for a file picked on its own. */
+  folderPath?: string
+  importable: boolean
+  /** Why it won't be imported (RAW, video, too big). */
+  reason?: string
+}
+
+export interface DriveExpandResult {
+  items: DriveItem[]
+  /** Picked folders whose contents Google won't let Frameline list: pick the photos inside them instead. */
+  closedFolders: { id: string; name: string }[]
+}
+
+export interface DriveImportInput {
+  name: string
+  quality: 'web' | 'original'
+  watermark: boolean
+  /** Each file goes to an existing album (`albumId`) or one made by name (`albumName`, reused when it exists). */
+  items: { fileId: string; name: string; size: number; mimeType: string; albumId?: ID; albumName?: string }[]
+}
+
+export interface DriveImport {
+  id: ID
+  eventId: ID
+  name: string
+  status: 'running' | 'done' | 'failed' | 'cancelled'
+  total: number
+  done: number
+  skipped: number
+  failed: number
+  albumsCreated: number
+  quality: 'web' | 'original'
+  watermark: boolean
+  createdAt: string
+  finishedAt?: string
+  error?: string
+}

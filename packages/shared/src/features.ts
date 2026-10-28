@@ -3,7 +3,8 @@
  * stay in place so it can come back by flipping the flag.
  *
  * Off until the thing behind it is real -- each of these looked finished and did nothing, or worse:
- * - driveImport: made photo rows with no file (`DRV_*.JPG`) that used up the plan's quota.
+ * (Google Drive import used to be one of these, a simulation that made photo rows with no file. It is real now and
+ * follows the server: ServerFeatures.drive / driveImport.)
  * - aiEnhance: took ₹8 from the wallet; the processor has no enhance step.
  * - cameraSync: issued FTP logins for an FTP server that doesn't exist.
  * - broadcasts: marked messages "sent"; nothing was delivered.
@@ -17,7 +18,6 @@
 export interface Features {
   /** Website builder, custom domain and the Enquiries inbox (admin), plus the guest "Enquire" entry points that feed it. */
   website: boolean
-  driveImport: boolean
   aiEnhance: boolean
   cameraSync: boolean
   broadcasts: boolean
@@ -28,7 +28,6 @@ export interface Features {
 
 export const FEATURES: Readonly<Features> = {
   website: false,
-  driveImport: false,
   aiEnhance: false,
   cameraSync: false,
   broadcasts: false,
@@ -48,6 +47,10 @@ export interface ServerFeatures {
   payments: boolean
   /** Email goes out (SMTP or Resend). Off: no emailed ZIPs or sign-in codes. */
   email: boolean
+  /** Google Drive is set up on the server: studios can connect their Drive and keep originals there. */
+  drive: boolean
+  /** Importing from Google Drive works too (the Google Picker's key is set). */
+  driveImport: boolean
   /** Support's WhatsApp number (SUPPORT_WHATSAPP), when there is one: the Help page shows a chat link. */
   supportWhatsapp?: string
   /** Where Book a call goes (SUPPORT_CALL_URL), when there is one. */
@@ -60,7 +63,7 @@ export interface Seller { name: string; gstin: string; address?: string }
 
 /** Sample data (no API URL) shows everything; a server that can't be asked is treated as switched off, the safe side. */
 export async function fetchServerFeatures(apiUrl: string | undefined): Promise<ServerFeatures> {
-  if (!apiUrl) return { ai: true, payments: true, email: true }
+  if (!apiUrl) return { ai: true, payments: true, email: true, drive: true, driveImport: true }
   try {
     const res = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/meta`)
     const body = (await res.json()) as { features?: Partial<ServerFeatures> }
@@ -72,11 +75,13 @@ export async function fetchServerFeatures(apiUrl: string | undefined): Promise<S
       payments: body.features?.payments === true,
       // Older servers didn't say; they had email.
       email: body.features?.email !== false,
+      drive: body.features?.drive === true,
+      driveImport: body.features?.driveImport === true,
       ...(typeof wa === 'string' && wa ? { supportWhatsapp: wa } : {}),
       ...(typeof call === 'string' && /^https:\/\//.test(call) ? { supportCallUrl: call } : {}),
       ...(seller && typeof seller.name === 'string' && typeof seller.gstin === 'string' ? { seller } : {}),
     }
   } catch {
-    return { ai: false, payments: false, email: false }
+    return { ai: false, payments: false, email: false, drive: false, driveImport: false }
   }
 }

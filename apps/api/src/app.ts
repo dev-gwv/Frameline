@@ -17,6 +17,8 @@ import { accountRoutes } from './routes/account'
 import { assetRoutes } from './routes/assets'
 import { webhookRoutes } from './routes/webhooks'
 import { integrationRoutes } from './routes/integrations'
+import { driveRoutes } from './routes/drive'
+import { driveConfigured, drivePickerOn } from './services/drive'
 import { authRoutes } from './routes/auth'
 import { businessRoutes } from './routes/business'
 import { eventRoutes } from './routes/events'
@@ -110,6 +112,10 @@ export function createApp() {
           payments: z.boolean(),
           /** Email goes out (SMTP or Resend). Off: no emailed ZIPs or sign-in codes; invites are saved but not mailed. */
           email: z.boolean(),
+          /** Google Drive is set up (OAuth client + sealing key): studios may connect their Drive and keep originals there. */
+          drive: z.boolean(),
+          /** Importing picked Drive files works too (the Google Picker key is set). */
+          driveImport: z.boolean(),
           supportWhatsapp: z.string().optional(),
           supportCallUrl: z.string().optional(),
           /** The company on GST invoices (SELLER_* vars); absent until it is set, and then no invoices are offered. */
@@ -124,6 +130,8 @@ export function createApp() {
       ai: aiOn(c.env),
       payments: paymentsOn(c.env),
       email: emailOn(c.env),
+      drive: driveConfigured(c.env),
+      driveImport: drivePickerOn(c.env),
       ...(c.env.SUPPORT_WHATSAPP ? { supportWhatsapp: c.env.SUPPORT_WHATSAPP } : {}),
       ...(c.env.SUPPORT_CALL_URL ? { supportCallUrl: c.env.SUPPORT_CALL_URL } : {}),
       ...(c.env.SELLER_NAME && c.env.SELLER_GSTIN
@@ -144,6 +152,7 @@ export function createApp() {
   v1.route('/', assetRoutes)
   v1.route('/', webhookRoutes)
   v1.route('/', integrationRoutes)
+  v1.route('/', driveRoutes)
 
   app.route('/v1', v1)
 

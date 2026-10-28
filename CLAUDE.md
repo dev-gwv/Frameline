@@ -79,9 +79,12 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
 - Payments: `GET /v1/meta` `features.payments` is true only with Razorpay keys (or simulated in dev/test). Off:
   admin hides selling, payouts, card/UPI and client renewal links; `effectiveSettings` turns `storeEnabled` off for
   guests. `features.seller` comes from `SELLER_*` vars; without it there are no invoice downloads.
-- `FEATURES` (`packages/shared/src/features.ts`, compile time): driveImport, aiEnhance, cameraSync, broadcasts,
+- `FEATURES` (`packages/shared/src/features.ts`, compile time): aiEnhance, cameraSync, broadcasts,
   website, guestNotify, reminderEmails are all **off** (they were simulated, or nothing sends them). Help guides
   carry `needs` and are hidden for switched-off features.
+- Google Drive (`/v1/meta` `features.drive`, `features.driveImport`): on only with GOOGLE_CLIENT_ID/SECRET +
+  `DRIVE_TOKEN_KEY` (+ `GOOGLE_PICKER_API_KEY` for imports). Off: Settings → Google Drive, the import menu and the
+  event "Full-size photos" card are hidden. See "Google Drive" below.
 - Photos get a 2048 px web copy from the studio's browser at upload (`PUT /v1/photos/:id/web`, `photos.web_copy`,
   `Photo.webUrl`); show photos with `displayUrl(photo)`, download originals from `photo.url`.
 - **Photo files open only with a signature** (24 Oct, `lib/media-sign.ts`): never hand out a bare `/v1/media/...`
@@ -93,6 +96,24 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
 - `FEATURES.phoneApp` off: no "Get the app" page, no QR "opens in the app", "studio page" not "studio app".
 - While payments are off: renewing a gallery is free, events hold 25,000 photos (0015), and a gallery stays open a
   year from creation even for a past date (0014, `galleryExpiry`). Big ZIPs come in parts (`services/zips.ts`).
+
+## Google Drive (28 Oct; docs/GOOGLE_DRIVE_PLAN.md)
+
+- **Scope `drive.file` only**, never `drive`/`drive.readonly` (restricted: yearly CASA audit). Connect is its own
+  consent (`POST /v1/drive/connect`, owner), never at sign-in. One `drive_connections` row per studio; the refresh
+  token is AES-GCM sealed with `DRIVE_TOKEN_KEY` (`lib/seal.ts`); access tokens cached in KV `drive:at:<studio>`.
+  Google refusing the token marks the row `revoked` (UI asks to reconnect). `services/drive.ts`.
+- **Import**: Google Picker in the admin → `POST /v1/drive/expand` (folder contents; Google may refuse to list a
+  picked folder → `closedFolders`) → `POST /events/:id/drive-imports` → `drive-import` jobs on the photo queue
+  (10 files each, `services/drive-import.ts`) copy into R2 and make normal photos (`source: drive`,
+  `photos.drive_file_id`, never twice per event). Web copy = Drive thumbnail at `=s2048` when it works.
+- **Originals in Drive** (`events.originals_in = 'drive'`): uploads get `mode: 'drive'` sessions; the browser PUTs to
+  a Google resumable session URI (`putDrive` in http.ts), completion checks the file is in the album's folder.
+  `photos.storage = 'drive'`: `r2Key` still names the would-be path so the web copy and signatures work; the
+  original is read through `openOriginal()` (`services/originals.ts`), falling back to the web copy
+  (`X-Frameline-Fallback: web-copy`). Processing uses the web copy (`webOnly`). Deleting in Frameline leaves Drive alone.
+- New photo rows go through `addPhotos()` (`services/add-photos.ts`): uploads, imports and Drive uploads share it.
+- Test page: `/drive-test.html` on the admin site (folder listing, thumbnail size, browser upload to Drive).
 
 ## PINs
 
@@ -156,6 +177,8 @@ hidden or says so: selling, payouts, card/UPI, invoices without a seller, "Notif
 - Make both GitHub repos private.
 - Northlight sample studio stays for testing until launch, then delete it.
 - Hosting the processor (then `AI_FEATURES` on).
+- Google Drive: the Google Cloud setup and verification in docs/GOOGLE_DRIVE_PLAN.md (needs the real domain
+  first), then the test page, then `GOOGLE_PICKER_API_KEY`, `GOOGLE_PROJECT_NUMBER` and the secret `DRIVE_TOKEN_KEY`.
 
 Live test data: event "Frameline Test – Demo Wedding" (`ev_2iat4iwano8v`, gallery `B6F105B`, PIN 7883,
 full-access 2378) in the owner's studio, with 23 screenshots and test guests. Delete when done.
@@ -172,3 +195,7 @@ full-access 2378) in the owner's studio, with 23 screenshots and test guests. De
   asked yet): `_headers` CSP on both Pages sites, thumbnails smaller than 2048 px for grids, index on
   `photos.copied_from`, guest Terms link + consent line, KYC files served by URL, help `expiry` guide
   (renewal links), latent Razorpay international-order confirm check (before payments go live).
+- 27–28 Oct 2026: Camtom audit (camtom.in keeps photos in the studio's own Drive; face matching on its own Google
+  Cloud servers, not Google Photos), then Google Drive import + originals in Drive (migration 0016), off until the
+  owner's Google setup. Note: `node_modules` links pointed at the old `E:\BuildOurs\Kamero-Clone` path; fixed with
+  `pnpm install --frozen-lockfile --config.confirmModulesPurge=false` (CI=true).

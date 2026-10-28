@@ -40,7 +40,7 @@ export default function Workspace() {
   const album = albums.find((a) => a.id === albumParam && !pending.albums.has(a.id))
   const albumId = album?.id
   // "With people" needs face finding: not offered (and an old link falls back to newest) while AI is off.
-  const { ai } = useServerFeatures()
+  const { ai, driveImport } = useServerFeatures()
   const sorts = ai ? GRID_SORTS : GRID_SORTS.filter((s) => s.value !== 'people')
   const asked = parseSort(params.get('sort'))
   const sort: GridSort = !ai && asked === 'people' ? 'newest' : asked
@@ -152,7 +152,7 @@ export default function Workspace() {
       <section className="min-w-0 flex-1 pb-28 md:pb-20" aria-label="Photos">
         <UploadStrip eventId={event.id} />
         {albumsQ.isError ? <QueryError error={albumsQ.error} retry={() => albumsQ.refetch()} />
-          : eventEmpty ? <EmptyEvent onChoose={choose} onImport={() => m.open('import')} />
+          : eventEmpty ? <EmptyEvent onChoose={choose} onImport={driveImport ? () => m.open('import') : undefined} />
           : (
             <>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -226,7 +226,7 @@ export default function Workspace() {
 }
 
 /** ev-empty: one big drop zone with one button. Drive import and camera sync are offered here. */
-function EmptyEvent({ onChoose, onImport }: { onChoose: () => void; onImport: () => void }) {
+function EmptyEvent({ onChoose, onImport }: { onChoose: () => void; onImport?: () => void }) {
   return (
     <div className={'grid min-h-[360px] place-items-center rounded-[14px] border-2 border-dashed border-line-2 bg-surface px-5 py-10 text-center sm:min-h-[520px]'}>
       <div className="flex max-w-[420px] flex-col items-center gap-2.5">
@@ -234,11 +234,11 @@ function EmptyEvent({ onChoose, onImport }: { onChoose: () => void; onImport: ()
         <h2 className="text-[22px] font-extrabold leading-tight">Add your first photos</h2>
         <p className="text-[14px] text-ink-2"><span className="hidden sm:inline">Drag a folder here, or choose photos. </span>You can leave this page while they upload.</p>
         <Button variant="primary" size="lg" icon={<Upload size={16} />} onClick={onChoose} className="mt-1 max-sm:w-full">Choose photos</Button>
-        {(FEATURES.driveImport || FEATURES.cameraSync) && (
+        {(onImport || FEATURES.cameraSync) && (
           <p className="mt-1 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-[13px] text-ink-3">
             or
-            {FEATURES.driveImport && <button type="button" onClick={onImport} className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><HardDriveDownload size={14} />Import from Google Drive</button>}
-            {FEATURES.driveImport && FEATURES.cameraSync && '·'}
+            {onImport && <button type="button" onClick={onImport} className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><HardDriveDownload size={14} />Import from Google Drive</button>}
+            {onImport && FEATURES.cameraSync && '·'}
             {FEATURES.cameraSync && <Link to="/camera-sync" className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><Camera size={14} />Connect your camera</Link>}
           </p>
         )}

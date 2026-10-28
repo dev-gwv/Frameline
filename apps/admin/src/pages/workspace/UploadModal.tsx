@@ -127,7 +127,7 @@ export function UploadModal({ open, onOpenChange, event, albums, albumId }: Prop
       description={view === 'review' ? <button type="button" className="inline-flex items-center gap-1 font-bold text-accent-text hover:underline" onClick={() => setView('options')}><ChevronLeft size={13} />Back to upload options</button>
         : files.length ? (existing.isLoading ? 'Checking for photos already in this event…'
           : dups.length ? <>{dups.every((d) => d.existing) ? `${fmt.count(dups.length)} ${dups.length === 1 ? 'is' : 'are'} already in this event` : `${fmt.count(dups.length)} duplicate${dups.length === 1 ? '' : 's'}`} and will {uploadDups ? 'upload again' : 'be skipped'}. <button type="button" className="font-bold text-accent-text underline" onClick={() => setView('review')}>Review</button></>
-          : 'None of these are in the event yet.') : 'JPG, PNG, HEIC or WebP, up to 200 MB each.'}
+          : 'None of these are in the event yet.') : `JPG, PNG, HEIC or WebP, up to 200 MB each.${event.originalsIn === 'drive' ? ' Full-size files go to your Google Drive.' : ''}`}
       footer={files.length ? (view === 'review'
         ? <Button variant="primary" onClick={() => setView('options')}>Done</Button>
         : <>

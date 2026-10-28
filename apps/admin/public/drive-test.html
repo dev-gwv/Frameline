@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Drive test</title>
+<style>
+  :root { --bg: #fafaf8; --ink: #1d1d1b; --ink2: #5c5c57; --line: #e3e2dc; --ok: #1d7a46; --bad: #b3261e; --accent: #c2410c; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161615; --ink: #f1f0ec; --ink2: #a9a8a2; --line: #34332f; --ok: #4ade80; --bad: #f87171; --accent: #fb923c; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 6px; }
+  p { color: var(--ink2); margin: 0 0 10px; }
+  section { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 14px; }
+  label { display: block; font-weight: 600; margin: 8px 0 2px; }
+  input, textarea { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); font: 13px ui-monospace, monospace; }
+  button { margin-top: 10px; padding: 8px 14px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  pre { white-space: pre-wrap; word-break: break-word; background: rgba(127,127,127,.08); border-radius: 8px; padding: 10px; font-size: 12.5px; margin: 10px 0 0; }
+  .ok { color: var(--ok); font-weight: 700; } .bad { color: var(--bad); font-weight: 700; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Google Drive test</h1>
+  <p>Three checks from docs/GOOGLE_DRIVE_PLAN.md, run with your own Google account before Drive is switched on. Nothing here talks to Frameline’s server, and nothing is saved.</p>
+
+  <section>
+    <h2>0. Keys</h2>
+    <p>From the Google Cloud project: the OAuth web client id (this page’s address must be one of its JavaScript origins), the Picker API key, and the project number.</p>
+    <label for="cid">OAuth client id</label><input id="cid" placeholder="1234-abc.apps.googleusercontent.com">
+    <label for="key">Picker API key</label><input id="key" placeholder="AIza…">
+    <label for="app">Project number</label><input id="app" placeholder="123456789012">
+    <button id="signin">Sign in with Google (drive.file only)</button>
+    <pre id="out0">Not signed in.</pre>
+  </section>
+
+  <section>
+    <h2>1. Does picking a folder let Frameline list what’s inside?</h2>
+    <p>Pick one folder that has photos in it. If Google lists them, the import can turn folders into albums. If not, studios will open the folder in the picker and select the photos.</p>
+    <button id="pickFolder" disabled>Pick a folder</button>
+    <pre id="out1"></pre>
+  </section>
+
+  <section>
+    <h2>2. Is Drive’s thumbnail good as a 2048 px web copy?</h2>
+    <p>Pick one photo. This asks for its thumbnail at 2048 px, the way imports make web copies.</p>
+    <button id="pickPhoto" disabled>Pick a photo</button>
+    <pre id="out2"></pre>
+  </section>
+
+  <section>
+    <h2>3. Can the browser upload straight into Drive?</h2>
+    <p>Uploads to events that keep originals in Drive: Frameline’s server opens the upload, the browser sends the bytes. Step A opens it here in the browser (always allowed). Step B checks the real case: run the command, which opens an upload the way the server does (with this page’s Origin), paste the address it prints, and send.</p>
+    <button id="upA" disabled>A. Upload a 1 MB test file</button>
+    <pre id="out3a"></pre>
+    <label for="cmd">B. Run this in a terminal (token from step 0)</label>
+    <textarea id="cmd" rows="5" readonly></textarea>
+    <label for="sess">Paste the <code>location:</code> address it prints</label><input id="sess" placeholder="https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&amp;upload_id=…">
+    <button id="upB" disabled>B. Send the test file there</button>
+    <pre id="out3b"></pre>
+    <p style="margin-top:10px">The test files are named “Frameline drive test.bin”. Delete them from your Drive afterwards.</p>
+  </section>
+</main>
+<script src="https://accounts.google.com/gsi/client" async></script>
+<script src="https://apis.google.com/js/api.js" async></script>
+<script>
+  const $ = (id) => document.getElementById(id)
+  const SCOPE = 'https://www.googleapis.com/auth/drive.file'
+  const API = 'https://www.googleapis.com/drive/v3'
+  let token = ''
+  for (const id of ['cid', 'key', 'app']) { try { $(id).value = localStorage.getItem('drive-test.' + id) || '' } catch {} }
+  const save = () => { for (const id of ['cid', 'key', 'app']) { try { localStorage.setItem('drive-test.' + id, $(id).value.trim()) } catch {} } }
+  const say = (el, text, ok) => { $(el).innerHTML = (ok === undefined ? '' : `<span class="${ok ? 'ok' : 'bad'}">${ok ? 'Yes' : 'No'}</span>\n`) + text.replace(/</g, '&lt;') }
+  const drive = (url, init = {}) => fetch(url, { ...init, headers: { ...(init.headers || {}), Authorization: 'Bearer ' + token } })
+
+  $('signin').onclick = () => {
+    save()
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: $('cid').value.trim(), scope: SCOPE,
+      callback: (r) => {
+        if (r.error) return say('out0', 'Google said: ' + r.error, false)
+        token = r.access_token
+        say('out0', `Signed in. Scopes granted: ${r.scope}`, r.scope.includes(SCOPE))
+        for (const b of ['pickFolder', 'pickPhoto', 'upA', 'upB']) $(b).disabled = false
+        $('cmd').value = `curl -si -X POST "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable" \\\n  -H "Authorization: Bearer ${token}" -H "Origin: ${location.origin}" \\\n  -H "Content-Type: application/json; charset=UTF-8" -H "X-Upload-Content-Type: application/octet-stream" -H "X-Upload-Content-Length: 1048576" \\\n  -d '{"name":"Frameline drive test.bin"}' | grep -i "^location"`
+      },
+    })
+    client.requestAccessToken()
+  }
+
+  const pick = (folders) => new Promise((resolve) => gapi.load('picker', () => {
+    const p = google.picker
+    const view = new p.DocsView(p.ViewId.DOCS).setIncludeFolders(true).setSelectFolderEnabled(folders)
+      .setMimeTypes(folders ? 'application/vnd.google-apps.folder' : 'image/jpeg,image/png,image/webp,image/heic,image/heif')
+    let b = new p.PickerBuilder().addView(view).setOAuthToken(token).setDeveloperKey($('key').value.trim())
+      .setCallback((d) => { if (d.action === p.Action.PICKED) resolve(d.docs[0]); else if (d.action === p.Action.CANCEL) resolve(null) })
+    if ($('app').value.trim()) b = b.setAppId($('app').value.trim())
+    b.build().setVisible(true)
+  }))
+
+  $('pickFolder').onclick = async () => {
+    const f = await pick(true)
+    if (!f) return
+    say('out1', 'Listing…')
+    const q = new URLSearchParams({ q: `'${f.id}' in parents and trashed = false`, fields: 'files(id,name,mimeType)', pageSize: '1000', supportsAllDrives: 'true', includeItemsFromAllDrives: 'true' })
+    const r = await drive(`${API}/files?${q}`)
+    const body = await r.json().catch(() => ({}))
+    const n = (body.files || []).length
+    say('out1', `${f.name}: Google listed ${n} item${n === 1 ? '' : 's'} inside (HTTP ${r.status}).\n${(body.files || []).slice(0, 8).map((x) => '· ' + x.name).join('\n')}${body.error ? '\n' + JSON.stringify(body.error) : ''}`, r.ok && n > 0)
+  }
+
+  $('pickPhoto').onclick = async () => {
+    const f = await pick(false)
+    if (!f) return
+    const meta = await (await drive(`${API}/files/${f.id}?fields=name,size,thumbnailLink,imageMediaMetadata(width,height)`)).json()
+    if (!meta.thumbnailLink) return say('out2', `${meta.name}: Drive gave no thumbnail link.`, false)
+    const url = meta.thumbnailLink.replace(/=s\d+(-[a-z]+)?$/, '=s2048')
+    try {
+      const r = await drive(url)
+      const blob = await r.blob()
+      const img = await createImageBitmap(blob)
+      say('out2', `${meta.name} (${meta.imageMediaMetadata?.width}×${meta.imageMediaMetadata?.height}): thumbnail ${img.width}×${img.height}, ${blob.type}, ${Math.round(blob.size / 1024)} KB.`, Math.max(img.width, img.height) >= 1600 && blob.type === 'image/jpeg')
+    } catch (e) {
+      say('out2', `The thumbnail couldn’t be read from this page (${e.message}). The server reads it without CORS, so this may still work there: check an import’s photos for web copies.`, false)
+    }
+  }
+
+  const testFile = () => new Blob([crypto.getRandomValues(new Uint8Array(65536)), new Uint8Array(1048576 - 65536)], { type: 'application/octet-stream' })
+  const put = async (session, el) => {
+    try {
+      const r = await fetch(session, { method: 'PUT', body: testFile() })
+      const body = await r.json().catch(() => ({}))
+      say(el, `HTTP ${r.status}. Drive file id: ${body.id || 'none'}`, r.ok && !!body.id)
+    } catch (e) {
+      say(el, `The browser was blocked (${e.message}). That usually means no CORS headers on this upload address.`, false)
+    }
+  }
+  $('upA').onclick = async () => {
+    const r = await drive('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
+      method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': 'application/octet-stream', 'X-Upload-Content-Length': '1048576' },
+      body: JSON.stringify({ name: 'Frameline drive test.bin' }),
+    })
+    const loc = r.headers.get('location')
+    if (!loc) return say('out3a', `Google didn’t open an upload (HTTP ${r.status}). If the status is 200, the Location header isn’t readable from the browser.`, false)
+    await put(loc, 'out3a')
+  }
+  $('upB').onclick = () => { const s = $('sess').value.trim().replace(/^location:\s*/i, ''); if (s) put(s, 'out3b') }
+</script>
+</body>
+</html>

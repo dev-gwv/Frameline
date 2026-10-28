@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
+import { webCopyKey } from '../db/mappers'
 
 type EventRow = typeof schema.events.$inferSelect
 type PhotoRow = typeof schema.photos.$inferSelect
@@ -47,10 +48,12 @@ export async function downloadFile(env: Env, p: PhotoRow, size: '2048' | '3072',
     const stored = await env.MEDIA.get(p.r2Key.replace(/\/[^/]+$/, `/renditions/${size}.jpg`))
     if (stored) return stored.body
   }
+  // An original in Drive isn't in R2 for the processor: it renders from the web copy (2048 px at most).
+  const source = p.storage === 'drive' ? webCopyKey(p.r2Key) : p.r2Key
   const res = await fetch(`${env.PROCESSOR_URL.replace(/\/$/, '')}/render`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(env.PROCESSOR_TOKEN ? { Authorization: `Bearer ${env.PROCESSOR_TOKEN}` } : {}) },
-    body: JSON.stringify({ bucket: env.R2_BUCKET_NAME, key: p.r2Key, size: Number(size), rotation: p.rotation || undefined, watermark: watermark ?? undefined }),
+    body: JSON.stringify({ bucket: env.R2_BUCKET_NAME, key: source, size: Number(size), rotation: p.rotation || undefined, watermark: watermark ?? undefined }),
   }).catch(() => null)
   return res?.ok && res.body ? res.body : null
 }

@@ -3,6 +3,7 @@ import { availableArticles, FEATURES } from '@frameline/shared'
 import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
 import { aiOn, effectiveSettings, paymentsOn } from '../lib/features'
+import { driveConfigured, drivePickerOn } from './drive'
 import { newId, nowIso } from '../lib/ids'
 
 /**
@@ -148,7 +149,8 @@ function switchedOff(env: Env): string {
     !aiOn(env) && 'selfie search / "Find my photos" / face recognition',
     !FEATURES.aiEnhance && 'AI enhance',
     !FEATURES.cameraSync && 'camera FTP sync',
-    !FEATURES.driveImport && 'Google Drive import',
+    !drivePickerOn(env) && 'Google Drive import',
+    !driveConfigured(env) && 'keeping original photos in Google Drive',
     !FEATURES.broadcasts && 'broadcast messages to guests',
     !FEATURES.website && 'website builder',
     !paymentsOn(env) && 'card/UPI payments, selling photos to guests and payouts',
@@ -160,7 +162,7 @@ function switchedOff(env: Env): string {
 
 /** The prompt for one ticket: rules, guides, facts, then the conversation so far. */
 export async function promptFor(env: Env, ticket: typeof schema.tickets.$inferSelect, msgs: (typeof schema.ticketMessages.$inferSelect)[]): Promise<Msg[]> {
-  const guides = availableArticles({ ai: aiOn(env), payments: paymentsOn(env), ...(sellerSet(env) ? { seller: { name: env.SELLER_NAME!, gstin: env.SELLER_GSTIN! } } : {}) }).map((a) => `- ${a.title}: ${a.answer}`).join('\n')
+  const guides = availableArticles({ ai: aiOn(env), payments: paymentsOn(env), drive: driveConfigured(env), driveImport: drivePickerOn(env),...(sellerSet(env) ? { seller: { name: env.SELLER_NAME!, gstin: env.SELLER_GSTIN! } } : {}) }).map((a) => `- ${a.title}: ${a.answer}`).join('\n')
   const system = `${SYSTEM}\n\nGUIDES:\n${guides}\n\nSWITCHED OFF: ${switchedOff(env)}\n\nFACTS:\n${await factsFor(env, ticket)}`
   const convo: Msg[] = msgs.slice(-10).map((m) => ({
     role: m.from === 'me' ? 'user' : 'assistant',

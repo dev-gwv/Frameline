@@ -10,6 +10,8 @@ import { notifyWaitingGuests } from './notify'
 import { publishTopics } from './realtime'
 import { vectorIndex } from './vectors'
 import { assignPeople, recountPeople, type ClusterMemory } from './clustering'
+import { DriveRevoked } from './drive'
+import { failImport, runDriveImport } from './drive-import'
 
 /**
  * Image processing contract. The real implementation is apps/processor (Node + sharp + YuNet/SFace ONNX,
@@ -43,6 +45,8 @@ export class ProcessingRejected extends Error {}
 
 /** Attempts before a photo is given up on and marked `failed` (so it never sits in `processing` forever). */
 export const MAX_PROCESS_ATTEMPTS = 5
+/** Waits (20 s each) for a Drive photo's web copy before it is processed without one. */
+const WEB_COPY_WAITS = 6
 
 const PROCESS_TIMEOUT_MS = 120_000
 
@@ -60,7 +64,8 @@ export class HttpProcessor implements PhotoProcessor {
       // A 24 MP photo takes seconds; a processor that hangs must not hold the queue consumer for 15 minutes.
       signal: AbortSignal.timeout(PROCESS_TIMEOUT_MS),
       headers: { 'Content-Type': 'application/json', ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) },
-      body: JSON.stringify({ ...job, bucket: this.bucket }),
+      // A web copy (original in Drive) is only scanned for faces: no renditions are made from it.
+      body: JSON.stringify({ ...job, ...(job.webOnly ? { reindex: true } : {}), bucket: this.bucket }),
     })
     // 422 = the file itself is the problem (HEIC it can't decode, a video, a corrupt upload, no key).
     if (res.status === 422) throw new ProcessingRejected(`processor rejected the file: ${await res.text().catch(() => '')}`.slice(0, 500))
@@ -72,7 +77,7 @@ export class HttpProcessor implements PhotoProcessor {
     }
     if (!res.ok) throw new Error(`processor responded ${res.status}`)
     // A full run (not a face re-index) writes …/renditions/2048.jpg and 3072.jpg next to the original.
-    return { ...((await res.json()) as ProcessResult), ...(job.reindex ? {} : { renditions: true }) }
+    return { ...((await res.json()) as ProcessResult), ...(job.reindex || job.webOnly ? {} : { renditions: true }) }
   }
 }
 
@@ -139,10 +144,13 @@ export async function applyResult(env: Env, job: ProcessPhotoJob, result: Proces
     db.update(schema.photos).set({
       status: 'ready',
       facesIndexedAt: new Date().toISOString(),
-      url: result.previewUrl ?? photo.url,
+      url: job.webOnly ? photo.url : result.previewUrl ?? photo.url,
       ...(result.renditions ? { webCopy: true } : {}),
       capturedAt: result.capturedAt ?? photo.capturedAt,
-      exif: { ...photo.exif, ...result.exif, width: result.width, height: result.height, sizeBytes: result.sizeBytes ?? photo.exif.sizeBytes },
+      // From a web copy (original in Drive) the size and dimensions are the web copy's: keep the original's.
+      exif: job.webOnly
+        ? { ...photo.exif, ...result.exif, width: photo.exif.width || result.width, height: photo.exif.height || result.height, sizeBytes: photo.exif.sizeBytes }
+        : { ...photo.exif, ...result.exif, width: result.width, height: result.height, sizeBytes: result.sizeBytes ?? photo.exif.sizeBytes },
       faces: faceRows.filter((f) => f.personId).map((f) => ({ personId: f.personId!, box: f.box })),
     }).where(eq(schema.photos.id, photo.id)),
     ...faceRows.map((f) => db.insert(schema.faces).values(f)),
@@ -159,9 +167,26 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
     const job = msg.body
     try {
       if (job.kind === 'build-zip') { await buildZip(env, job); msg.ack(); continue }
+      if (job.kind === 'drive-import') {
+        try { await runDriveImport(env, job) } catch (e) {
+          if (e instanceof DriveRevoked) { await failImport(env, job.importId, 'Google Drive was disconnected'); msg.ack(); continue }
+          throw e
+        }
+        msg.ack()
+        continue
+      }
       if (job.kind !== 'process-photo') { msg.ack(); continue }
-      // Photos registered by URL have no file in R2 for the processor to read.
-      const result = await (job.key ? processor : new SimulatedProcessor(env)).process(job)
+      // Original in Drive: work from the web copy the studio's browser sends just after the upload. Wait for it a
+      // little (fresh messages, like a busy processor), then go ahead without it.
+      if (job.webOnly && job.key && !(await env.MEDIA.head(job.key)) && (job.webWaits ?? 0) < WEB_COPY_WAITS) {
+        await env.PHOTO_QUEUE.send({ ...job, webWaits: (job.webWaits ?? 0) + 1 }, { delaySeconds: 20 })
+        msg.ack()
+        continue
+      }
+      // Photos registered by URL have no file in R2 for the processor to read; nor has a Drive photo whose web copy
+      // never came (it goes live without faces rather than failing).
+      const readable = !!job.key && (!job.webOnly || !!(await env.MEDIA.head(job.key)))
+      const result = await (readable ? processor : new SimulatedProcessor(env)).process(job)
       if (await applyResult(env, job, result, memory)) {
         if (!touched.has(job.studioId)) touched.set(job.studioId, new Set())
         touched.get(job.studioId)!.add(job.eventId)
@@ -175,6 +200,11 @@ export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env):
         continue
       }
       console.error(JSON.stringify({ level: 'error', msg: 'queue job failed', job, attempt: msg.attempts, error: String(e) }))
+      if (job.kind === 'drive-import' && msg.attempts >= MAX_PROCESS_ATTEMPTS) {
+        await failImport(env, job.importId, 'Google Drive kept failing. Try the import again later.').catch(() => undefined)
+        msg.ack()
+        continue
+      }
       if (job.kind === 'process-photo' && (e instanceof ProcessingRejected || msg.attempts >= MAX_PROCESS_ATTEMPTS)) {
         await markFailed(env, job, String(e)).catch(() => undefined)
         if (!touched.has(job.studioId)) touched.set(job.studioId, new Set())

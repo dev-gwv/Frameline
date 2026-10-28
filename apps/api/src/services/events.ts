@@ -87,6 +87,9 @@ export async function createEvent(db: DB, studioId: string, input: NewEvent): Pr
     hosts: input.host ? [{ id: newId('h'), name: input.host.email.split('@')[0], email: input.host.email, phone: input.host.phone, role: 'client', access: 'full', status: 'invited', invitedAt: now }] : [],
     highlights: true, plan: 'subscription',
   }
+  // A studio whose Drive is connected and set as the default keeps new events' originals there.
+  const [drive] = await db.select({ status: schema.driveConnections.status, def: schema.driveConnections.defaultForNewEvents }).from(schema.driveConnections).where(eq(schema.driveConnections.studioId, studioId)).limit(1)
+  if (drive?.status === 'ok' && drive.def) row.originalsIn = 'drive'
   await db.batch([
     db.insert(schema.events).values(row),
     db.insert(schema.albums).values({ id: `${id}_guest`, eventId: id, studioId, name: 'Guest uploads', order: 99, photoCount: 0, kind: 'guest', createdAt: now }),

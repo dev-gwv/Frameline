@@ -43,6 +43,13 @@ export const useTickets = () => {
 export const useTeam = () => { const api = useApi(); return useQuery({ queryKey: ['team'], queryFn: () => api.listTeam() }) }
 export const useWatermark = () => { const api = useApi(); return useQuery({ queryKey: ['watermark'], queryFn: () => api.getWatermark() }) }
 export const useWebsite = () => { const api = useApi(); return useQuery({ queryKey: ['website'], queryFn: () => api.getWebsite() }) }
+/** The studio's Google Drive connection (only asked when the server has Drive set up). */
+export const useDrive = (enabled = true) => { const api = useApi(); return useQuery({ queryKey: ['drive'], queryFn: () => api.getDrive(), enabled }) }
+/** An event's Drive imports; looks again every few seconds while one runs (live updates usually beat it). */
+export const useDriveImports = (eventId?: ID, enabled = true) => {
+  const api = useApi()
+  return useQuery({ queryKey: ['drive-imports', eventId], queryFn: () => api.listDriveImports(eventId!), enabled: !!eventId && enabled, refetchInterval: (q) => (q.state.data?.some((i) => i.status === 'running') ? 4000 : false) })
+}
 export const useEnquiries = () => { const api = useApi(); return useQuery({ queryKey: ['enquiries'], queryFn: () => api.listEnquiries() }) }
 
 /**

@@ -9,6 +9,7 @@ import type {
   Purchase, SmartQR, StoreSettings, StoreSettingsPatch, Studio, StudioProfile, TeamMember, Ticket, Usage, UsageBreakdown,
   UsageReport, WatermarkSettings, Website, ZipRequest, WalletBalance, NeedsYouItem,
   AccessRequest, EventHost, EventStats, HandleCheck, NotifyRequest, PayoutCheck, ReviewStatus, StatsTotals, StudioStats,
+  DriveExpandResult, DriveImport, DriveImportInput, DriveItem, DrivePickerConfig, DriveStatus,
 } from './types'
 import { buildNeedsYou } from './needs-you'
 import { availableArticles } from './help'
@@ -381,7 +382,35 @@ export interface FramelineApi {
   requestNotify(shortId: string, phone: string): Promise<NotifyRequest>
   /** Stops a "Notify me" request for this number. */
   cancelNotify(shortId: string, phone: string): Promise<void>
+
+  // ── Google Drive (docs/GOOGLE_DRIVE_PLAN.md) ───────────────────────────────
+  getDrive(): Promise<DriveStatus>
+  /** Google's consent page for connecting the studio's Drive (owner). Open it; it comes back to /settings/drive. */
+  connectDrive(): Promise<{ authorizationUrl: string }>
+  updateDrive(patch: { defaultForNewEvents: boolean }): Promise<DriveStatus>
+  /** Revokes Frameline's access (owner). Files already in Drive stay there. */
+  disconnectDrive(): Promise<void>
+  /** A short-lived token and keys for the Google Picker (editors). The sample API answers with `accessToken: 'sample'`. */
+  getDrivePicker(): Promise<DrivePickerConfig>
+  /** What picked files and folders hold (folders: every file inside, with its folder path). */
+  expandDriveItems(ids: string[]): Promise<DriveExpandResult>
+  startDriveImport(eventId: ID, input: DriveImportInput): Promise<DriveImport>
+  listDriveImports(eventId: ID): Promise<DriveImport[]>
+  cancelDriveImport(id: ID): Promise<DriveImport>
+  /** Where the event keeps new full-size files: Frameline's storage or the studio's Drive (needs Drive connected). */
+  setOriginalsIn(eventId: ID, where: 'frameline' | 'drive'): Promise<PhotoEvent>
 }
+
+/** What the sample API's stand-in for the Google Picker offers (no Google account needed). */
+export const SAMPLE_DRIVE: { id: string; name: string; folder: boolean; count: number }[] = [
+  { id: 'sample-folder-haldi', name: 'Haldi', folder: true, count: 48 },
+  { id: 'sample-folder-reception', name: 'Reception', folder: true, count: 72 },
+  { id: 'sample-folder-portraits', name: 'Couple portraits', folder: true, count: 36 },
+  { id: 'sample-file-cover', name: 'Cover shot.jpg', folder: false, count: 1 },
+]
+
+/** The same photo types the server imports from Drive (no RAW, no video). */
+export const DRIVE_IMPORTABLE = /^image\/(jpeg|png|webp|heic|heif)$/i
 
 /**
  * Where the mock keeps its data. `subscribe` (optional) reports writes by another tab/window so every copy of the app
@@ -771,7 +800,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     t.assistant = 'thinking'
     setTimeout(() => {
       const words = text.toLowerCase().split(/\W+/).filter((w) => w.length > 3)
-      const best = availableArticles({ ai: true, payments: true })
+      const best = availableArticles({ ai: true, payments: true, drive: true, driveImport: true })
         .map((a) => ({ a, n: words.filter((w) => `${a.title} ${a.tags.join(' ')}`.toLowerCase().includes(w)).length }))
         .sort((x, y) => y.n - x.n)[0]
       const found = best && best.n > 0
@@ -850,6 +879,16 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     return check
   }
 
+  // Google Drive (sample): not saved between visits.
+  const sampleDrive = { connected: false, connectedAt: '', defaultForNewEvents: false }
+  const sampleImports: DriveImport[] = []
+  const sampleImported: Record<ID, string[]> = {}
+  const driveStatus = (): DriveStatus => ({
+    available: true, picker: true, connected: sampleDrive.connected, defaultForNewEvents: sampleDrive.defaultForNewEvents, missingFiles: 0,
+    ...(sampleDrive.connected ? { email: s().studio.email, status: 'ok' as const, connectedAt: sampleDrive.connectedAt } : {}),
+  })
+  const needDrive = () => { if (!sampleDrive.connected) fail(409, 'drive_not_connected', 'Connect Google Drive first, in Settings → Google Drive.') }
+
   const api: FramelineApi = {
     subscribe(fn) { listeners.add(fn); return () => { listeners.delete(fn) } },
 
@@ -921,6 +960,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
         settings: defaultSettings({ ...PRESETS[input.preset].settings, guestUploadLimit: input.guestUploadLimit, pin: String(1000 + (t % 9000)) }),
         hosts: input.host?.email ? [normHost({ id: uid('h'), name: input.host.email.split('@')[0], email: input.host.email, phone: input.host.phone, role: 'client' })] : [],
         highlights: true, plan: 'subscription',
+        ...(sampleDrive.connected && sampleDrive.defaultForNewEvents ? { originalsIn: 'drive' as const } : {}),
       }
       s().events.unshift(event)
       s().albums.push({ id: `${id}_guest`, eventId: id, name: 'Guest uploads', order: 99, photoCount: 0, kind: 'guest' })
@@ -2034,6 +2074,123 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       save()
     },
 
+    // ── Google Drive: a pretend Drive (SAMPLE_DRIVE); imports add sample photos through uploadPhotos ──────
+    async getDrive() { await wait(latency / 2); return driveStatus() },
+    async connectDrive() {
+      await wait(latency)
+      sampleDrive.connected = true
+      sampleDrive.connectedAt = new Date().toISOString()
+      emit('studio')
+      return { authorizationUrl: '/settings/drive?drive=connected' }
+    },
+    async updateDrive(patch) {
+      await wait(latency / 2)
+      needDrive()
+      sampleDrive.defaultForNewEvents = patch.defaultForNewEvents
+      emit('studio')
+      return driveStatus()
+    },
+    async disconnectDrive() {
+      await wait(latency / 2)
+      sampleDrive.connected = false
+      for (const e of s().events) if (e.originalsIn === 'drive') e.originalsIn = 'frameline'
+      for (const imp of sampleImports) if (imp.status === 'running') { imp.status = 'cancelled'; imp.finishedAt = new Date().toISOString() }
+      emit('studio', 'events', 'misc')
+    },
+    async getDrivePicker() {
+      await wait(latency / 2)
+      needDrive()
+      return { accessToken: 'sample', apiKey: 'sample', expiresAt: new Date(Date.now() + 3600_000).toISOString() }
+    },
+    async expandDriveItems(ids) {
+      await wait(latency)
+      const items: DriveItem[] = []
+      for (const id of ids) {
+        const entry = SAMPLE_DRIVE.find((d) => d.id === id)
+        if (!entry) continue
+        if (!entry.folder) { items.push({ id: entry.id, name: entry.name, mimeType: 'image/jpeg', size: 9_400_000, importable: true }); continue }
+        const prefix = entry.name.replace(/[^A-Za-z]/g, '').slice(0, 4).toUpperCase()
+        for (let i = 1; i <= entry.count; i++) {
+          // Every twelfth file is a RAW, which isn't imported (the same rule as the real server).
+          const raw = i % 12 === 0
+          items.push({
+            id: `${entry.id}-${i}`, name: `${prefix}_${String(i).padStart(4, '0')}.${raw ? 'CR3' : 'JPG'}`, mimeType: raw ? 'image/x-canon-cr3' : 'image/jpeg',
+            size: 8_000_000 + (Math.abs(hash(`${id}${i}`)) % 5_000_000), folderPath: i > entry.count - 8 ? `${entry.name}/Candids` : entry.name,
+            importable: !raw, ...(raw ? { reason: 'RAW and other camera files aren’t imported yet' } : {}),
+          })
+        }
+      }
+      return { items, closedFolders: [] }
+    },
+    async startDriveImport(eventId, input) {
+      await wait(latency)
+      needDrive()
+      const ev = findEvent(eventId)
+      const albums = s().albums.filter((a) => a.eventId === ev.id && a.kind === 'album' && !a.deletedAt)
+      const byName = new Map(albums.map((a) => [a.name.toLowerCase(), a.id]))
+      const unique = [...new Map(input.items.map((i) => [i.fileId, i])).values()]
+      const have = new Set(sampleImported[ev.id] ?? [])
+      const wanted = unique.filter((i) => !have.has(i.fileId) && DRIVE_IMPORTABLE.test(i.mimeType))
+      const u = s().usage
+      const cost = wanted.length * (input.quality === 'original' ? 2 : 1)
+      if (cost && u.photosUsed + cost > u.photosLimit) fail(402, 'quota_exceeded', `This import needs room for ${cost} photos but your plan has ${Math.max(0, u.photosLimit - u.photosUsed)} left.`)
+      let created = 0
+      for (const name of new Set(wanted.filter((i) => i.albumName).map((i) => i.albumName!))) {
+        if (byName.has(name.toLowerCase())) continue
+        byName.set(name.toLowerCase(), (await api.createAlbum(ev.id, name)).id)
+        created++
+      }
+      const now = new Date().toISOString()
+      const imp: DriveImport = {
+        id: uid('di'), eventId: ev.id, name: input.name, status: wanted.length ? 'running' : 'done', total: input.items.length, done: 0,
+        skipped: input.items.length - wanted.length, failed: 0, albumsCreated: created, quality: input.quality, watermark: input.watermark,
+        createdAt: now, ...(wanted.length ? {} : { finishedAt: now }),
+      }
+      sampleImports.unshift(imp)
+      sampleImported[ev.id] = [...have, ...wanted.map((w) => w.fileId)]
+      const groups = new Map<ID, typeof wanted>()
+      for (const w of wanted) { const a = w.albumId ?? byName.get(w.albumName!.toLowerCase())!; groups.set(a, [...(groups.get(a) ?? []), w]) }
+      const finish = (status: DriveImport['status'], error?: string) => {
+        if (imp.status !== 'running') return
+        imp.status = status
+        imp.finishedAt = new Date().toISOString()
+        if (error) imp.error = error
+        emit('misc')
+      }
+      ;(async () => {
+        for (const [albumId, list] of groups) {
+          for (let i = 0; i < list.length; i += 10) {
+            if (imp.status !== 'running') return
+            const part = list.slice(i, i + 10)
+            await api.uploadPhotos(ev.id, albumId, part.map((p) => ({ filename: p.name, size: p.size })), { quality: input.quality, watermark: input.watermark || undefined, source: 'drive' })
+            imp.done += part.length
+            emit('misc')
+            await wait(300)
+          }
+        }
+        finish('done')
+      })().catch((e: unknown) => finish('failed', e instanceof Error ? e.message : 'Import failed'))
+      emit('misc')
+      return clone(imp)
+    },
+    async listDriveImports(eventId) { await wait(latency / 2); return clone(sampleImports.filter((i) => i.eventId === eventId).slice(0, 30)) },
+    async cancelDriveImport(id) {
+      await wait(latency / 2)
+      const imp = sampleImports.find((i) => i.id === id)
+      if (!imp) fail(404, 'not_found', `Import ${id} was not found.`)
+      if (imp!.status === 'running') { imp!.status = 'cancelled'; imp!.skipped = imp!.total - imp!.done - imp!.failed; imp!.finishedAt = new Date().toISOString() }
+      emit('misc')
+      return clone(imp!)
+    },
+    async setOriginalsIn(eventId, where) {
+      await wait(latency / 2)
+      if (where === 'drive') needDrive()
+      const e = findEvent(eventId)
+      e.originalsIn = where
+      save()
+      emit('events')
+      return clone(e)
+    },
   }
   if (persist) {
     for (const key of Object.keys(api) as (keyof FramelineApi)[]) {

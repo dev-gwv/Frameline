@@ -18,6 +18,14 @@ GOOGLE_CLIENT_SECRET=
 # Native app redirects allowed for Google sign-in (comma-separated; tokens return in the URL fragment).
 GOOGLE_NATIVE_REDIRECTS=frameline://sign-in
 
+# ── Google Drive (optional; docs/GOOGLE_DRIVE_PLAN.md) ──────────────────────
+# Uses the Google client above. Add the redirect URI <API_PUBLIC_URL>/v1/drive/callback to it.
+# 32 random bytes, base64 (seals stored refresh tokens): node -e "console.log(crypto.randomBytes(32).toString('base64'))"
+DRIVE_TOKEN_KEY=
+# The Google Picker's browser key (restricted to the Picker API and the admin site) and the Cloud project number.
+GOOGLE_PICKER_API_KEY=
+GOOGLE_PROJECT_NUMBER=
+
 # ── Direct-to-R2 presigned uploads (optional; without them parts go through the Worker) ──
 R2_ACCOUNT_ID=
 R2_ACCESS_KEY_ID=
