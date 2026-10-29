@@ -1,16 +1,23 @@
-import { fmt, type PhotoEvent, type Studio } from '@frameline/shared'
+import { FEATURES, fmt, type PhotoEvent, type Studio } from '@frameline/shared'
 import { appLink, galleryLink } from '../lib'
 
 export const TEMPLATE_KEY = 'frameline.messageTemplate'
 export const MAX_TEMPLATE = 2000
-export const VARIABLES = ['Event name', 'Event ID', 'Studio name', 'Web gallery link', 'App link', 'PIN', 'Expiry date'] as const
-export type Variable = (typeof VARIABLES)[number]
+const ALL_VARIABLES = ['Event name', 'Event ID', 'Studio name', 'Web gallery link', 'App link', 'PIN', 'Expiry date'] as const
+export type Variable = (typeof ALL_VARIABLES)[number]
+/** Variables offered in the editor: no app link while there is no phone app (FEATURES.phoneApp). */
+export const VARIABLES: readonly Variable[] = FEATURES.phoneApp ? ALL_VARIABLES : ALL_VARIABLES.filter((v) => v !== 'App link')
 
-export const DEFAULT_TEMPLATE =
-  'Namaste! The photos from {Event name} are ready.\n\nOpen {Web gallery link} and enter PIN {PIN}.\n\nPrefer the app? Use code {Event ID}.\n— {Studio name}'
+const APP_LINE = '\n\nPrefer the app? Use code {Event ID}.'
+const WITH_APP = `Namaste! The photos from {Event name} are ready.\n\nOpen {Web gallery link} and enter PIN {PIN}.${APP_LINE}\n— {Studio name}`
+export const DEFAULT_TEMPLATE = FEATURES.phoneApp ? WITH_APP : WITH_APP.replace(APP_LINE, '')
 
 export function loadTemplate() {
-  try { return localStorage.getItem(TEMPLATE_KEY) || DEFAULT_TEMPLATE } catch { return DEFAULT_TEMPLATE }
+  try {
+    const saved = localStorage.getItem(TEMPLATE_KEY)
+    // A template saved before the app line came out is the old default, not the studio's own words.
+    return !saved || saved === WITH_APP ? DEFAULT_TEMPLATE : saved
+  } catch { return DEFAULT_TEMPLATE }
 }
 export function saveTemplate(t: string) {
   try { localStorage.setItem(TEMPLATE_KEY, t); return true } catch { return false }

@@ -16,7 +16,7 @@ export function EventCard({ event: e, actions }: { event: PhotoEvent; actions: E
     { label: 'Share', icon: <Share2 size={14} />, onSelect: () => actions.share(e) },
     ...(driveImport && !archived ? [{ label: 'Import from Google Drive', icon: <GoogleDriveIcon size={14} />, onSelect: () => navigate(`/events/${e.id}?modal=import`) }] : []),
     { label: 'Copy link', icon: <Link2 size={14} />, onSelect: () => actions.copyLink(e) },
-    { label: 'Rename or change date', icon: <CalendarDays size={14} />, onSelect: () => actions.edit(e) },
+    { label: 'Edit name, date or city', icon: <CalendarDays size={14} />, onSelect: () => actions.edit(e) },
     { label: 'Renew', icon: <CreditCard size={14} />, onSelect: () => actions.renew(e) },
     'separator',
     archived

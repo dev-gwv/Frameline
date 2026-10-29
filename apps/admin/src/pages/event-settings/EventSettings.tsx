@@ -27,7 +27,7 @@ export default function EventSettings() {
   const [dlSession, setDlSession] = useState(0)
   const props: CardProps = { event, set: saveSettings, update: saveEvent }
   // With the AI features off (server switch), guests get these settings: no selfie, everyone sees everything.
-  const { ai } = useServerFeatures()
+  const { ai, payments } = useServerFeatures()
   const guestSettings = ai ? event.settings : withoutAi(event.settings)
   const close = (v: boolean) => { if (!v) setDialog(null) }
 
@@ -62,7 +62,7 @@ export default function EventSettings() {
 
       <DownloadsModal open={dialog === 'downloads'} onOpenChange={close} event={event} set={saveSettings} onLog={() => setDialog('log')} session={dlSession} />
       <DownloadLogModal open={dialog === 'log'} onOpenChange={close} eventId={event.id} onBack={() => setDialog('downloads')} />
-      <AddPhotosModal open={dialog === 'add-photos'} onOpenChange={close} event={event} />
+      <AddPhotosModal open={payments && dialog === 'add-photos'} onOpenChange={close} event={event} />
       <DetailsModal open={dialog === 'details'} onOpenChange={close} event={event} update={saveEvent} />
     </div>
   )

@@ -58,12 +58,12 @@ function ProfileForm({ studio }: { studio: Studio }) {
     if (!form.name.trim()) e.name = 'Enter your studio name'
     if (!/^[a-z0-9-]{3,30}$/.test(form.handle)) e.handle = '3–30 lowercase letters, numbers or dashes'
     if (form.about.length > 1000) e.about = 'Keep it under 1,000 characters'
-    if (!/^\+?[\d\s-]{10,15}$/.test(form.phone)) e.phone = 'Enter a mobile number like +91 98200 41177'
+    // Phone and city are optional: a studio changing its logo shouldn't be stopped by them.
+    if (form.phone.trim() && !/^\+?[\d\s-]{10,15}$/.test(form.phone.trim())) e.phone = 'Enter a mobile number like +91 98200 41177, or leave it empty'
     if (!EMAIL_RE.test(form.email)) e.email = 'Enter a valid email'
     if (form.website && !URL_RE.test(form.website)) e.website = 'Website must start with https://'
     if (form.whatsapp && !/^\+?[\d\s-]{10,15}$/.test(form.whatsapp)) e.whatsapp = 'Enter a WhatsApp number like +91 98200 41177, or leave it empty'
     if (form.instagram && !/^@?[A-Za-z0-9._]{1,30}$/.test(form.instagram)) e.instagram = 'Use your handle, like @northlight.studio'
-    if (!form.city.trim()) e.city = 'Enter your city'
     if (!/^#[0-9a-fA-F]{6}$/.test(form.brandColor)) e.brandColor = 'Use a hex colour like #8C2F39'
     return e
   }, [form])
@@ -99,12 +99,12 @@ function ProfileForm({ studio }: { studio: Studio }) {
             <Textarea id="p-about" rows={4} value={form.about} onChange={(e) => set({ about: e.target.value })} />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Phone" error={show('phone')} htmlFor="p-phone"><Input id="p-phone" type="tel" value={form.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
+            <Field label="Phone (optional)" error={show('phone')} htmlFor="p-phone"><Input id="p-phone" type="tel" value={form.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
             <Field label="WhatsApp (optional)" error={show('whatsapp')} hint="Guests message this number. Empty: your phone." htmlFor="p-wa"><Input id="p-wa" type="tel" placeholder={form.phone || '+91 98200 41177'} value={form.whatsapp} onChange={(e) => set({ whatsapp: e.target.value })} /></Field>
             <Field label="Email" error={show('email')} htmlFor="p-email"><Input id="p-email" type="email" value={form.email} onChange={(e) => set({ email: e.target.value })} /></Field>
             <Field label="Website" error={show('website')} htmlFor="p-web"><Input id="p-web" placeholder="https://" value={form.website} onChange={(e) => set({ website: e.target.value.trim() })} /></Field>
             <Field label="Instagram" error={show('instagram')} htmlFor="p-ig"><Input id="p-ig" placeholder="@yourstudio" value={form.instagram} onChange={(e) => set({ instagram: e.target.value.trim() })} /></Field>
-            <Field label="City" error={show('city')} htmlFor="p-city"><Input id="p-city" value={form.city} onChange={(e) => set({ city: e.target.value })} /></Field>
+            <Field label="City (optional)" error={show('city')} htmlFor="p-city"><Input id="p-city" value={form.city} onChange={(e) => set({ city: e.target.value })} /></Field>
           </div>
         </Card>
 

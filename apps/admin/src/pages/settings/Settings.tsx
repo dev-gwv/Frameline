@@ -18,7 +18,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'notifications', label: 'Notifications' },
   { id: 'billing', label: 'Billing and GST' },
   { id: 'invoices', label: 'Invoices' },
-  { id: 'security', label: 'Security' },
+  { id: 'security', label: 'Your account' },
 ]
 
 /** /settings/:tab — account settings as a left-list page (same pattern as Selling settings). */

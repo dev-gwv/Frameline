@@ -20,6 +20,8 @@ interface AuthCtx {
   verifyCode(email: string, code: string, extra?: { name?: string; studioName?: string }): Promise<VerifyResult>
   signInWithPassword(email: string, password: string): Promise<VerifyResult>
   setPassword(newPassword: string, currentPassword?: string): Promise<void>
+  /** Your own name, shown to your team and on invites. */
+  rename(name: string): Promise<void>
   /** Forgot password: after requestCode(email), set a new password with the emailed code. Signs you in. */
   resetPassword(email: string, code: string, newPassword: string): Promise<VerifyResult>
   googleUrl(redirectPath?: string): string | null
@@ -118,6 +120,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async setPassword(newPassword, currentPassword) {
       if (http) return http.auth.setPassword(newPassword, currentPassword)
       if (newPassword.length < 8) throw new Error('Use at least 8 characters.')
+    },
+    async rename(name) {
+      if (http) await http.auth.updateMe({ name })
+      else await new Promise((r) => setTimeout(r, 300))
+      if (user) set({ ...user, name })
+      queryClient.invalidateQueries({ queryKey: ['team'] })
     },
     async resetPassword(email, code, newPassword) {
       if (http) {

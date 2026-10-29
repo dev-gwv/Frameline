@@ -111,7 +111,8 @@ function EventHeader({ event }: { event: PhotoEvent }) {
               trigger={<Button variant="ghost" size="icon" aria-label="More event actions" className="max-sm:h-11 max-sm:w-11"><MoreHorizontal size={18} /></Button>}
             />
             <Button icon={<Upload size={15} />} onClick={() => m.open('upload')} className="max-sm:h-11 max-sm:flex-1">Upload</Button>
-            {driveImport && <Button icon={<GoogleDriveIcon size={15} />} onClick={() => m.open('import')} aria-label="Import from Google Drive" title="Import from Google Drive" className="max-sm:h-11 max-sm:flex-1"><span className="max-[420px]:hidden">From </span>Drive</Button>}
+            {/* Phones: the Drive mark alone, so Upload and Share keep their room. */}
+            {driveImport && <Button icon={<GoogleDriveIcon size={16} />} onClick={() => m.open('import')} title="Import from Google Drive" className="max-sm:h-11 max-sm:w-11 max-sm:shrink-0 max-sm:px-0"><span className="max-sm:sr-only">From Drive</span></Button>}
             <Button variant="primary" icon={<Share2 size={15} />} onClick={() => m.open('share', { tab: 'link' })} className="max-sm:h-11 max-sm:flex-1">Share</Button>
           </div>
         </div>

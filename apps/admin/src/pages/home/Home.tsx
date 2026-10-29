@@ -76,7 +76,7 @@ export default function Home() {
       subtitle={events.data ? statusSentence(list, uploadingIds) : <Skeleton className="mt-1 h-4 w-72 max-w-full" />}
       actions={<>
         <Button icon={<Upload size={15} />} className="max-sm:h-[46px] max-sm:flex-1" onClick={() => set({ upload: '1' })}>Upload photos</Button>
-        {driveImport && <Button icon={<GoogleDriveIcon size={15} />} className="max-sm:h-[46px]" title="Import from Google Drive" onClick={() => set({ upload: 'drive' })}><span className="max-sm:hidden">Import from </span>Drive</Button>}
+        {driveImport && <Button icon={<GoogleDriveIcon size={15} />} className="max-sm:h-[46px]" title="Import from Google Drive" onClick={() => set({ upload: 'drive' })}><span className="max-sm:hidden">Import from Drive</span><span className="sm:hidden">Drive</span></Button>}
         <Button variant="primary" icon={<Plus size={15} />} className="max-sm:h-[46px] max-sm:flex-1" onClick={() => set({ new: '1' })}>New event</Button>
       </>}>
       <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_330px]">

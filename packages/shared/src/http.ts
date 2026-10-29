@@ -224,6 +224,8 @@ export interface FramelineHttpApi extends FramelineApi {
     googleStartUrl(redirectPath?: string): string
     logout(opts?: { allDevices?: boolean }): Promise<void>
     me(): Promise<MeResponse>
+    /** Your own name (shown to your team and on invites). */
+    updateMe(patch: { name: string }): Promise<MeResponse['user']>
     isSignedIn(): Promise<boolean>
   }
   /** Low-level escape hatch for endpoints not in `FramelineApi`. */
@@ -981,6 +983,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
         await tokens.clear()
       },
       me: () => get<MeResponse>('/v1/me'),
+      updateMe: (patch) => request<MeResponse['user']>('PATCH', '/v1/me', { body: { name: patch.name } }),
       isSignedIn: async () => !!(await tokens.get())?.refreshToken,
     },
   }

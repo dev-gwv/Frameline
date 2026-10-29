@@ -987,6 +987,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       patch = { ...patch }
       delete patch.photoLimit; delete patch.expiresAt; delete patch.plan
       Object.assign(e, patch)
+      if (patch.endDate === '') delete e.endDate // "" makes it a one-day event again
       emit('events')
       return clone(e)
     },

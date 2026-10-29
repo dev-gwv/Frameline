@@ -18,7 +18,7 @@ export interface EventActions {
 
 /**
  * Everything the event card ⋯ menu does. Archive and trash act at once and offer Undo (rule 8).
- * Render `dialogs` once on the page (the Rename or change date modal).
+ * Render `dialogs` once on the page (the Edit event details modal).
  */
 export function useEventActions(events: PhotoEvent[]) {
   const api = useApi()

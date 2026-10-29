@@ -176,15 +176,17 @@ export function ImportModal({ open, onOpenChange, event, albums, initialTab, alb
               <span className="text-[12.5px] text-ink-3 tnum">{groups.length} album{groups.length === 1 ? '' : 's'} · {photosLabel(toImport)}</span>
             </div>
             {groups.length === 0 ? <p className="mt-2 text-[13px] text-ink-2">No photos Frameline can import in what you picked.</p> : (
-              <ul className="mt-2 flex flex-col gap-1.5">
+              <ul className="mt-2 flex flex-col gap-2">
                 {groups.map((g) => (
-                  <li key={g.key} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
-                    <span className="inline-flex min-w-0 items-center gap-1.5 font-semibold">{g.key === LOOSE ? <ImageIcon size={13} className="shrink-0 text-ink-3" /> : <Folder size={13} className="shrink-0 text-ink-3" />}<span className="truncate">{g.label}</span></span>
-                    <span className="text-ink-3">→ album</span>
-                    <input value={names[g.key] ?? g.target} onChange={(e) => setNames((n) => ({ ...n, [g.key]: e.target.value }))} aria-label={`Album for ${g.label}`}
-                      className="h-8 w-[160px] min-w-0 rounded-control border border-line-2 bg-surface px-2 text-[13px] outline-none focus:border-accent" />
-                    {g.albumId && <span className="text-[12px] text-ink-3">adds to it</span>}
-                    <span className="ml-auto text-[12.5px] text-ink-3 tnum">{fmt.count(g.count)}</span>
+                  <li key={g.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 text-[13px] sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.3fr)_3.5rem]">
+                    <span className="inline-flex min-w-0 items-center gap-1.5 font-semibold" title={g.label}>{g.key === LOOSE ? <ImageIcon size={13} className="shrink-0 text-ink-3" /> : <Folder size={13} className="shrink-0 text-ink-3" />}<span className="truncate">{g.label}</span></span>
+                    <span className="text-right text-[12.5px] text-ink-3 tnum sm:order-last">{fmt.count(g.count)}</span>
+                    <span className="hidden text-ink-3 sm:inline">→</span>
+                    <span className="col-span-2 flex min-w-0 items-center gap-2 sm:col-span-1">
+                      <input value={names[g.key] ?? g.target} onChange={(e) => setNames((n) => ({ ...n, [g.key]: e.target.value }))} aria-label={`Album for ${g.label}`} title={names[g.key] ?? g.target}
+                        className="h-8 min-w-0 flex-1 rounded-control border border-line-2 bg-surface px-2 text-[13px] outline-none focus:border-accent" />
+                      {g.albumId && <span className="shrink-0 text-[12px] text-ink-3">adds to it</span>}
+                    </span>
                   </li>
                 ))}
               </ul>

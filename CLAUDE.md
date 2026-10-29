@@ -206,3 +206,10 @@ full-access 2378) in the owner's studio, with 23 screenshots and test guests. De
   Cloud servers, not Google Photos), then Google Drive import + originals in Drive (migration 0016), off until the
   owner's Google setup. Note: `node_modules` links pointed at the old `E:\BuildOurs\Kamero-Clone` path; fixed with
   `pnpm install --frozen-lockfile --config.confirmModulesPurge=false` (CI=true).
+- 29 Oct 2026: Drive made a main action (`00619df`), then a live test in Chrome. Fixed: studio profile couldn't be
+  saved at all without a logo (`logoUrl: ""` was refused; now "" removes it) and demanded phone + city; no way to
+  edit an event's city, last day or type (`endDate: ""` clears it); no way to change your own name (Settings → Your
+  account, `PATCH /v1/me`); photo sizes invented as 6000 × 4000 while no processor runs (now read from the file,
+  `imageSize`); share message offered an app that doesn't exist; "Add photos" packs offered while payments are
+  off; trial date shown after it passed; Drive button overflowed the event header on phones. Still open: no
+  personal profile photo (users have none in the DB); Home's "Watch" videos are YouTube searches, not real videos.

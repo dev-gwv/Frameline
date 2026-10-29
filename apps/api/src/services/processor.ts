@@ -1,4 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm'
+import { imageSize } from '@frameline/shared'
 import type { BuildZipJob, Env, PhotoJob, ProcessPhotoJob } from '../env'
 import { getMailer } from './mailer'
 import { getDb, schema } from '../db/client'
@@ -81,15 +82,25 @@ export class HttpProcessor implements PhotoProcessor {
   }
 }
 
-/** Dev stand-in: confirms the original exists, keeps client-reported dimensions and any faces already known. */
+/**
+ * Stand-in while no processor runs (production until the VPS is set up): confirms the original exists, reads its
+ * pixel size from the file's first bytes when the client didn't send it, and keeps any faces already known.
+ */
 export class SimulatedProcessor implements PhotoProcessor {
   readonly name = 'simulated'
   constructor(private env: Env) {}
   async process(job: ProcessPhotoJob): Promise<ProcessResult> {
     const head = job.key ? await this.env.MEDIA.head(job.key) : null
     const [photo] = await getDb(this.env.DB).select({ exif: schema.photos.exif, faces: schema.photos.faces }).from(schema.photos).where(eq(schema.photos.id, job.photoId)).limit(1)
+    let size = photo?.exif.width && photo.exif.height ? { width: photo.exif.width, height: photo.exif.height } : null
+    // Not from the 2048 px web copy (originals kept in Drive): that would give the copy's size, not the photo's.
+    if (!size && head && job.key && !job.webOnly) {
+      const start = await this.env.MEDIA.get(job.key, { range: { offset: 0, length: 128 * 1024 } })
+      size = start ? imageSize(new Uint8Array(await start.arrayBuffer())) : null
+    }
     return {
-      width: photo?.exif.width || 6000, height: photo?.exif.height || 4000, sizeBytes: head?.size ?? photo?.exif.sizeBytes,
+      // 6000 × 4000 only when the size can't be read (HEIC): layouts need some shape.
+      width: size?.width ?? 6000, height: size?.height ?? 4000, sizeBytes: head?.size ?? photo?.exif.sizeBytes,
       faces: (photo?.faces ?? []).map((f) => ({ box: f.box, personId: f.personId })),
     }
   }

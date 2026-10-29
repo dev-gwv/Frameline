@@ -83,6 +83,8 @@ studioRoutes.openapi(createRoute({
   const { services, testimonials, faq, socialLinks, portfolioLinks, app, ...columns } = patch
   const current = await loadStudio(db, m.studioId)
   const set: Partial<typeof schema.studios.$inferInsert> = { ...columns }
+  // "" removes the logo (stored as no logo, not an empty address).
+  if (columns.logoUrl === '') set.logoUrl = null
   if (services || testimonials || faq || socialLinks || portfolioLinks) {
     const prev = studioOut(current)
     set.profile = {

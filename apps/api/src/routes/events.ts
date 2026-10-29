@@ -89,8 +89,10 @@ eventRoutes.openapi(createRoute({
     const [taken] = await db.select({ id: schema.events.id }).from(schema.events).where(eq(schema.events.shortId, patch.shortId)).limit(1)
     if (taken) throw new Conflict(`The gallery code ${patch.shortId} is already used. Try another.`, 'short_id_taken')
   }
-  const norm = { ...patch }
+  const norm: Omit<typeof patch, 'endDate'> & { endDate?: string | null } = { ...patch }
   for (const k of ['date', 'endDate'] as const) if (norm[k]) norm[k] = new Date(norm[k]!).toISOString()
+  // "" clears the last day (a one-day event again).
+  if (patch.endDate === '') norm.endDate = null
   // A later date keeps the gallery open a year past it; an earlier one never shortens what the studio has.
   const expiresAt = norm.date ? galleryExpiry(norm.date, ev.expiresAt) : undefined
   let invited: Host[] = []

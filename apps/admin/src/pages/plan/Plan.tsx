@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { fmt, PLANS, planPrice, type Plan as PlanT, type PlanChange } from '@frameline/shared'
 import { Button, Card, Chip, cn, Meter, Page, Segmented, Skeleton } from '@frameline/ui'
+import { useServerFeatures } from '../../lib/api'
 import { useWalletBalance } from '../../lib/queries'
+import { trialLine } from './planLine'
 import { useParamState } from '../../lib/url'
 import { useAuth } from '../../lib/auth'
 import { QueryError } from '../system'
@@ -26,12 +28,13 @@ export default function Plan() {
   const [modal, setModal] = useState<'capacity' | 'renewal-price' | null>(null)
   const [upgrade, setUpgrade] = useState<PlanT | null>(null)
   const [paid, setPaid] = useState<{ r: PlanChange; plan: PlanT } | null>(null)
+  const { payments } = useServerFeatures()
 
   if (isError) return <Page title="Plan and billing"><QueryError error={error} retry={() => refetch()} what="your plan" /></Page>
 
   // Nothing renews by itself (no saved card), so a paid plan says "valid till"; the trial says it is one.
   const subtitle = !usage ? ' ' : usage.trial
-    ? `Free trial till ${fmt.date(usage.validTill)} · ${fmt.count(usage.photosLimit)} photos`
+    ? `${trialLine(usage, payments)} · ${fmt.count(usage.photosLimit)} photos`
     : `${plan.name} · ${fmt.count(plan.photos)} photos a ${usage.period === 'yearly' ? 'year' : 'quarter'} · valid till ${fmt.date(usage.validTill)}`
   const flag = (k: string) => params.get(k) === '1'
   const renewId = params.get('renew')

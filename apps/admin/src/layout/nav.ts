@@ -1,6 +1,6 @@
 import {
   BarChart3, CalendarDays, Camera, CreditCard, Droplet, HardDrive, House, LayoutGrid, LifeBuoy, Megaphone, QrCode, Settings2, ShoppingBag,
-  Smartphone, Trash2, Upload, UserRound, Users, WandSparkles, type LucideIcon,
+  Smartphone, Store, Trash2, Upload, UserRound, Users, WandSparkles, type LucideIcon,
 } from 'lucide-react'
 import { FEATURES } from '@frameline/shared'
 
@@ -41,7 +41,8 @@ export const MORE_NAV: NavItem[] = [
 ]
 
 export const ACCOUNT_NAV: NavItem[] = [
-  { to: '/settings/profile', label: 'Studio profile', icon: UserRound, keywords: 'name logo brand contact' },
+  { to: '/settings/profile', label: 'Studio profile', icon: Store, keywords: 'name logo brand contact cover' },
+  { to: '/settings/security', label: 'Your account', icon: UserRound, keywords: 'my name password security devices' },
   { to: '/settings/team', label: 'Team', icon: Users, keywords: 'members invite roles' },
   { to: '/plan', label: 'Plan and billing', icon: CreditCard, keywords: 'subscription wallet add money renew packs invoices upgrade' },
   { to: '/settings', label: 'Settings', icon: Settings2, keywords: 'notifications security password billing gst invoices' },
@@ -54,7 +55,7 @@ export const EXTRA_PAGES: NavItem[] = [
   { to: '/sell/settings/business', label: 'Selling settings', icon: Settings2, description: 'Business details, payout account, prices, terms', keywords: 'kyc pan gst bank payout terms abroad' },
   { to: '/settings/notifications', label: 'Notifications', icon: Settings2, description: 'Emails you get from Frameline', keywords: 'email alerts' },
   { to: '/settings/billing', label: 'Billing and GST', icon: CreditCard, description: 'Details printed on your invoices', keywords: 'gstin address invoice' },
-  { to: '/settings/security', label: 'Security', icon: Settings2, description: 'Password and signed-in devices', keywords: 'password sessions sign out devices' },
+  { to: '/settings/security', label: 'Your account', icon: UserRound, description: 'Your name, password and signed-in devices', keywords: 'security password sessions sign out devices name profile me' },
 ]
 
 /**

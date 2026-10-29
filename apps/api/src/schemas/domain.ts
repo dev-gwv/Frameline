@@ -48,7 +48,7 @@ const ItemId = z.string().trim().min(1).max(64)
 export const StudioPatch = z.object({
   name: z.string().trim().min(1).max(120),
   handle: z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/, 'Use 3–40 lowercase letters, numbers or dashes'),
-  logoUrl: z.url().max(2048),
+  logoUrl: z.union([z.url().max(2048), z.literal('')]).openapi({ description: 'An uploaded image URL; "" removes the logo.' }),
   brandColor: HexColor,
   phone: z.string().max(40),
   whatsapp: z.string().max(40),
@@ -166,7 +166,7 @@ export const EventPatch = z.object({
   name: z.string().trim().min(1).max(160),
   type: EventType,
   date: IsoDate,
-  endDate: IsoDate,
+  endDate: z.union([IsoDate, z.literal('')]).openapi({ description: 'Last day of a multi-day event; "" makes it a one-day event.' }),
   city: z.string().trim().max(120),
   status: EventStatus,
   coverTones: z.tuple([Tone, Tone, Tone]),

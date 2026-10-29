@@ -6,6 +6,7 @@ import { Button, Card, Meter, Modal, QRCode, Skeleton, useToast } from '@frameli
 import { useStudio, useUsage } from '../../lib/queries'
 import { useServerFeatures } from '../../lib/api'
 import { GALLERY_URL } from '../../lib/url'
+import { trialLine } from '../plan/planLine'
 
 const title = 'font-sans text-[15px] font-extrabold tracking-normal'
 
@@ -18,13 +19,14 @@ export function PlanCard() {
   const usage = useUsage()
   const u = usage.data
   const plan = PLANS.find((p) => p.id === u?.planId)
+  const { payments } = useServerFeatures()
   const pct = u ? u.photosUsed / Math.max(1, u.photosLimit) : 0
   return (
     <Card>
       <h2 className={title}>Plan and photos</h2>
       {!u ? <div className="mt-2 flex flex-col gap-2"><Skeleton className="h-3.5 w-1/2" /><Skeleton className="h-1.5" /><Skeleton className="h-3.5 w-2/3" /></div> : (
         <>
-          <p className="mb-2.5 mt-0.5 text-[13px] text-ink-2">{u.trial ? `Free trial till ${fmt.date(u.validTill)}` : `${plan?.name ?? 'Your plan'} · valid till ${fmt.date(u.validTill)}`}</p>
+          <p className="mb-2.5 mt-0.5 text-[13px] text-ink-2">{u.trial ? trialLine(u, payments) : `${plan?.name ?? 'Your plan'} · valid till ${fmt.date(u.validTill)}`}</p>
           <Meter value={u.photosUsed} max={u.photosLimit} tone={pct >= 1 ? 'bad' : pct >= 0.9 ? 'warn' : 'gold'} label="Photos used" />
           <div className="mt-2 flex items-center justify-between gap-2 text-[12.5px]">
             <span className="text-ink-2 tnum">{fmt.count(u.photosUsed)} of {fmt.count(u.photosLimit)} used</span>

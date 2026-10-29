@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Circle, Eye, EyeOff, LogOut, MonitorSmartphone } from 'lucide-react'
@@ -20,6 +20,32 @@ function useHasPassword() {
   const [local, setLocal] = useLocalState<boolean>('frameline.passwordSet', false)
   if (http) return { hasPassword: me.data?.user.hasPassword ?? false, loading: me.isLoading, markSet: () => {} }
   return { hasPassword: local, loading: false, markSet: () => setLocal(true) }
+}
+
+/** Your own name: shown to your team, in the account menu and on host and team invites. */
+function NameCard() {
+  const toast = useToast()
+  const { user, rename } = useAuth()
+  const [name, setName] = useState(user?.name ?? '')
+  const [busy, setBusy] = useState(false)
+  const changed = !!user && name.trim() !== user.name
+  const bad = !name.trim() ? 'Enter your name' : name.trim().length > 120 ? 'Keep it under 120 characters' : ''
+  useEffect(() => { if (user) setName(user.name) }, [user?.name]) // eslint-disable-line react-hooks/exhaustive-deps
+  const save = async () => {
+    if (bad || !changed) return
+    setBusy(true)
+    try { await rename(name.trim()); toast.success('Name saved') } catch (err) { toast.error('Couldn’t save your name', errorMessage(err)) } finally { setBusy(false) }
+  }
+  return (
+    <Card>
+      <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); void save() }}>
+        <Field label="Your name" htmlFor="me-name" error={changed ? bad : ''} hint={`Your team sees it. You sign in as ${user?.email ?? ''}.`} className="min-w-[14rem] flex-1">
+          <Input id="me-name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Button type="submit" variant="primary" disabled={!changed || !!bad} loading={busy} className="mb-[22px]">Save name</Button>
+      </form>
+    </Card>
+  )
 }
 
 export function SecurityTab() {
@@ -81,8 +107,9 @@ export function SecurityTab() {
 
   return (
     <div>
-    <SectionTitle title="Security" description="Your password and the devices you’re signed in on." />
-    <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
+    <SectionTitle title="Your account" description="Your name, your password and the devices you’re signed in on." />
+    <NameCard />
+    <div className="mt-4 grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
       <Card className="flex flex-col gap-3">
         {loading ? <Skeleton className="h-72" /> : <>
           <div>

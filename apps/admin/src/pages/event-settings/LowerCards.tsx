@@ -150,6 +150,8 @@ export function HostsCard({ event, update }: CardProps) {
 
 export function LimitCard({ event, onAdd, onDetails }: CardProps & { onAdd: () => void; onDetails: () => void }) {
   const used = event.photoLimit ? event.photoCount / event.photoLimit : 0
+  // Photo packs are bought by card, UPI or wallet: nothing to offer while payments are off.
+  const { payments } = useServerFeatures()
   return (
     <SettingsCard id="photo-limit" title="Photo limit" className="pb-4">
       <div className="mb-1.5 mt-2 flex flex-wrap justify-between gap-x-3 text-[13px]">
@@ -158,8 +160,8 @@ export function LimitCard({ event, onAdd, onDetails }: CardProps & { onAdd: () =
       </div>
       <Meter value={event.photoCount} max={event.photoLimit || 1} tone={used >= 1 ? 'bad' : used >= 0.9 ? 'warn' : 'gold'} label="Photos used" />
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button size="sm" className="max-sm:h-10" onClick={onAdd}>Add photos</Button>
-        <Button size="sm" variant="ghost" className="max-sm:h-10" onClick={onDetails}>Change date or name</Button>
+        {payments && <Button size="sm" className="max-sm:h-10" onClick={onAdd}>Make room for more photos</Button>}
+        <Button size="sm" variant="ghost" className="max-sm:h-10" onClick={onDetails}>Edit name, date or city</Button>
       </div>
     </SettingsCard>
   )
