@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { CalendarCheck, LogOut, MoreHorizontal, Plus, Trash2, UserCog } from 'lucide-react'
 import { ApiError, fmt, PLANS, type ID, type PhotoEvent, type TeamMember } from '@frameline/shared'
 import { Avatar, Button, Card, Chip, cn, ConfirmDialog, EmptyState, Field, Input, Menu, Modal, RadioCardGroup, Skeleton, useToast } from '@frameline/ui'
-import { errorMessage, useApi } from '../../lib/api'
+import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { useAction, useEvents, useTeam, useUsage } from '../../lib/queries'
 import { useParamState } from '../../lib/url'
@@ -37,6 +37,8 @@ export function TeamTab() {
   const usage = useUsage()
   const events = useEvents()
   const [params, set] = useParamState()
+  // No email set up (server switch): invites are saved, nothing is sent; they join by signing in with that email.
+  const { email: emailOn } = useServerFeatures()
   const [hidden, setHidden] = useState<ID[]>([])
   const [picking, setPicking] = useState<TeamMember | null>(null)
   const [leaving, setLeaving] = useState<TeamMember | null>(null)
@@ -96,7 +98,7 @@ export function TeamTab() {
                       {ROLE[m.role].label} · {m.role === 'uploader' ? (assigned.length ? assigned.join(', ') : 'No events yet') : m.email}
                     </span>
                   </div>
-                  {m.pending || !m.lastActive ? <Chip tone="warn">Invite sent</Chip> : <span className="hidden text-[12.5px] text-ink-3 sm:block">{fmt.ago(m.lastActive)}</span>}
+                  {m.pending || !m.lastActive ? <Chip tone="warn">{emailOn && m.emailSent !== false ? 'Invite sent' : 'Not joined yet'}</Chip> : <span className="hidden text-[12.5px] text-ink-3 sm:block">{fmt.ago(m.lastActive)}</span>}
                   <Menu trigger={<Button size="icon" variant="ghost" aria-label={`More for ${m.name}`}><MoreHorizontal size={16} /></Button>}
                     items={[
                       ...(['owner', 'editor', 'uploader'] as Role[]).filter((r) => r !== m.role).map((r) => ({

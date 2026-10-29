@@ -15,7 +15,7 @@ export function EventBasics({ value, onChange, errors = {}, idPrefix = 'ne', aut
   idPrefix?: string
   autoFocus?: boolean
 }) {
-  const { ai } = useServerFeatures()
+  const { ai, payments } = useServerFeatures()
   return (
     <>
       <Field label="Event name" htmlFor={`${idPrefix}-name`} error={errors.name}>
@@ -35,7 +35,7 @@ export function EventBasics({ value, onChange, errors = {}, idPrefix = 'ne', aut
       <div className="flex flex-col gap-[5px]">
         <span className="text-[12.5px] font-bold text-ink-2" id={`${idPrefix}-audience`}>Who should see the photos?</span>
         <RadioCardGroup label="Who should see the photos?" value={value.preset} onChange={(preset) => onChange({ preset })}
-          options={audience(ai).map((a) => ({ value: a.value, title: a.title, description: a.description }))} />
+          options={audience(ai, payments).map((a) => ({ value: a.value, title: a.title, description: a.description }))} />
       </div>
     </>
   )

@@ -137,6 +137,12 @@ publicRoutes.openapi(createRoute({
   const g = await readGuest(c).catch(() => null)
   rememberGallery(c, e, guestIdentity(c, g?.eventId === e.id ? g : null))
   const albums = await db.select().from(schema.albums).where(and(eq(schema.albums.eventId, e.id), isNull(schema.albums.deletedAt), sql`${schema.albums.kind} != 'store'`)).orderBy(asc(schema.albums.order))
+  // Guests count only what they can see in Guest uploads: photos waiting for review (or rejected) don't show.
+  const guestAlbum = albums.find((a) => a.kind === 'guest')
+  if (guestAlbum) {
+    const [{ n }] = await db.select({ n: count() }).from(schema.photos).where(and(eq(schema.photos.albumId, guestAlbum.id), visible()))
+    guestAlbum.photoCount = n
+  }
   const films = await db.select().from(schema.films).where(eq(schema.films.eventId, e.id)).orderBy(asc(schema.films.createdAt))
   let coverUrl: string | undefined
   if (e.coverPhotoId) {

@@ -160,7 +160,10 @@ export function useStudioProfile(code: string | undefined) {
   return useQuery({ queryKey: ['studio', 'profile', (code ?? '').toLowerCase()], queryFn: () => api.getStudioProfile(code!), enabled: !!code, retry: false })
 }
 
-/** Albums a guest can browse: regular albums, plus guest uploads when they don't need review. */
-export function guestAlbums(albums: Album[] | undefined, event: PublicEvent) {
-  return (albums ?? []).filter((a) => a.kind === 'album' || (a.kind === 'guest' && a.photoCount > 0 && !event.settings.reviewGuestUploads))
+/**
+ * Albums a guest can browse: regular albums, plus Guest uploads once it has photos guests can see (the server
+ * counts only approved ones while the studio reviews guest photos).
+ */
+export function guestAlbums(albums: Album[] | undefined, _event: PublicEvent) {
+  return (albums ?? []).filter((a) => a.kind === 'album' || (a.kind === 'guest' && a.photoCount > 0))
 }

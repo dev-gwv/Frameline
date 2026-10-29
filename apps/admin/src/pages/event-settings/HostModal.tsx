@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { EventHost, HostAccess } from '@frameline/shared'
 import { Button, Field, Input, Modal, RadioCardGroup } from '@frameline/ui'
+import { useServerFeatures } from '../../lib/api'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 /** "riya.kabir@gmail.com" → "Riya Kabir". */
@@ -10,6 +11,7 @@ const nameFrom = (contact: string) => contact.split('@')[0].split(/[._-]+/).filt
 export function AddHostModal({ open, onOpenChange, existing, onAdd }: {
   open: boolean; onOpenChange: (v: boolean) => void; existing: EventHost[]; onAdd: (h: EventHost) => void
 }) {
+  const { email: emailOn } = useServerFeatures()
   const [contact, setContact] = useState('')
   const [access, setAccess] = useState<HostAccess>('full')
   const [tried, setTried] = useState(false)
@@ -29,9 +31,10 @@ export function AddHostModal({ open, onOpenChange, existing, onAdd }: {
   return (
     <Modal open={open} onOpenChange={close} width={520} title="Add a host"
       description="Hosts help run this event only. They don’t see your other events or money."
-      footer={<><Button variant="ghost" onClick={() => close(false)}>Cancel</Button><Button variant="primary" onClick={submit}>Send invite</Button></>}>
+      footer={<><Button variant="ghost" onClick={() => close(false)}>Cancel</Button><Button variant="primary" onClick={submit}>{emailOn ? 'Send invite' : 'Add host'}</Button></>}>
       <form className="flex flex-col gap-3.5" onSubmit={(e) => { e.preventDefault(); submit() }}>
-        <Field label="Email" htmlFor="host-contact" error={tried && error} hint="We email them an invite.">
+        <Field label="Email" htmlFor="host-contact" error={tried && error}
+          hint={emailOn ? 'We email them an invite.' : 'They sign in with this email. Email isn’t set up yet, so you’ll get an invite message to send them.'}>
           <Input id="host-contact" type="email" value={contact} onChange={(e) => setContact(e.target.value)} placeholder="riya.kabir@gmail.com" autoFocus autoComplete="off" />
         </Field>
         <div>

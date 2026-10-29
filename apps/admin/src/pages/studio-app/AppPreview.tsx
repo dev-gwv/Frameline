@@ -8,9 +8,10 @@ const Heading = ({ children }: { children: string }) => <div className="mb-1 mt-
 export function AppPreview({ studio, events, config }: { studio: Studio; events: PhotoEvent[]; config: StudioAppConfig }) {
   const byId = new Map(events.map((e) => [e.id, e]))
   const featured = config.featuredEventIds.map((id) => byId.get(id)).filter((e): e is PhotoEvent => !!e)
-  const listed = events
-    .filter((e) => !e.deletedAt && e.status !== 'draft' && e.status !== 'archived')
-    .filter((e) => config.showPrivate || e.settings.access === 'link')
+  const live = events.filter((e) => !e.deletedAt && e.status !== 'draft' && e.status !== 'archived')
+  const listed = live.filter((e) => config.showPrivate || e.settings.access === 'link')
+  // Live events exist but every one needs a PIN: say why the list is empty.
+  const allPrivate = listed.length === 0 && live.length > 0
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -20,7 +21,9 @@ export function AppPreview({ studio, events, config }: { studio: Studio; events:
             <span>9:41</span><span className="h-3.5 w-16 rounded-full bg-line-2" /><span>5G</span>
           </div>
           <div className="flex items-center gap-2 px-3 pb-2 pt-2">
-            <div className="grid size-[30px] place-items-center rounded-[8px] font-display text-[14px] font-semibold text-white" style={{ background: studio.brandColor }}>{studio.name[0]}</div>
+            <div className="grid size-[30px] place-items-center overflow-hidden rounded-[8px] font-display text-[14px] font-semibold text-white" style={{ background: studio.brandColor }}>
+              {studio.logoUrl ? <img src={studio.logoUrl} alt="" className="size-full object-cover" /> : studio.name[0]}
+            </div>
             <div className="min-w-0 flex-1">
               <b className="block truncate text-[13px]">{studio.name.replace(/ Studio$/, '')}</b>
               <span className="block truncate text-[10px] text-ink-3">{studio.city}</span>
@@ -49,7 +52,7 @@ export function AppPreview({ studio, events, config }: { studio: Studio; events:
             </>}
 
             <Heading>Galleries</Heading>
-            {listed.length === 0 && <p className="text-[11px] text-ink-3">Your live events show here.</p>}
+            {listed.length === 0 && <p className="text-[11px] text-ink-3">{allPrivate ? 'Your live events have PINs, so they’re not listed. Turn on “Private events in the list” to show them.' : 'Your live events show here.'}</p>}
             {listed.map((e) => (
               <div key={e.id} className="flex items-center gap-2 border-t border-line py-1.5">
                 <div className="h-7 w-10 shrink-0 rounded" style={{ background: toneCss(e.coverTones[0]) }} />

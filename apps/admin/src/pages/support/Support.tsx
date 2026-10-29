@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Bot, CalendarClock, CheckCircle2, ChevronDown, Loader2, MessageCircle, MessageSquare, PlayCircle, Search, Send, Ticket as TicketIcon, Users, X } from 'lucide-react'
-import { availableArticles, fmt, type Ticket } from '@frameline/shared'
+import { FEATURES, availableArticles, fmt, type Ticket } from '@frameline/shared'
 import { Button, Card, Chip, cn, EmptyState, Field, Input, Modal, Page, Segmented, Select, Skeleton, Textarea, type ChipTone } from '@frameline/ui'
 import { useApi, useServerFeatures } from '../../lib/api'
 import { useAction, useEvents, useStudio, useTickets } from '../../lib/queries'
@@ -14,6 +14,8 @@ const STATUS: Record<Ticket['status'], { label: string; tone: ChipTone }> = {
   open: { label: 'Open', tone: 'accent' }, answered: { label: 'Answered', tone: 'ok' }, waiting: { label: 'Waiting', tone: 'warn' }, closed: { label: 'Closed', tone: 'neutral' },
 }
 const PLATFORM_LABEL: Record<Ticket['platform'], string> = { admin: 'This website', 'web-gallery': 'Guest gallery', app: 'Phone app', desktop: 'Desktop uploader' }
+/** Where a problem can happen today: no phone app while FEATURES.phoneApp is off, and no desktop uploader yet. */
+const PLATFORMS: Ticket['platform'][] = FEATURES.phoneApp ? ['admin', 'web-gallery', 'app'] : ['admin', 'web-gallery']
 
 /**
  * /support "Help": Book a call (the way to a person, owner 19 Oct; our booking app takes it from there), Ask a
@@ -102,7 +104,7 @@ function RequestModal({ open, onOpenChange, onCreated }: { open: boolean; onOpen
     <Modal open={open} onOpenChange={onOpenChange} title="Ask a question" description="Our assistant answers in about a minute. If it needs a person, it gives you a link to book a call." width={560}
       footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="primary" loading={send.isPending} onClick={() => { setTried(true); if (!error) send.mutate(undefined) }}>Send request</Button></>}>
       <Field label="What happened?" error={tried ? error : ''} htmlFor="req-what">
-        <Textarea id="req-what" rows={4} autoFocus placeholder="Guests say the PIN doesn’t open the Riya & Kabir gallery…" value={what} onChange={(e) => setWhat(e.target.value)} />
+        <Textarea id="req-what" rows={4} autoFocus placeholder="Guests say the PIN doesn’t open my wedding gallery…" value={what} onChange={(e) => setWhat(e.target.value)} />
       </Field>
       <Field label="Which event?" htmlFor="req-event">
         <Select id="req-event" value={eventId} onChange={(e) => setEventId(e.target.value)}>
@@ -112,7 +114,7 @@ function RequestModal({ open, onOpenChange, onCreated }: { open: boolean; onOpen
       </Field>
       <Field label="Where does it happen?">
         <div className="-mx-1 overflow-x-auto px-1 scrollbar-none">
-          <Segmented value={platform} onChange={setPlatform} options={(Object.keys(PLATFORM_LABEL) as Ticket['platform'][]).map((p) => ({ value: p, label: PLATFORM_LABEL[p] }))} />
+          <Segmented value={platform} onChange={setPlatform} options={PLATFORMS.map((p) => ({ value: p, label: PLATFORM_LABEL[p] }))} />
         </div>
       </Field>
     </Modal>

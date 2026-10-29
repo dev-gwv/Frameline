@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Droplet, ExternalLink, FolderOpen, HardDrive, MoreHorizontal, Palette, Plus, ShoppingBag, Tag, Trash2, Upload, UserCog } from 'lucide-react'
+import { Copy, Droplet, ExternalLink, FolderOpen, HardDrive, MoreHorizontal, Palette, Plus, ShoppingBag, Tag, Trash2, Upload, UserCog } from 'lucide-react'
 import { fmt, type EventHost, type HostAccess } from '@frameline/shared'
 import { Avatar, Button, Chip, ConfirmDialog, Meter, Modal, SettingRow, Skeleton, Toggle, Menu, useToast } from '@frameline/ui'
 import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { GoogleDriveIcon, driveFolderUrl } from '../../lib/drive'
 import { useDrive, usePrices, useStoreSettings } from '../../lib/queries'
-import { useModalParam } from '../../lib/url'
+import { galleryUrl, useModalParam } from '../../lib/url'
 import { PriceRows, pricesValid } from '../sell/Prices'
 import { AddHostModal } from './HostModal'
 import { SettingsCard, TextLink, ToggleRow, type CardProps } from './parts'
@@ -107,6 +107,14 @@ function EventPricesModal({ open, onOpenChange, overrides, onSave }: {
 export function HostsCard({ event, update }: CardProps) {
   const toast = useToast()
   const [adding, setAdding] = useState(false)
+  // No email set up (server switch): invites are saved but nothing goes out, so the studio sends the link itself.
+  const { email: emailOn } = useServerFeatures()
+  const inviteText = (h: EventHost) =>
+    `You've been added as a host for ${event.name}${h.access === 'upload' ? ' so you can upload photos' : ''}. Open ${galleryUrl(event.shortId)} and sign in with ${h.email || h.phone} to accept.`
+  const copyInvite = async (h: EventHost) => {
+    try { await navigator.clipboard.writeText(inviteText(h)); toast.success('Invite message copied', 'Send it on WhatsApp or by email.') }
+    catch { toast.error('Couldn’t copy', inviteText(h)) }
+  }
   const remove = (h: EventHost) => {
     const before = event.hosts
     void update({ hosts: before.filter((x) => x.id !== h.id) })
@@ -125,10 +133,11 @@ export function HostsCard({ event, update }: CardProps) {
         <div key={h.id} className="flex items-center gap-3 border-t border-line py-3 first:border-t-0">
           <Avatar name={h.name} tone="neutral" />
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13.5px] font-bold">{h.name}{h.status === 'invited' && <Chip tone="accent">Invite sent</Chip>}</div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13.5px] font-bold">{h.name}{h.status === 'invited' && <Chip tone="accent">{emailOn && h.email ? 'Invite sent' : 'Not joined yet'}</Chip>}</div>
             <div className="text-[12.5px] text-ink-2">{access(h) === 'upload' ? 'Can only upload photos' : 'Can upload and change settings'}</div>
           </div>
           <Menu width={280} items={[
+            ...(h.status === 'invited' ? [{ label: 'Copy invite message', description: 'Send it to them yourself', icon: <Copy size={15} />, onSelect: () => void copyInvite(h) }] : []),
             access(h) === 'upload'
               ? { label: 'Let them see everything', description: 'And change settings', icon: <UserCog size={15} />, onSelect: () => setAccess(h, 'full') }
               : { label: 'Only let them upload', description: 'For a second shooter', icon: <Upload size={15} />, onSelect: () => setAccess(h, 'upload') },
@@ -142,7 +151,16 @@ export function HostsCard({ event, update }: CardProps) {
       </div>
       <AddHostModal open={adding} onOpenChange={setAdding} existing={event.hosts}
         onAdd={(h) => {
-          void update({ hosts: [...event.hosts, h] }).then((err) => { if (!err) toast.success(`Invite sent to ${h.email || h.phone}`) })
+          void update({ hosts: [...event.hosts, h] }).then((err) => {
+            if (err) return
+            if (emailOn && h.email) toast.success(`Invite sent to ${h.email}`)
+            else {
+              void navigator.clipboard.writeText(inviteText(h)).then(
+                () => toast.success(`${h.name} added as a host`, 'Nothing was emailed. The invite message is copied: send it to them on WhatsApp.'),
+                () => toast.success(`${h.name} added as a host`, 'Nothing was emailed. Use ⋯ → Copy invite message and send it to them.'),
+              )
+            }
+          })
         }} />
     </SettingsCard>
   )

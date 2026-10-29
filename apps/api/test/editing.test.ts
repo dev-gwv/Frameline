@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { imageSize } from '@frameline/shared'
 import { call, tokenFor } from './helpers'
@@ -37,6 +38,18 @@ describe('editing', () => {
     expect(r.json.name).toBe('Meera I.')
     expect((await call('/v1/me', { token })).json.user.name).toBe('Meera I.')
     await call('/v1/me', { token, method: 'PATCH', body: { name: 'Meera Iyer' } })
+  })
+})
+
+describe('guest uploads in the gallery', () => {
+  it('counts only guest photos guests can see', async () => {
+    const r = await call('/v1/public/events/6402F9F')
+    expect(r.status).toBe(200)
+    const guest = r.json.albums.find((a: { kind: string }) => a.kind === 'guest')
+    const row = await env.DB.prepare(`SELECT count(*) AS all_n, sum(CASE WHEN hidden = 0 AND status = 'ready' AND deleted_at IS NULL AND (review_status IS NULL OR review_status = 'approved') THEN 1 ELSE 0 END) AS seen FROM photos WHERE album_id = ?`).bind(guest.id).first<{ all_n: number; seen: number }>()
+    // The sample wedding has guest photos waiting for review: guests' count leaves them out.
+    expect(row!.all_n).toBeGreaterThan(row!.seen)
+    expect(guest.photoCount).toBe(row!.seen)
   })
 })
 

@@ -834,7 +834,9 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     return st
   }
   function publicAlbums(e: PhotoEvent) {
+    // Like the server: guests count only approved guest photos in Guest uploads.
     return liveAlbums().filter((a) => a.eventId === e.id && a.kind !== 'store').sort((a, b) => a.order - b.order)
+      .map((a) => (a.kind === 'guest' ? { ...a, photoCount: albumPhotos(a).filter((p) => !p.hidden && !p.deletedAt && (!p.reviewStatus || p.reviewStatus === 'approved')).length } : a))
   }
   /** Face finding progress for an event: photos still processing, plus a running reindexFaces scan. */
   function faceProgress(e: PhotoEvent) {

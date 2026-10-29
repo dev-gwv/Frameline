@@ -189,6 +189,10 @@ hidden or says so: selling, payouts, card/UPI, invoices without a seller, "Notif
 
 Live test data: event "Frameline Test – Demo Wedding" (`ev_2iat4iwano8v`, gallery `B6F105B`, PIN 7883,
 full-access 2378) in the owner's studio, with 23 screenshots and test guests. Delete when done.
+The owner's signed-in account is for testing (29 Oct: "you can create test data in my signed in account"). Added
+29 Oct: event "Claude QA - Sharma Wedding" (`ev_aqpsc2hzm4vx`, 6 photos, albums Photos + Haldi, host
+qa-couple@example.com), guest "Claude Test Guest" (+91 90000 00001) on B6F105B with 2 approved guest photos,
+Smart QR "QA studio front desk", team invite qa-shooter@example.com, support ticket "QA test: …".
 
 ## Session log
 
@@ -213,3 +217,9 @@ full-access 2378) in the owner's studio, with 23 screenshots and test guests. De
   `imageSize`); share message offered an app that doesn't exist; "Add photos" packs offered while payments are
   off; trial date shown after it passed; Drive button overflowed the event header on phones. Still open: no
   personal profile photo (users have none in the DB); Home's "Watch" videos are YouTube searches, not real videos.
+  Second pass the same day (live, with test data): approved guest photos never showed in the gallery while review
+  was on (now the server counts only visible ones in Guest uploads); host and team invites said "Invite sent"
+  with email off; "Buyers" event type and support "Phone app / Desktop uploader" offered things that don't exist;
+  studio page preview ignored the logo and said nothing when every event has a PIN. Checked working: guest PIN,
+  sign-up, browse, favourite, download, Download all, guest upload + review, albums, move, trash/restore, QR,
+  reports. The support assistant hands everything to a person (no `SUPPORT_AI_API_KEY` yet).
