@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowUpDown, Check, HardDriveDownload, Images, Upload, Camera, X } from 'lucide-react'
+import { ArrowUpDown, Check, Images, Upload, Camera, X } from 'lucide-react'
 import { FEATURES, fmt, type ID, type Photo } from '@frameline/shared'
 import { Button, EmptyState, Menu, Skeleton, useToast } from '@frameline/ui'
 import { errorMessage, useServerFeatures } from '../../lib/api'
+import { GoogleDriveIcon } from '../../lib/drive'
 import { useAlbums, usePeople } from '../../lib/queries'
 import { useModalParam, useParamState } from '../../lib/url'
 import { useEventContext } from '../event/EventLayout'
@@ -14,7 +15,7 @@ import { isImage, setPendingFiles, usePendingDeletes } from './pending'
 import { GRID_COLS, PhotoGrid } from './PhotoGrid'
 import { useGridIds, usePhotoPages } from './photoQuery'
 import { PhotoSelectionBar } from './SelectionBar'
-import { UploadStrip } from './UploadStrip'
+import { DriveImportStrip, UploadStrip } from './UploadStrip'
 import { useEventUploads } from '../../layout/UploadDock'
 
 /**
@@ -151,6 +152,7 @@ export default function Workspace() {
 
       <section className="min-w-0 flex-1 pb-28 md:pb-20" aria-label="Photos">
         <UploadStrip eventId={event.id} />
+        {driveImport && <DriveImportStrip eventId={event.id} onOpen={() => m.open('import', { tab: 'running' })} />}
         {albumsQ.isError ? <QueryError error={albumsQ.error} retry={() => albumsQ.refetch()} />
           : eventEmpty ? <EmptyEvent onChoose={choose} onImport={driveImport ? () => m.open('import') : undefined} />
           : (
@@ -189,8 +191,11 @@ export default function Workspace() {
                   ) : album?.kind === 'guest' ? (
                     <EmptyState icon={<Images size={22} />} title="No guest photos yet" body="Photos guests add from the gallery appear here." />
                   ) : (
-                    <EmptyState icon={<Upload size={22} />} title={`${title} is empty`} body="Drop photos anywhere on this page, or choose them from your computer."
-                      action={<Button icon={<Upload size={14} />} onClick={choose}>Choose photos</Button>} />
+                    <EmptyState icon={<Upload size={22} />} title={`${title} is empty`} body={`Drop photos anywhere on this page, or choose them from your computer${driveImport ? ' or Google Drive' : ''}.`}
+                      action={<div className="flex flex-wrap justify-center gap-2">
+                        <Button icon={<Upload size={14} />} onClick={choose}>Choose photos</Button>
+                        {driveImport && <Button icon={<GoogleDriveIcon size={14} />} onClick={() => m.open('import')}>From Google Drive</Button>}
+                      </div>} />
                   )
                 ) : (
                   <PhotoGrid photos={photos} selected={selected} selecting={selectMode} onToggle={(i, r) => { setSelectMode(true); toggle(i, r) }} onOpen={open} />
@@ -233,13 +238,14 @@ function EmptyEvent({ onChoose, onImport }: { onChoose: () => void; onImport?: (
         <span className="grid size-[52px] place-items-center rounded-full bg-accent-soft text-accent-text"><Upload size={24} /></span>
         <h2 className="text-[22px] font-extrabold leading-tight">Add your first photos</h2>
         <p className="text-[14px] text-ink-2"><span className="hidden sm:inline">Drag a folder here, or choose photos. </span>You can leave this page while they upload.</p>
-        <Button variant="primary" size="lg" icon={<Upload size={16} />} onClick={onChoose} className="mt-1 max-sm:w-full">Choose photos</Button>
-        {(onImport || FEATURES.cameraSync) && (
-          <p className="mt-1 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-[13px] text-ink-3">
-            or
-            {onImport && <button type="button" onClick={onImport} className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><HardDriveDownload size={14} />Import from Google Drive</button>}
-            {onImport && FEATURES.cameraSync && '·'}
-            {FEATURES.cameraSync && <Link to="/camera-sync" className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><Camera size={14} />Connect your camera</Link>}
+        <div className="mt-1 flex w-full flex-wrap justify-center gap-2">
+          <Button variant="primary" size="lg" icon={<Upload size={16} />} onClick={onChoose} className="max-sm:w-full">Choose photos</Button>
+          {onImport && <Button size="lg" icon={<GoogleDriveIcon size={16} />} onClick={onImport} className="max-sm:w-full">Import from Google Drive</Button>}
+        </div>
+        {onImport && <p className="text-[12.5px] text-ink-3">Already sorted in Drive? Each folder becomes an album.</p>}
+        {FEATURES.cameraSync && (
+          <p className="mt-1 text-[13px] text-ink-3">
+            or <Link to="/camera-sync" className="inline-flex min-h-[32px] items-center gap-1 font-bold text-ink-2 hover:text-ink hover:underline"><Camera size={14} />Connect your camera</Link>
           </p>
         )}
       </div>

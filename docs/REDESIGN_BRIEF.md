@@ -113,7 +113,8 @@ before each edit; other agents edit it too). You may delete/rename files inside 
   and a small Face finding modal), so Upload and Share work from Guests and Settings too. TRANSITION for A: the old
   Workspace still mounts Upload/Import/Share itself, so EventModals skips those on the Photos tab (`photosTabOwns`) and
   EventLayout hides the old `WorkspaceHeader` with `[&>div>header]:hidden`. Remove both when you rewrite the Photos tab.
-- ⋯ menu: Preview as a guest, Import from Google Drive, Films, Face finding, Archive event (acts immediately + Undo
+- From Drive button next to Upload (only while the server has Drive import on; 28 Oct, moved out of the ⋯ menu).
+- ⋯ menu: Preview as a guest, Films, Face finding, Archive event (acts immediately + Undo
   toast; "Restore event" when archived). Delete stays at the bottom of Settings (B).
 - Guests badge = pending access requests + guest photos awaiting review (`useGuestsAttention(eventId)`).
 

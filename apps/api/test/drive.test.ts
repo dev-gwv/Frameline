@@ -346,5 +346,20 @@ describe('originals kept in the studio’s Drive', () => {
     const ev = await call('/v1/events', { token: await tokenFor('owner'), body: { name: 'Drive wedding', date: '2026-12-01', city: 'Pune', type: 'wedding', preset: 'private-family' } })
     expect(ev.status).toBe(201)
     expect(ev.json.originalsIn).toBe('drive')
+    // The New event form can say otherwise for one event.
+    const own = await call('/v1/events', { token: await tokenFor('owner'), body: { name: 'Kept here', date: '2026-12-02', city: 'Pune', type: 'wedding', preset: 'private-family', originalsIn: 'frameline' } })
+    expect(own.json.originalsIn).toBe('frameline')
+  })
+
+  it('a new event can ask for Drive only while Drive is connected', async () => {
+    const body = { name: 'Drive party', date: '2026-12-03', city: 'Goa', type: 'wedding', preset: 'private-family', originalsIn: 'drive' }
+    const refused = await call('/v1/events', { token: await tokenFor('owner'), body })
+    expect(refused.status).toBe(409)
+    expect(refused.json.code).toBe('drive_not_connected')
+    await connectStudio()
+    fakeGoogle()
+    const ok = await call('/v1/events', { token: await tokenFor('owner'), body })
+    expect(ok.status).toBe(201)
+    expect(ok.json.originalsIn).toBe('drive')
   })
 })

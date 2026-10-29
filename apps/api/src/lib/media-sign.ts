@@ -51,8 +51,12 @@ async function signPhoto<T extends { url?: string; webUrl?: string }>(env: Env, 
   return { ...out, ...(url ? { url } : {}), ...(webUrl ? { webUrl } : {}) }
 }
 
-/** The studio's view of a photo: like photoOut, with signed URLs. */
-export const studioPhotoOut = (env: Env, r: PhotoRow) => signPhoto(env, photoOut(r, env.PUBLIC_MEDIA_BASE), r, 'studio')
+/** The studio's view of a photo: like photoOut, with signed URLs and where the original is in their Drive. */
+export const studioPhotoOut = (env: Env, r: PhotoRow) => signPhoto(env, {
+  ...photoOut(r, env.PUBLIC_MEDIA_BASE),
+  ...(r.driveFileId ? { driveFileId: r.driveFileId } : {}),
+  ...(r.storage === 'drive' ? { originalInDrive: true } : {}),
+}, r, 'studio')
 
 export const studioPhotosOut = (env: Env, rows: PhotoRow[]) => Promise.all(rows.map((r) => studioPhotoOut(env, r)))
 

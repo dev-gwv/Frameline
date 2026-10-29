@@ -114,6 +114,13 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
   (`X-Frameline-Fallback: web-copy`). Processing uses the web copy (`webOnly`). Deleting in Frameline leaves Drive alone.
 - New photo rows go through `addPhotos()` (`services/add-photos.ts`): uploads, imports and Drive uploads share it.
 - Test page: `/drive-test.html` on the admin site (folder listing, thumbnail size, browser upload to Drive).
+- **Drive is a main action, never only in a ⋯ menu** (owner, 29 Oct). Where it shows (all hidden while the server
+  switch is off): event header "From Drive" next to Upload; empty event / empty album; Upload dialog; Home "Import
+  from Drive" (`/?upload=drive` picks the event); first-run card + Getting started "Connect Google Drive"; event
+  card menu; ⌘K; More menu (`withDrive` in nav.ts); New event "Keep full-size photos in Google Drive"
+  (`originalsIn` on POST /events); event Settings "Google Drive" card (folder link, import); viewer "Open in
+  Drive" (`Photo.driveFileId`/`originalInDrive`, studio only); a progress line above the grid while imports run.
+  Connecting from the import window comes back to it (`startDriveConnect` / `takeDriveReturn`, `lib/drive.tsx`).
 
 ## PINs
 

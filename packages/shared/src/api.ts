@@ -43,6 +43,8 @@ export interface NewEventInput {
   preset: PresetId
   host?: { email: string; phone?: string }
   guestUploadLimit: number
+  /** Where full-size files go; unset follows Settings → Google Drive's default. */
+  originalsIn?: 'frameline' | 'drive'
 }
 
 export interface UploadFile { filename: string; size: number; url?: string; width?: number; height?: number }
@@ -960,7 +962,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
         settings: defaultSettings({ ...PRESETS[input.preset].settings, guestUploadLimit: input.guestUploadLimit, pin: String(1000 + (t % 9000)) }),
         hosts: input.host?.email ? [normHost({ id: uid('h'), name: input.host.email.split('@')[0], email: input.host.email, phone: input.host.phone, role: 'client' })] : [],
         highlights: true, plan: 'subscription',
-        ...(sampleDrive.connected && sampleDrive.defaultForNewEvents ? { originalsIn: 'drive' as const } : {}),
+        ...(sampleDrive.connected && (input.originalsIn ? input.originalsIn === 'drive' : sampleDrive.defaultForNewEvents) ? { originalsIn: 'drive' as const } : {}),
       }
       s().events.unshift(event)
       s().albums.push({ id: `${id}_guest`, eventId: id, name: 'Guest uploads', order: 99, photoCount: 0, kind: 'guest' })
@@ -1135,6 +1137,9 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
         uploadedBy: opts.uploadedBy ?? (source === 'guest' ? 'Guest' : 'You'), source,
         ...(review ? { reviewStatus: 'pending' as const } : source === 'guest' ? { reviewStatus: 'approved' as const } : {}),
         quality: opts.quality === 'original' ? 'original' : 'web', views: 0, rotation: 0,
+        // Pretend Drive: imported files keep their Drive id; the studio's own uploads to a Drive event live there.
+        ...(source === 'drive' ? { driveFileId: `sample-${(hash(f.filename) >>> 0).toString(36)}` }
+          : source !== 'guest' && ev.originalsIn === 'drive' ? { driveFileId: `sample-${(hash(f.filename + i) >>> 0).toString(36)}`, originalInDrive: true } : {}),
       }))
       state.added.push(...created)
       if (ev.status === 'draft') ev.status = 'uploading'
@@ -2187,6 +2192,7 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       if (where === 'drive') needDrive()
       const e = findEvent(eventId)
       e.originalsIn = where
+      if (where === 'drive' && !e.driveFolderId) e.driveFolderId = `sample-folder-${e.shortId}`
       save()
       emit('events')
       return clone(e)

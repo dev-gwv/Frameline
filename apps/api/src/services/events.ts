@@ -2,7 +2,7 @@ import { and, eq, isNull, or, sql } from 'drizzle-orm'
 import { EVENT_PHOTO_LIMIT, PRESETS, defaultSettings, hash, tone } from '@frameline/shared'
 import type { DB } from '../db/client'
 import { schema } from '../db/client'
-import { NotFound } from '../lib/errors'
+import { AppError, NotFound } from '../lib/errors'
 import { newId, newShortId, nowIso } from '../lib/ids'
 
 type EventTypeId = (typeof schema.events.$inferInsert)['type']
@@ -59,6 +59,8 @@ export interface NewEvent {
   preset: keyof typeof PRESETS
   guestUploadLimit: number
   host?: { email: string; phone?: string }
+  /** Where full-size files go; unset follows the studio's Drive default. "drive" needs a working connection. */
+  originalsIn?: 'frameline' | 'drive'
   /** Settings that win over the preset's, e.g. a partner's own defaults. */
   overrides?: Partial<(typeof schema.events.$inferInsert)['settings']>
 }
@@ -87,9 +89,12 @@ export async function createEvent(db: DB, studioId: string, input: NewEvent): Pr
     hosts: input.host ? [{ id: newId('h'), name: input.host.email.split('@')[0], email: input.host.email, phone: input.host.phone, role: 'client', access: 'full', status: 'invited', invitedAt: now }] : [],
     highlights: true, plan: 'subscription',
   }
-  // A studio whose Drive is connected and set as the default keeps new events' originals there.
-  const [drive] = await db.select({ status: schema.driveConnections.status, def: schema.driveConnections.defaultForNewEvents }).from(schema.driveConnections).where(eq(schema.driveConnections.studioId, studioId)).limit(1)
-  if (drive?.status === 'ok' && drive.def) row.originalsIn = 'drive'
+  // Originals in Drive when asked for, or when the studio's Drive is connected and set as the default.
+  if (input.originalsIn !== 'frameline') {
+    const [drive] = await db.select({ status: schema.driveConnections.status, def: schema.driveConnections.defaultForNewEvents }).from(schema.driveConnections).where(eq(schema.driveConnections.studioId, studioId)).limit(1)
+    if (input.originalsIn === 'drive' && drive?.status !== 'ok') throw new AppError(409, 'drive_not_connected', 'Google Drive isn’t connected', 'Connect Google Drive in Settings, or keep this event’s originals in Frameline.')
+    if (drive?.status === 'ok' && (input.originalsIn === 'drive' || drive.def)) row.originalsIn = 'drive'
+  }
   await db.batch([
     db.insert(schema.events).values(row),
     db.insert(schema.albums).values({ id: `${id}_guest`, eventId: id, studioId, name: 'Guest uploads', order: 99, photoCount: 0, kind: 'guest', createdAt: now }),

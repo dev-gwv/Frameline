@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Droplet, HardDrive, MoreHorizontal, Palette, Plus, ShoppingBag, Tag, Trash2, Upload, UserCog } from 'lucide-react'
+import { Droplet, ExternalLink, FolderOpen, HardDrive, MoreHorizontal, Palette, Plus, ShoppingBag, Tag, Trash2, Upload, UserCog } from 'lucide-react'
 import { fmt, type EventHost, type HostAccess } from '@frameline/shared'
 import { Avatar, Button, Chip, ConfirmDialog, Meter, Modal, SettingRow, Skeleton, Toggle, Menu, useToast } from '@frameline/ui'
 import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
+import { GoogleDriveIcon, driveFolderUrl } from '../../lib/drive'
 import { useDrive, usePrices, useStoreSettings } from '../../lib/queries'
+import { useModalParam } from '../../lib/url'
 import { PriceRows, pricesValid } from '../sell/Prices'
 import { AddHostModal } from './HostModal'
 import { SettingsCard, TextLink, ToggleRow, type CardProps } from './parts'
@@ -207,7 +209,8 @@ export function StorageCard({ event }: CardProps) {
   const api = useApi()
   const navigate = useNavigate()
   const toast = useToast()
-  const { drive: available } = useServerFeatures()
+  const { drive: available, driveImport } = useServerFeatures()
+  const m = useModalParam()
   const drive = useDrive(available)
   const [saving, setSaving] = useState(false)
   if (!available) return null
@@ -219,7 +222,7 @@ export function StorageCard({ event }: CardProps) {
     try { await api.setOriginalsIn(event.id, v ? 'drive' : 'frameline') } catch (e) { toast.error('Couldn’t change it', errorMessage(e)) } finally { setSaving(false) }
   }
   return (
-    <SettingsCard id="storage" title="Full-size photos">
+    <SettingsCard id="storage" title="Google Drive">
       {ready ? (
         <SettingRow
           icon={<HardDrive size={15} />} title="Keep originals in Google Drive"
@@ -236,6 +239,14 @@ export function StorageCard({ event }: CardProps) {
             : 'Connect your Google Drive to keep this event’s full-size photos there instead.'}
           control={<Button size="sm" className="max-sm:h-10" onClick={() => navigate('/settings/drive')}>{d?.status === 'revoked' ? 'Reconnect' : 'Connect'}</Button>}
         />
+      )}
+      {ready && event.driveFolderId && (
+        <SettingRow icon={<FolderOpen size={15} />} title="This event’s folder in Drive" description="Full-size photos uploaded while this was on, one subfolder per album."
+          control={<a href={driveFolderUrl(event.driveFolderId)} target="_blank" rel="noreferrer"><Button size="sm" className="max-sm:h-10" icon={<ExternalLink size={13} />}>Open</Button></a>} />
+      )}
+      {driveImport && (
+        <SettingRow icon={<GoogleDriveIcon size={15} />} title="Import from Google Drive" description="Bring in a finished shoot. Each folder becomes an album."
+          control={<Button size="sm" className="max-sm:h-10" onClick={() => m.open('import')}>Import</Button>} />
       )}
     </SettingsCard>
   )

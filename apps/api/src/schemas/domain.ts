@@ -144,6 +144,8 @@ export const PhotoEvent = z.object({
   deletedAt: z.string().optional(),
   /** Where new full-size files go: Frameline's storage, or the studio's connected Google Drive. */
   originalsIn: z.enum(['frameline', 'drive']).optional(),
+  /** The event's folder in the studio's Drive (Frameline → event), once the first Drive upload made it. */
+  driveFolderId: z.string().optional(),
 }).openapi('PhotoEvent')
 
 export const NewEventInput = z.object({
@@ -154,6 +156,7 @@ export const NewEventInput = z.object({
   preset: PresetId,
   host: z.object({ email: z.email().max(254), phone: z.string().max(40).optional() }).optional(),
   guestUploadLimit: z.number().int().min(0).max(100_000).default(300),
+  originalsIn: z.enum(['frameline', 'drive']).optional().openapi({ description: 'Where full-size files go. Default: the studio’s Google Drive setting. "drive" needs a working Drive connection.' }),
 }).strict().openapi('NewEventInput')
 
 // photoLimit, expiresAt and plan are not editable: they change only by paying (packs, renewals, plan changes).
@@ -198,6 +201,8 @@ export const Photo = z.object({
   reviewStatus: z.enum(['pending', 'approved', 'rejected']).optional(), enhancedFrom: z.string().optional(),
   quality: z.enum(['web', 'original']), views: z.number().int(), rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]),
   deletedAt: z.string().optional(),
+  driveFileId: z.string().optional().openapi({ description: 'Studio only: the original is kept in (or was imported from) this file in the studio’s Google Drive.' }),
+  originalInDrive: z.boolean().optional().openapi({ description: 'Studio only: the full-size file lives in the studio’s Google Drive, not in Frameline.' }),
 }).openapi('Photo')
 
 export const Person = z.object({ id: Id, eventId: Id, name: z.string().optional(), photoCount: z.number().int(), tone: Tone }).openapi('Person')

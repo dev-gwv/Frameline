@@ -54,6 +54,7 @@ export function eventOut(r: Row<typeof s.events>): PhotoEvent {
     status: r.status, photoCount: r.photoCount, photoLimit: r.photoLimit, visits: r.visits, faceMatches: r.faceMatches,
     expiresAt: r.expiresAt, createdAt: r.createdAt, coverTones: r.coverTones, settings: withSettingsDefaults(r.settings), hosts: r.hosts.map(hostOut),
     highlights: r.highlights, plan: r.plan, coverPhotoId: opt(r.coverPhotoId), deletedAt: opt(r.deletedAt), originalsIn: r.originalsIn,
+    driveFolderId: opt(r.driveFolderId),
   }
 }
 

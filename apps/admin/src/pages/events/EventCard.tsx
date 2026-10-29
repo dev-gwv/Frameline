@@ -1,15 +1,20 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Archive, ArchiveRestore, CalendarDays, CreditCard, ImageIcon, Link2, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
 import { fmt, type PhotoEvent } from '@frameline/shared'
 import { CoverMosaic, EventStatusChip, Menu, Skeleton, type MenuItem } from '@frameline/ui'
+import { useServerFeatures } from '../../lib/api'
+import { GoogleDriveIcon } from '../../lib/drive'
 import { daysLeft, photoLine } from './lib'
 import type { EventActions } from './useEventActions'
 
 /** The event card used on Events and Home: cover, status, name, date · city, photo count, ⋯ menu. */
 export function EventCard({ event: e, actions }: { event: PhotoEvent; actions: EventActions }) {
+  const navigate = useNavigate()
+  const { drive, driveImport } = useServerFeatures()
   const archived = e.status === 'archived'
   const items: (MenuItem | 'separator')[] = [
     { label: 'Share', icon: <Share2 size={14} />, onSelect: () => actions.share(e) },
+    ...(driveImport && !archived ? [{ label: 'Import from Google Drive', icon: <GoogleDriveIcon size={14} />, onSelect: () => navigate(`/events/${e.id}?modal=import`) }] : []),
     { label: 'Copy link', icon: <Link2 size={14} />, onSelect: () => actions.copyLink(e) },
     { label: 'Rename or change date', icon: <CalendarDays size={14} />, onSelect: () => actions.edit(e) },
     { label: 'Renew', icon: <CreditCard size={14} />, onSelect: () => actions.renew(e) },
@@ -36,7 +41,10 @@ export function EventCard({ event: e, actions }: { event: PhotoEvent; actions: E
           } />
         </div>
         <div className="truncate text-[12.5px] text-ink-2">{fmt.date(e.date)} · {e.city}</div>
-        <div className="mt-1.5 text-[12px] text-ink-3 tnum">{photoLine(e)}</div>
+        <div className="mt-1.5 flex items-center gap-1.5 text-[12px] text-ink-3 tnum">
+          <span className="truncate">{photoLine(e)}</span>
+          {drive && e.originalsIn === 'drive' && <span className="ml-auto inline-flex shrink-0 items-center gap-1" title="Full-size photos are kept in your Google Drive"><GoogleDriveIcon size={12} />Drive</span>}
+        </div>
       </div>
     </article>
   )

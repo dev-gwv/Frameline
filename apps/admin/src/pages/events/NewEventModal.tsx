@@ -2,9 +2,10 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronDown, Info, Mail, Phone } from 'lucide-react'
 import { DEMO_NOW, EVENT_TYPES, fmt, type EventType } from '@frameline/shared'
-import { Button, Field, Input, Modal, Select, cn } from '@frameline/ui'
-import { useApi } from '../../lib/api'
-import { useAction, useUsage } from '../../lib/queries'
+import { Button, Field, Input, Modal, Select, Toggle, cn } from '@frameline/ui'
+import { useApi, useServerFeatures } from '../../lib/api'
+import { GoogleDriveIcon } from '../../lib/drive'
+import { useAction, useDrive, useUsage } from '../../lib/queries'
 import { useParamState } from '../../lib/url'
 import { EventBasics, validateBasics, type EventBasicsValue } from './EventBasics'
 import { EMAIL_RE, guessType, PHONE_RE, toDateInput } from './lib'
@@ -34,10 +35,16 @@ export function NewEventModal() {
   const [params, setParams] = useParamState()
   const open = params.get('new') === '1'
   const usage = useUsage().data
+  const server = useServerFeatures()
+  const drive = useDrive(server.drive && open).data
+  const driveReady = !!drive?.connected && drive.status !== 'revoked'
   const [f, setF] = useState<Form>(initial)
   const [touched, setTouched] = useState(false)
   const [more, setMore] = useState(false)
+  // Where full-size files go: starts at the studio's default (Settings → Google Drive).
+  const [inDrive, setInDrive] = useState(false)
   useEffect(() => { if (open) { setF(initial()); setTouched(false); setMore(false) } }, [open])
+  useEffect(() => { if (open) setInDrive(driveReady && !!drive?.defaultForNewEvents) }, [open, driveReady, drive?.defaultForNewEvents])
 
   const close = () => setParams({ new: undefined })
   const errors = validate(f)
@@ -48,6 +55,7 @@ export function NewEventModal() {
     name: f.name.trim(), date: f.date, city: f.city.trim(), type: f.typeTouched ? f.type : guessType(f.name, f.preset), preset: f.preset,
     host: f.hostEmail.trim() ? { email: f.hostEmail.trim(), phone: f.hostPhone.trim() || undefined } : undefined,
     guestUploadLimit: Number(f.guestLimit),
+    ...(driveReady ? { originalsIn: inDrive ? 'drive' as const : 'frameline' as const } : {}),
   }), {
     success: (ev) => `${ev.name} created`,
     onSuccess: (ev) => navigate(`/events/${ev.id}`),
@@ -97,6 +105,17 @@ export function NewEventModal() {
                 value={f.guestLimit} onChange={(e) => patch({ guestLimit: e.target.value })} />
             </Field>
           </div>
+        )}
+
+        {driveReady && (
+          <label className="flex items-center gap-3 rounded-[10px] border border-line px-3.5 py-2.5">
+            <GoogleDriveIcon size={18} className="shrink-0" />
+            <span className="min-w-0 flex-1">
+              <b className="block text-[13.5px]">Keep full-size photos in Google Drive</b>
+              <span className="text-[12.5px] text-ink-2">{inDrive ? `In ${drive!.email}’s Drive, under Frameline → this event. Frameline keeps a 2048 px copy for the gallery.` : 'Off: Frameline keeps the full-size files.'}</span>
+            </span>
+            <Toggle label="Keep full-size photos in Google Drive" checked={inDrive} onCheckedChange={setInDrive} />
+          </label>
         )}
 
         {left === null ? null : left > 0 ? (

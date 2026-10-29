@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react'
 import { Link, NavLink, Outlet, useMatch, useNavigate, useOutletContext, useParams } from 'react-router-dom'
-import { Archive, Eye, Film, HardDriveDownload, MoreHorizontal, ScanFace, Share2, Upload } from 'lucide-react'
+import { Archive, Eye, Film, MoreHorizontal, ScanFace, Share2, Upload } from 'lucide-react'
 import { fmt, type EventStats, type PhotoEvent } from '@frameline/shared'
 import { Button, CountBadge, EventStatusChip, Menu, Skeleton, cn, useToast } from '@frameline/ui'
 import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { useDrive, useEvent, useEventStats, useGuestsAttention } from '../../lib/queries'
 import { BackLink, galleryUrl, useModalParam } from '../../lib/url'
+import { GoogleDriveIcon } from '../../lib/drive'
 import { EventModals } from '../workspace/EventModals'
 import { QueryError } from '../system'
 
@@ -100,7 +101,6 @@ function EventHeader({ event }: { event: PhotoEvent }) {
               width={300}
               items={[
                 { label: 'Preview as a guest', description: 'Opens the gallery in a new tab', icon: <Eye size={16} />, onSelect: () => window.open(galleryUrl(event.shortId), '_blank', 'noopener') },
-                ...(driveImport ? [{ label: 'Import from Google Drive', description: 'Bring in a finished shoot', icon: <HardDriveDownload size={16} />, onSelect: () => m.open('import') }] : []),
                 { label: 'Films', description: 'Add YouTube videos to the gallery', icon: <Film size={16} />, onSelect: () => m.open('films') },
                 ...(ai ? [{ label: 'Face finding', description: !event.settings.faceSearch ? 'Off for this event' : finding ? finding[0].toUpperCase() + finding.slice(1) : `${fmt.count(stats?.faces.total ?? event.photoCount)} photos done`, icon: <ScanFace size={16} />, onSelect: () => m.open('faces') }] : []),
                 'separator',
@@ -111,6 +111,7 @@ function EventHeader({ event }: { event: PhotoEvent }) {
               trigger={<Button variant="ghost" size="icon" aria-label="More event actions" className="max-sm:h-11 max-sm:w-11"><MoreHorizontal size={18} /></Button>}
             />
             <Button icon={<Upload size={15} />} onClick={() => m.open('upload')} className="max-sm:h-11 max-sm:flex-1">Upload</Button>
+            {driveImport && <Button icon={<GoogleDriveIcon size={15} />} onClick={() => m.open('import')} aria-label="Import from Google Drive" title="Import from Google Drive" className="max-sm:h-11 max-sm:flex-1"><span className="max-[420px]:hidden">From </span>Drive</Button>}
             <Button variant="primary" icon={<Share2 size={15} />} onClick={() => m.open('share', { tab: 'link' })} className="max-sm:h-11 max-sm:flex-1">Share</Button>
           </div>
         </div>

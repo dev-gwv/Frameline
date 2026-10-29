@@ -3,17 +3,21 @@ import { useNavigate } from 'react-router-dom'
 import { CalendarPlus, ChevronRight, Plus, Search } from 'lucide-react'
 import { fmt, type PhotoEvent } from '@frameline/shared'
 import { Button, CoverMosaic, EmptyState, EventStatusChip, Input, Modal, Skeleton } from '@frameline/ui'
+import { useServerFeatures } from '../../lib/api'
 import { useParamState } from '../../lib/url'
 import { daysLeft, matchesQuery, photoLine, recentFirst } from '../events/lib'
 
 /**
- * "Upload photos to…": which event? Opens with `?upload=1` (Home's Upload photos, search). Live and
- * uploading events first; picking one opens that event's upload dialog.
+ * "Upload photos to…": which event? Opens with `?upload=1` (Home's Upload photos, search), or `?upload=drive`
+ * ("Import from Google Drive to…"). Live and uploading events first; picking one opens that event's upload or
+ * import dialog.
  */
 export function UploadPicker({ events, loading }: { events: PhotoEvent[]; loading: boolean }) {
   const navigate = useNavigate()
   const [params, set] = useParamState()
-  const open = params.get('upload') === '1'
+  const { driveImport } = useServerFeatures()
+  const drive = params.get('upload') === 'drive' && driveImport
+  const open = params.get('upload') === '1' || drive
   const [q, setQ] = useState('')
   useEffect(() => { if (open) setQ('') }, [open])
 
@@ -23,7 +27,7 @@ export function UploadPicker({ events, loading }: { events: PhotoEvent[]; loadin
   const newEvent = () => set({ upload: undefined, new: '1' })
 
   return (
-    <Modal open={open} onOpenChange={(v) => !v && close()} title="Upload photos to…" width={480}
+    <Modal open={open} onOpenChange={(v) => !v && close()} title={drive ? 'Import from Google Drive to…' : 'Upload photos to…'} width={480}
       footer={all.length > 0 ? (
         <button type="button" onClick={newEvent} className="mr-auto inline-flex min-h-[38px] items-center gap-1.5 text-[13px] font-bold text-accent-text hover:underline">
           <Plus size={14} aria-hidden />New event instead
@@ -44,7 +48,7 @@ export function UploadPicker({ events, loading }: { events: PhotoEvent[]; loadin
             <ul className="-mx-2 flex flex-col">
               {shown.map((e) => (
                 <li key={e.id}>
-                  <button type="button" onClick={() => navigate(`/events/${e.id}?modal=upload`)}
+                  <button type="button" onClick={() => navigate(`/events/${e.id}?modal=${drive ? 'import' : 'upload'}`)}
                     className="flex min-h-[52px] w-full items-center gap-3 rounded-control px-2 py-1.5 text-left hover:bg-sunk">
                     <CoverMosaic tones={e.coverTones} className="h-[38px] w-[54px] shrink-0 overflow-hidden rounded-md" empty={e.photoCount === 0 ? ' ' : undefined} />
                     <span className="min-w-0 flex-1">

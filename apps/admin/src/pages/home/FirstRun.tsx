@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { CalendarPlus, ExternalLink, ImageIcon, Play, Share2, Upload } from 'lucide-react'
 import { fmt, type PhotoEvent, type Studio, type WatermarkSettings } from '@frameline/shared'
 import { Button, Card, ChecklistSteps, CoverMosaic, EventStatusChip, IconTile, Modal, useToast } from '@frameline/ui'
-import { useApi } from '../../lib/api'
-import { useAction } from '../../lib/queries'
+import { useApi, useServerFeatures } from '../../lib/api'
+import { useAuth } from '../../lib/auth'
+import { GoogleDriveIcon } from '../../lib/drive'
+import { useAction, useDrive } from '../../lib/queries'
 import { useParamState } from '../../lib/url'
 import { daysLeft, recentFirst } from '../events/lib'
 
@@ -18,6 +20,7 @@ export function focusEvent(events: PhotoEvent[]) {
 export function NextStepCard({ event }: { event?: PhotoEvent }) {
   const navigate = useNavigate()
   const [, set] = useParamState()
+  const { driveImport } = useServerFeatures()
   if (!event) {
     return (
       <Card padded={false} className="grid overflow-hidden sm:grid-cols-[200px_1fr]">
@@ -45,8 +48,11 @@ export function NextStepCard({ event }: { event?: PhotoEvent }) {
         </p>
         <div className="flex w-full flex-wrap gap-2">
           {empty
-            ? <Button variant="primary" className="max-sm:h-[46px] max-sm:flex-1" icon={<Upload size={15} />} onClick={() => navigate(`/events/${event.id}?modal=upload`)}>Add photos</Button>
-            : <Button variant="primary" className="max-sm:h-[46px] max-sm:flex-1" icon={<Share2 size={15} />} onClick={() => navigate(`/events/${event.id}?modal=share`)}>Share with guests</Button>}
+            ? <>
+                <Button variant="primary" className="max-sm:h-[46px] max-sm:flex-1" icon={<Upload size={15} />} onClick={() => navigate(`/events/${event.id}?modal=upload`)}>Add photos</Button>
+                {driveImport && <Button className="max-sm:h-[46px] max-sm:flex-1" icon={<GoogleDriveIcon size={15} />} onClick={() => navigate(`/events/${event.id}?modal=import`)}>From Google Drive</Button>}
+              </>
+            :<Button variant="primary" className="max-sm:h-[46px] max-sm:flex-1" icon={<Share2 size={15} />} onClick={() => navigate(`/events/${event.id}?modal=share`)}>Share with guests</Button>}
           <Button variant="ghost" className="max-sm:h-[46px]" onClick={() => navigate(`/events/${event.id}`)}>Open event</Button>
         </div>
       </div>
@@ -61,10 +67,16 @@ export function GettingStarted({ studio, events, watermark, event }: { studio?: 
   const hasPhotos = events.some((e) => e.photoCount > 0)
   const wmDone = !!watermark && (watermark.mode === 'logo' || !!watermark.text.trim()) && watermark.applyTo.previews
   const act = (label: string, onClick: () => void) => <Button size="sm" className="max-sm:h-10" onClick={onClick}>{label}</Button>
+  // Google Drive: only the owner connects it, and only when the server has it set up.
+  const { user } = useAuth()
+  const server = useServerFeatures()
+  const owner = !user || user.role === 'owner'
+  const drive = useDrive(server.drive && owner).data
   return (
     <Card>
       <ChecklistSteps title="Getting started" steps={[
         { id: 'studio', title: 'Set up your studio', done: !!studio?.name.trim() && !!studio.handle, action: act('Set up', () => navigate('/setup')) },
+        ...(server.drive && owner ? [{ id: 'drive', title: 'Connect Google Drive (optional)', done: !!drive?.connected && drive.status !== 'revoked', action: act('Connect', () => navigate('/settings/drive')) }] : []),
         { id: 'event', title: 'Create your first event', done: events.length > 0, action: act('New event', () => set({ new: '1' })) },
         { id: 'photos', title: 'Add photos', done: hasPhotos, action: act('Add', () => (event ? navigate(`/events/${event.id}?modal=upload`) : set({ upload: '1' }))) },
         { id: 'share', title: 'Share with guests', done: false, action: event && hasPhotos ? act('Share', () => navigate(`/events/${event.id}?modal=share`)) : undefined },

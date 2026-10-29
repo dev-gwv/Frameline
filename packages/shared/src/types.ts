@@ -148,6 +148,8 @@ export interface PhotoEvent {
   deletedAt?: string
   /** Where new full-size files go: Frameline's storage (default) or the studio's Google Drive (setOriginalsIn). */
   originalsIn?: 'frameline' | 'drive'
+  /** The event's folder in the studio's Drive (Frameline → event), once the first upload to Drive made it. */
+  driveFolderId?: string
 }
 
 export interface Album {
@@ -209,6 +211,10 @@ export interface Photo {
   rotation: PhotoRotation
   /** Set while the photo is in the trash (deletePhotos); restorePhotos brings it back, purged after TRASH_DAYS. */
   deletedAt?: string
+  /** Studio only: the file in the studio's Google Drive this photo was imported from or uploaded to. */
+  driveFileId?: string
+  /** Studio only: the full-size file is kept in the studio's Google Drive (the event keeps originals there). */
+  originalInDrive?: boolean
 }
 
 export type ReviewStatus = 'pending' | 'approved' | 'rejected'

@@ -11,7 +11,7 @@ import { UploadModal } from './UploadModal'
 
 /**
  * Event-level modals, mounted once by EventLayout so they open from every event tab and from deep links:
- * `?modal=share[&tab=link|qr|message|special]`, `?modal=upload[&album=<id>]`, `?modal=import`, `?modal=films`, `?modal=faces`.
+ * `?modal=share[&tab=link|qr|message|special]`, `?modal=upload[&album=<id>]`, `?modal=import[&tab=running|past][&album=<id>]`, `?modal=films`, `?modal=faces`.
  */
 export function EventModals({ event }: { event: PhotoEvent }) {
   const m = useModalParam()
@@ -19,14 +19,16 @@ export function EventModals({ event }: { event: PhotoEvent }) {
   const is = (name: string) => m.modal === name
   const albumId = m.params.get('album') ?? undefined
   // Face finding needs the image processor: no modal while the AI features are off, even from an old link.
-  const { ai } = useServerFeatures()
+  const { ai, driveImport } = useServerFeatures()
 
   return (
     <>
       <ShareModal open={is('share')} onOpenChange={(v) => !v && m.close()} event={event} albums={albums}
         tab={parseShareTab(m.params.get('tab'))} onTab={(t) => m.set({ tab: t }, true)} />
-      <UploadModal open={is('upload')} onOpenChange={(v) => !v && m.close()} event={event} albums={albums} albumId={albumId} />
-      <ImportModal open={is('import')} onOpenChange={(v) => !v && m.close()} event={event} albums={albums} />
+      <UploadModal open={is('upload')} onOpenChange={(v) => !v && m.close()} event={event} albums={albums} albumId={albumId}
+        onDrive={driveImport ? () => m.open('import') : undefined} />
+      <ImportModal open={is('import')} onOpenChange={(v) => !v && m.close()} event={event} albums={albums}
+        initialTab={m.params.get('tab')} albumId={albumId} />
       <FilmsModal eventId={event.id} open={is('films')} onOpenChange={(v) => !v && m.close()} />
       <FacesModal event={event} open={ai && is('faces')} onOpenChange={(v) => !v && m.close()} />
     </>

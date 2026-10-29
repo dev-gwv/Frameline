@@ -2,7 +2,9 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronRight, Plus, Upload } from 'lucide-react'
 import { Button, EmptyState, Page, Skeleton } from '@frameline/ui'
+import { useServerFeatures } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
+import { GoogleDriveIcon } from '../../lib/drive'
 import { useEvents, useStudio, useWatermark } from '../../lib/queries'
 import { useParamState } from '../../lib/url'
 import { useUploads } from '../../layout/UploadDock'
@@ -20,7 +22,7 @@ import { firstName, greeting, statusSentence } from './stats'
 /**
  * Home answers one question: what do I do next? Greeting + status, your events, Needs you, and three
  * small cards. A studio that hasn't shared anything yet gets the first-run version instead.
- * Deep links: /?upload=1 (upload picker), /?new=1 (New event).
+ * Deep links: /?upload=1 (upload picker), /?upload=drive (Drive import picker), /?new=1 (New event).
  */
 export default function Home() {
   const { user } = useAuth()
@@ -29,6 +31,7 @@ export default function Home() {
   const events = useEvents()
   const watermark = useWatermark()
   const { jobs } = useUploads()
+  const { driveImport } = useServerFeatures()
   const list = useMemo(() => events.data ?? [], [events.data])
   const { actions, dialogs } = useEventActions(list)
 
@@ -73,6 +76,7 @@ export default function Home() {
       subtitle={events.data ? statusSentence(list, uploadingIds) : <Skeleton className="mt-1 h-4 w-72 max-w-full" />}
       actions={<>
         <Button icon={<Upload size={15} />} className="max-sm:h-[46px] max-sm:flex-1" onClick={() => set({ upload: '1' })}>Upload photos</Button>
+        {driveImport && <Button icon={<GoogleDriveIcon size={15} />} className="max-sm:h-[46px]" title="Import from Google Drive" onClick={() => set({ upload: 'drive' })}><span className="max-sm:hidden">Import from </span>Drive</Button>}
         <Button variant="primary" icon={<Plus size={15} />} className="max-sm:h-[46px] max-sm:flex-1" onClick={() => set({ new: '1' })}>New event</Button>
       </>}>
       <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_330px]">

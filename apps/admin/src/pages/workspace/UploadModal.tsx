@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ChevronDown, ChevronLeft, ImagePlus, Upload } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ImagePlus, Upload } from 'lucide-react'
 import { PACKS, fmt, type Album, type ID, type Photo, type PhotoEvent, type UploadFile } from '@frameline/shared'
 import { Button, Field, Meter, Modal, PhotoTile, RadioCardGroup, Select, Toggle, cn, useToast } from '@frameline/ui'
 import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
+import { GoogleDriveIcon } from '../../lib/drive'
 import { useUsage, useWalletBalance, useWatermark } from '../../lib/queries'
 import { useUploads } from '../../layout/UploadDock'
 import { liveUrl, objectUrl, photosLabel } from './lib'
@@ -14,7 +15,7 @@ const MAX_BYTES = 200 * 1024 * 1024
 const POS: Record<string, string> = { tl: 'top left', tr: 'top right', bl: 'bottom left', br: 'bottom right' }
 const DEFAULT_ALBUM = 'Photos'
 
-interface Props { open: boolean; onOpenChange: (v: boolean) => void; event: PhotoEvent; albums: Album[]; albumId?: ID }
+interface Props { open: boolean; onOpenChange: (v: boolean) => void; event: PhotoEvent; albums: Album[]; albumId?: ID; onDrive?: () => void }
 interface Dup { file: File; index: number; existing?: Photo; twin?: File }
 type View = 'options' | 'review' | 'full'
 
@@ -23,7 +24,7 @@ type View = 'options' | 'review' | 'full'
  * deep duplicate check). Duplicates are skipped (Review shows them side by side), files over 200 MB are left out.
  * When the batch won't fit the event, the "Not enough space" choice replaces the options.
  */
-export function UploadModal({ open, onOpenChange, event, albums, albumId }: Props) {
+export function UploadModal({ open, onOpenChange, event, albums, albumId, onDrive }: Props) {
   const api = useApi()
   const toast = useToast()
   const { start } = useUploads()
@@ -146,7 +147,19 @@ export function UploadModal({ open, onOpenChange, event, albums, albumId }: Prop
           <span className="text-[13px] text-ink-2">Or drop them anywhere on the event’s Photos tab.</span>
           <span className="mt-1 inline-flex h-[38px] items-center rounded-control bg-gold px-4 text-[13.5px] font-bold text-accent-ink">Choose photos</span>
         </button>
-      ) : view === 'review' ? (
+      ) : null}
+      {!files.length && onDrive && (
+        <button type="button" onClick={onDrive}
+          className="flex w-full items-center gap-3 rounded-[12px] border border-line px-4 py-3 text-left hover:border-accent hover:bg-sunk">
+          <GoogleDriveIcon size={22} />
+          <span className="min-w-0 flex-1">
+            <b className="block text-[14px]">Import from Google Drive</b>
+            <span className="text-[12.5px] text-ink-2">Pick folders in your Drive; each one becomes an album. Nothing to download first.</span>
+          </span>
+          <ChevronRight size={16} className="shrink-0 text-ink-3" aria-hidden />
+        </button>
+      )}
+      {!files.length ? null : view === 'review' ? (
         <DupReview dups={dups} uploadDups={uploadDups} onUploadDups={setUploadDups} />
       ) : (
         <>

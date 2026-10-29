@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CheckCircle2, ChevronDown, CircleSlash, Folder, HardDriveDownload, Image as ImageIcon, XCircle } from 'lucide-react'
 import { SAMPLE_DRIVE, fmt, type Album, type DriveExpandResult, type DriveImportInput, type PhotoEvent } from '@frameline/shared'
 import { Button, Chip, EmptyState, Meter, Modal, RadioCardGroup, TabBar, Toggle, cn, useToast } from '@frameline/ui'
 import { errorMessage, useApi } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
+import { GoogleDriveIcon, startDriveConnect } from '../../lib/drive'
 import { useAction, useDrive, useDriveImports } from '../../lib/queries'
 import { pickFromDrive } from './drivePicker'
 import { photosLabel } from './lib'
@@ -18,13 +19,21 @@ const LOOSE = ''
  * renameable), choose Standard or Original, import. The server copies the files; imports keep going after the
  * modal closes (Running / Past tabs). Sample data shows a stand-in picker (SAMPLE_DRIVE).
  */
-export function ImportModal({ open, onOpenChange, event, albums }: { open: boolean; onOpenChange: (v: boolean) => void; event: PhotoEvent; albums: Album[] }) {
+export function ImportModal({ open, onOpenChange, event, albums, initialTab, albumId }: {
+  open: boolean; onOpenChange: (v: boolean) => void; event: PhotoEvent; albums: Album[]
+  /** `?tab=running|past` (the import strip's Details opens Running). */
+  initialTab?: string | null
+  /** The album being looked at: photos picked one by one go into it, not a new "From Google Drive" album. */
+  albumId?: string
+}) {
   const api = useApi()
   const toast = useToast()
   const { user } = useAuth()
   const drive = useDrive(open)
   const imports = useDriveImports(event.id, open)
   const [tab, setTab] = useState<Tab>('new')
+  useEffect(() => { if (open) setTab(initialTab === 'running' || initialTab === 'past' ? initialTab : 'new') }, [open, initialTab])
+  const into = albums.find((a) => a.id === albumId && a.kind === 'album')
   const [picked, setPicked] = useState<DriveExpandResult | null>(null)
   const [choosing, setChoosing] = useState(false)
   const [sample, setSample] = useState<string[] | null>(null)
@@ -62,7 +71,7 @@ export function ImportModal({ open, onOpenChange, event, albums }: { open: boole
       if (!it.importable) continue
       const path = it.folderPath ?? LOOSE
       const key = path === LOOSE ? LOOSE : merge ? path.split('/')[0] : path
-      const g = map.get(key) ?? { key, label: key === LOOSE ? 'Photos you picked' : key, target: key === LOOSE ? 'From Google Drive' : key.split('/').join(' – ').slice(0, 120), count: 0 }
+      const g = map.get(key) ?? { key, label: key === LOOSE ? 'Photos you picked' : key, target: key === LOOSE ? into?.name ?? 'From Google Drive' : key.split('/').join(' – ').slice(0, 120), count: 0 }
       g.count++
       map.set(key, g)
     }
@@ -71,7 +80,7 @@ export function ImportModal({ open, onOpenChange, event, albums }: { open: boole
       const existing = regular.find((a) => a.name.toLowerCase() === name.toLowerCase())
       return { ...g, target: existing?.name ?? name, albumId: existing?.id }
     })
-  }, [picked, merge, names, regular])
+  }, [picked, merge, names, regular, into])
   const skipped = (picked?.items ?? []).filter((i) => !i.importable)
   const reasons = [...skipped.reduce((m, i) => m.set(i.reason ?? 'Not a photo', (m.get(i.reason ?? 'Not a photo') ?? 0) + 1), new Map<string, number>())]
   const toImport = groups.reduce((n, g) => n + g.count, 0)
@@ -94,6 +103,19 @@ export function ImportModal({ open, onOpenChange, event, albums }: { open: boole
 
   const d = drive.data
   const notReady = d && (!d.connected || d.status === 'revoked')
+  const owner = !user || user.role === 'owner'
+  const [connecting, setConnecting] = useState(false)
+  const connect = async () => {
+    setConnecting(true)
+    try {
+      // Google sends the studio back to Settings, which returns them to this window.
+      if (await startDriveConnect(() => api.connectDrive(), `/events/${event.id}?modal=import`)) { await drive.refetch(); toast.success('Google Drive connected') }
+    } catch (e) {
+      toast.error('Couldn’t start connecting', errorMessage(e))
+    } finally {
+      setConnecting(false)
+    }
+  }
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="Import from Google Drive" width={620}
       footer={tab === 'new' && picked ? <>
@@ -107,18 +129,21 @@ export function ImportModal({ open, onOpenChange, event, albums }: { open: boole
       ]} />
 
       {tab === 'new' && notReady && (
-        <EmptyState icon={<HardDriveDownload size={22} />}
+        <EmptyState icon={<GoogleDriveIcon size={26} />}
           title={d.status === 'revoked' ? 'Reconnect Google Drive' : 'Connect Google Drive first'}
-          body={user?.role === 'owner' || !user ? 'It takes a minute, in Settings → Google Drive. Frameline only sees the files you pick.' : 'Ask the studio owner to connect it in Settings → Google Drive.'}
-          action={user?.role === 'owner' || !user ? <Link to="/settings/drive"><Button variant="primary">Open Settings → Google Drive</Button></Link> : undefined} />
+          body={owner ? 'It takes a minute: Google asks you to allow it, then you come back here. Frameline only sees the files you pick.' : 'Ask the studio owner to connect it in Settings → Google Drive.'}
+          action={owner ? <Button variant="primary" loading={connecting} onClick={() => void connect()}>{d.status === 'revoked' ? 'Reconnect Google Drive' : 'Connect Google Drive'}</Button> : undefined} />
       )}
 
       {tab === 'new' && !notReady && !picked && sample === null && (
         <div className="flex flex-col items-center gap-3 rounded-[10px] border border-dashed border-line-2 px-4 py-8 text-center">
-          <HardDriveDownload size={26} className="text-ink-3" />
+          <GoogleDriveIcon size={30} />
           <div>
             <b className="block text-[14px]">Pick folders or photos in your Drive</b>
-            <span className="text-[12.5px] text-ink-2">Each folder becomes an album. You can rename them before importing.</span>
+            <span className="text-[12.5px] text-ink-2">
+              Each folder becomes an album. You can rename them before importing.
+              {into && <> Photos you pick one by one go into <b className="text-ink">{into.name}</b>.</>}
+            </span>
           </div>
           <Button variant="primary" loading={choosing || drive.isLoading} onClick={() => void choose()}>Choose from Google Drive</Button>
         </div>

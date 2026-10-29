@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Download, Eye, Heart, ScanFace, Sparkles, Upload } from 'lucide-react'
+import { Download, ExternalLink, Eye, Heart, ScanFace, Sparkles, Upload } from 'lucide-react'
 import { DEMO_NOW, fmt, toneCss, type Album, type Person, type Photo, type PhotoEvent } from '@frameline/shared'
 import { cn } from '@frameline/ui'
 import { useServerFeatures } from '../../lib/api'
+import { GoogleDriveIcon, driveFileUrl } from '../../lib/drive'
 import { SOURCE_LABEL } from '../workspace/lib'
 
 type Tab = 'details' | 'people' | 'activity'
@@ -14,7 +15,7 @@ export function InfoPanel({ photo, album, people, personName }: {
 }) {
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('details')
-  const { ai } = useServerFeatures()
+  const { ai, drive } = useServerFeatures()
   const ids = [...new Set(photo.faces.map((f) => f.personId))]
   const inPhoto = ids.map((id) => people.find((p) => p.id === id)).filter(Boolean) as Person[]
   const original = photo.quality === 'original'
@@ -46,6 +47,15 @@ export function InfoPanel({ photo, album, people, personName }: {
                 <dd className="text-[14px] font-semibold tnum">{v}</dd>
               </div>
             ))}
+            {drive && (photo.originalInDrive || photo.driveFileId) && (
+              <div>
+                <dt className="text-[12px] text-side-ink-2">{photo.originalInDrive ? 'Full-size file' : 'Imported from'}</dt>
+                <dd className="flex flex-wrap items-center gap-x-2 text-[14px] font-semibold">
+                  <span className="inline-flex items-center gap-1.5"><GoogleDriveIcon size={14} />{photo.originalInDrive ? 'In your Google Drive' : 'Your Google Drive'}</span>
+                  {photo.driveFileId && <a href={driveFileUrl(photo.driveFileId)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12.5px] font-bold text-side-gold hover:underline">Open in Drive<ExternalLink size={12} aria-hidden /></a>}
+                </dd>
+              </div>
+            )}
             {ai && inPhoto.length > 0 && (
               <div>
                 <dt className="mb-1.5 text-[12px] text-side-ink-2">People in this photo</dt>

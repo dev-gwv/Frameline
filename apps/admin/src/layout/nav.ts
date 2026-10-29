@@ -1,5 +1,5 @@
 import {
-  BarChart3, CalendarDays, Camera, CreditCard, Droplet, House, LayoutGrid, LifeBuoy, Megaphone, QrCode, Settings2, ShoppingBag,
+  BarChart3, CalendarDays, Camera, CreditCard, Droplet, HardDrive, House, LayoutGrid, LifeBuoy, Megaphone, QrCode, Settings2, ShoppingBag,
   Smartphone, Trash2, Upload, UserRound, Users, WandSparkles, type LucideIcon,
 } from 'lucide-react'
 import { FEATURES } from '@frameline/shared'
@@ -29,6 +29,8 @@ export const PRIMARY_NAV: NavItem[] = [
 
 export const MORE_NAV: NavItem[] = [
   { to: '/watermark', label: 'Watermark', icon: Droplet, description: 'Your name or logo on photos', keywords: 'logo text copyright' },
+  // Shown only while the server has Google Drive set up (withDrive).
+  { to: '/settings/drive', label: 'Google Drive', icon: HardDrive, description: 'Import shoots, keep originals in your Drive', keywords: 'gdrive google storage originals connect folder import' },
   ...(FEATURES.cameraSync ? [{ to: '/camera-sync', label: 'Camera sync', icon: Camera, description: 'Photos from your camera while you shoot', keywords: 'ftp live tether wifi' }] : []),
   { to: '/qr', label: 'Smart QR', icon: QrCode, description: 'One printed QR code for every event', keywords: 'poster print scan' },
   ...(FEATURES.broadcasts ? [{ to: '/messages', label: 'Messages to guests', icon: Megaphone, description: 'Send news to people who follow you', keywords: 'broadcast push notification announce' }] : []),
@@ -90,6 +92,10 @@ export const ALL_PAGES: NavItem[] = [...PRIMARY_NAV, ...MORE_NAV, ...ACCOUNT_NAV
 /** Sell photos and its settings only while card/UPI payments work (server switch `payments`): guests can't buy without. */
 export const withSelling = <T extends { to: string | null }>(items: T[], payments: boolean): T[] =>
   payments ? items : items.filter((it) => !it.to?.startsWith('/sell'))
+
+/** The Google Drive page only while the server has Drive set up (server switch `drive`). */
+export const withDrive = <T extends { to: string | null }>(items: T[], drive: boolean): T[] =>
+  drive ? items : items.filter((it) => it.to !== '/settings/drive')
 
 /** True when `pathname` belongs to this nav item. */
 export function isActive(item: { to: string | null; match?: string[] }, pathname: string) {
