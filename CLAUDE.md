@@ -68,6 +68,11 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
   Studio AutoPilot reads the gallery back. Studio AutoPilot keeps a cached row (`project_galleries`, its 0261/0264)
   and rings "N photos are in the … gallery".
 - Galleries made from Studio AutoPilot: private-family preset with face privacy **off** and downloads **all**.
+- **Google Drive through Studio AutoPilot** (30 Oct): `GET .../studio` carries `drive` (available, importAvailable,
+  connected, needsReconnect, email, defaultForNewEvents, settingsPath); each gallery carries `originalsIn` and
+  `importPath` (`/events/:id?modal=import`); `POST .../events` takes `originalsIn` (409 `drive_not_connected` when
+  Drive isn't connected). Studio AutoPilot never rebuilds Drive: its buttons sign the person in (`sso` `to`) at the
+  import window or `/settings/drive`.
 
 ## Switches
 

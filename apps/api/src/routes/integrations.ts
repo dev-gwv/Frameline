@@ -12,6 +12,7 @@ import { STUDIO_AUTOPILOT, ensurePartnerStudio, ensurePartnerUser, link, linkedI
 import { emit } from '../services/realtime'
 import { effectiveSettings } from '../lib/features'
 import { issueSession } from '../services/sessions'
+import { driveConfigured, drivePickerOn, getConnection } from '../services/drive'
 
 /**
  * Studio AutoPilot, the studio-management app, opens Frameline as its gallery add-on.
@@ -21,7 +22,9 @@ import { issueSession } from '../services/sessions'
  * - POST /events     a project's "Create gallery": makes (once) the event for that project.
  * - GET  /events/:p  how that gallery is doing, for the project page.
  * - GET  /events     every gallery made for the company (Studio AutoPilot's Galleries list).
- * - GET  /studio     the joined Frameline studio: plan, wallet, photos used (Studio AutoPilot's settings).
+ * - GET  /studio     the joined Frameline studio: plan, wallet, photos used, Google Drive (Studio AutoPilot's settings).
+ * Google Drive itself (connect, import, originals in Drive) is done in Frameline's admin, reached through /sso with
+ * the paths these answers give (`importPath`, `drive.settingsPath`).
  * And one door the other way: services/partner-notify.ts tells Studio AutoPilot when a gallery changed.
  *
  * Billing stays Frameline's: a studio made here starts on the same trial as any other and pays from its wallet.
@@ -101,7 +104,11 @@ const Gallery = z.object({
   visits: z.number().int(),
   /** Signed-up guests; only on the single-gallery read. */
   guests: z.number().int().optional(),
+  /** Where new full-size files go: Frameline, or the studio's Google Drive. */
+  originalsIn: z.enum(['frameline', 'drive']),
   adminPath: z.string(),
+  /** The admin page that imports from Google Drive into this gallery (an sso `to`). */
+  importPath: z.string(),
   createdAt: z.string(),
 }).openapi('PartnerGallery')
 
@@ -115,7 +122,8 @@ const galleryFrom = (c: Context<AppEnv>, projectId: string, e: EventRow) => ({
   facePrivacy: e.settings.facePrivacy && e.settings.faceSearch,
   expiresAt: e.expiresAt,
   visits: (e.visits?.web ?? 0) + (e.visits?.android ?? 0) + (e.visits?.ios ?? 0),
-  adminPath: `/events/${e.id}`, createdAt: e.createdAt,
+  originalsIn: e.originalsIn,
+  adminPath: `/events/${e.id}`, importPath: `/events/${e.id}?modal=import`, createdAt: e.createdAt,
 })
 
 async function linkedEvent(c: Context<AppEnv>, claims: PartnerClaims, projectId: string): Promise<EventRow | null> {
@@ -154,6 +162,7 @@ integrationRoutes.openapi(createRoute({
       date: z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'Must be an ISO-8601 date'),
       city: z.string().trim().max(120).default(''),
       type: z.enum(['wedding', 'engagement', 'couple', 'family', 'baby', 'birthday', 'corporate', 'school', 'sports', 'product', 'real-estate', 'themed', 'other']).default('wedding'),
+      originalsIn: z.enum(['frameline', 'drive']).optional().openapi({ description: 'Keep full-size photos in the studio\'s Google Drive. Unset: the studio\'s Drive default. "drive" without a working Drive connection is 409 drive_not_connected.' }),
     })),
   },
   responses: { 200: json(Gallery, 'Already made'), 201: json(Gallery, 'Made'), ...problems(401, 409, 422, 501) },
@@ -175,7 +184,7 @@ integrationRoutes.openapi(createRoute({
   }
   const made = await createEvent(db, studioId, {
     name: input.name, date: input.date, city: input.city, type: input.type, preset: 'private-family', guestUploadLimit: 300,
-    overrides: SA_GALLERY,
+    overrides: SA_GALLERY, originalsIn: input.originalsIn,
   })
   const winner = await link(db, 'event', key, made)
   // Two presses at once: the first to link wins, and the loser's empty event is removed again.
@@ -232,7 +241,32 @@ const PartnerStudio = z.object({
   photosLimit: z.number().int().nullable(),
   galleries: z.number().int(),
   adminUrl: z.string(),
+  /** Google Drive for this studio: whether Frameline offers it at all, and whether the studio connected it. */
+  drive: z.object({
+    available: z.boolean(),
+    /** Importing also needs Google's file picker. */
+    importAvailable: z.boolean(),
+    connected: z.boolean(),
+    /** Google no longer lets Frameline in: the owner has to connect again. */
+    needsReconnect: z.boolean(),
+    email: z.string().nullable(),
+    /** New galleries keep their full-size photos in Drive. */
+    defaultForNewEvents: z.boolean(),
+    /** The admin page to connect or manage Drive (an sso `to`). */
+    settingsPath: z.string(),
+  }),
 }).openapi('PartnerStudio')
+
+/** Drive as Studio AutoPilot shows it; a studio not set up here yet has no connection. */
+async function driveOut(c: Context<AppEnv>, studioId: string | null) {
+  const conn = studioId && driveConfigured(c.env) ? await getConnection(c.env, studioId) : null
+  return {
+    available: driveConfigured(c.env), importAvailable: drivePickerOn(c.env),
+    connected: !!conn && conn.status !== 'revoked', needsReconnect: conn?.status === 'revoked',
+    email: conn?.email ?? null, defaultForNewEvents: !!conn && conn.status !== 'revoked' && conn.defaultForNewEvents,
+    settingsPath: '/settings/drive',
+  }
+}
 
 integrationRoutes.openapi(createRoute({
   method: 'get', path: '/integrations/studioautopilot/studio', tags: ['Integrations'], summary: 'The Frameline studio joined to this company',
@@ -244,13 +278,13 @@ integrationRoutes.openapi(createRoute({
   const adminUrl = c.env.APP_URL.replace(/\/$/, '')
   const studioId = await linkedId(db, 'studio', claims.cid)
   const [s] = studioId ? await db.select().from(schema.studios).where(eq(schema.studios.id, studioId)).limit(1) : []
-  if (!s) return c.json({ linked: false, studioName: null, plan: null, validTill: null, walletRupees: null, photosUsed: null, photosLimit: null, galleries: 0, adminUrl }, 200)
+  if (!s) return c.json({ linked: false, studioName: null, plan: null, validTill: null, walletRupees: null, photosUsed: null, photosLimit: null, galleries: 0, adminUrl, drive: await driveOut(c, null) }, 200)
   const l = schema.partnerLinks
   const e = schema.events
   const [{ n }] = await db.select({ n: count() }).from(l).innerJoin(e, eq(e.id, l.localId))
     .where(and(eq(l.provider, STUDIO_AUTOPILOT), eq(l.kind, 'event'), like(l.externalId, `${projectKey(claims, '')}%`), eq(e.studioId, s.id), isNull(e.deletedAt)))
   return c.json({
     linked: true, studioName: s.name, plan: s.planId, validTill: s.validTill, walletRupees: s.walletPaise / 100,
-    photosUsed: s.photosUsed, photosLimit: s.photosLimit, galleries: n, adminUrl,
+    photosUsed: s.photosUsed, photosLimit: s.photosLimit, galleries: n, adminUrl, drive: await driveOut(c, s.id),
   }, 200)
 })

@@ -247,6 +247,46 @@ describe('what Studio AutoPilot reads back', () => {
   })
 })
 
+describe('Google Drive through Studio AutoPilot', () => {
+  const api = (path: string, token: string, body?: unknown) => call(`/v1/integrations/studioautopilot${path}`, { token, body })
+  const bag = env as unknown as Record<string, unknown>
+  const KEYS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'DRIVE_TOKEN_KEY', 'GOOGLE_PICKER_API_KEY'] as const
+  const saved: Record<string, unknown> = {}
+  const on = () => { for (const k of KEYS) saved[k] = bag[k]; Object.assign(bag, { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', DRIVE_TOKEN_KEY: 'k'.repeat(44), GOOGLE_PICKER_API_KEY: 'pk' }) }
+  const off = () => { for (const k of KEYS) bag[k] = saved[k] }
+
+  it('says whether the studio connected Drive, keeps originals there when asked, and gives the admin paths', async () => {
+    on()
+    try {
+      const cid = uid()
+      const sub = uid()
+      const first = await api('/events', await mint({ cid, sub, purpose: 'api' }), { projectId: 'd-1', name: 'Drive wedding', date: '2026-12-01T00:00:00.000Z' })
+      expect(first.json).toMatchObject({ originalsIn: 'frameline', importPath: `/events/${first.json.eventId}?modal=import` })
+      const notYet = await api('/studio', await mint({ cid, sub, purpose: 'api' }))
+      expect(notYet.json.drive).toMatchObject({ available: true, importAvailable: true, connected: false, needsReconnect: false, settingsPath: '/settings/drive' })
+      // Asking for Drive before it is connected is refused, not quietly ignored.
+      expectProblem(await api('/events', await mint({ cid, sub, purpose: 'api' }), { projectId: 'd-2', name: 'Too early', date: '2026-12-02T00:00:00.000Z', originalsIn: 'drive' }), 409, 'drive_not_connected')
+
+      const ev = await env.DB.prepare('SELECT studio_id FROM events WHERE id = ?').bind(first.json.eventId).first<{ studio_id: string }>()
+      const now = new Date().toISOString()
+      await env.DB.prepare(`INSERT INTO drive_connections (studio_id, google_sub, email, refresh_token_enc, scope, status, default_for_new_events, missing_files, connected_by, connected_at)
+        VALUES (?, 'g-1', 'studio@gmail.com', 'v1.x.y', 'drive.file', 'ok', 0, 0, 'u', ?)`).bind(ev!.studio_id, now).run()
+      const studio = await api('/studio', await mint({ cid, sub, purpose: 'api' }))
+      expect(studio.json.drive).toMatchObject({ connected: true, email: 'studio@gmail.com', defaultForNewEvents: false })
+      const inDrive = await api('/events', await mint({ cid, sub, purpose: 'api' }), { projectId: 'd-3', name: 'Kept in Drive', date: '2026-12-03T00:00:00.000Z', originalsIn: 'drive' })
+      expect(inDrive.status).toBe(201)
+      expect(inDrive.json.originalsIn).toBe('drive')
+    } finally {
+      off()
+    }
+  })
+
+  it('says Drive is not offered when the server has no Google keys', async () => {
+    const r = await api('/studio', await mint({ purpose: 'api' }))
+    expect(r.json.drive).toMatchObject({ available: false, connected: false })
+  })
+})
+
 describe('telling Studio AutoPilot a gallery changed', () => {
   const api = (path: string, token: string, body?: unknown) => call(`/v1/integrations/studioautopilot${path}`, { token, body })
 
