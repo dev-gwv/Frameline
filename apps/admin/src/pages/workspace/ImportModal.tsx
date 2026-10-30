@@ -51,12 +51,17 @@ export function ImportModal({ open, onOpenChange, event, albums, initialTab, alb
     setPicked(await api.expandDriveItems(ids))
     setNames({})
   }
+  // Google's picker is its own window on top of the page. While it shows, this dialog steps aside: an open dialog
+  // makes everything outside it unclickable (the picker included) and closes on the first click outside it.
+  const [inPicker, setInPicker] = useState(false)
   const choose = async () => {
     setChoosing(true)
     try {
       const cfg = await api.getDrivePicker()
       if (cfg.accessToken === 'sample') { setSample([]); return }
-      await expand(await pickFromDrive(cfg))
+      setInPicker(true)
+      const ids = await pickFromDrive(cfg).finally(() => setInPicker(false))
+      await expand(ids)
     } catch (e) {
       toast.error('Couldn’t open Google Drive', errorMessage(e))
     } finally {
@@ -117,7 +122,7 @@ export function ImportModal({ open, onOpenChange, event, albums, initialTab, alb
     }
   }
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Import from Google Drive" width={620}
+    <Modal open={open && !inPicker} onOpenChange={onOpenChange} title="Import from Google Drive" width={620}
       footer={tab === 'new' && picked ? <>
         <Button variant="ghost" onClick={() => setPicked(null)}>Back</Button>
         <Button variant="primary" loading={begin.isPending} disabled={toImport <= 0 || over > 0} onClick={() => begin.mutate(undefined)}>Import {photosLabel(toImport)}</Button>
