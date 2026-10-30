@@ -10,7 +10,7 @@ import { audit } from '../services/audit'
 import { createEvent } from '../services/events'
 import { STUDIO_AUTOPILOT, ensurePartnerStudio, ensurePartnerUser, link, linkedId, projectKey, spendJti } from '../services/partner'
 import { emit } from '../services/realtime'
-import { effectiveSettings } from '../lib/features'
+import { effectiveSettings, paymentsOn } from '../lib/features'
 import { issueSession } from '../services/sessions'
 import { driveConfigured, drivePickerOn, getConnection } from '../services/drive'
 
@@ -284,7 +284,10 @@ integrationRoutes.openapi(createRoute({
   const [{ n }] = await db.select({ n: count() }).from(l).innerJoin(e, eq(e.id, l.localId))
     .where(and(eq(l.provider, STUDIO_AUTOPILOT), eq(l.kind, 'event'), like(l.externalId, `${projectKey(claims, '')}%`), eq(e.studioId, s.id), isNull(e.deletedAt)))
   return c.json({
-    linked: true, studioName: s.name, plan: s.planId, validTill: s.validTill, walletRupees: s.walletPaise / 100,
+    linked: true, studioName: s.name, plan: s.planId,
+    // While payments are off a lapsed plan isn't enforced and nothing can be bought, so there is no end to show
+    // (Studio AutoPilot would say "plan ended, renew it" about something that hasn't ended).
+    validTill: paymentsOn(c.env) ? s.validTill : null, walletRupees: s.walletPaise / 100,
     photosUsed: s.photosUsed, photosLimit: s.photosLimit, galleries: n, adminUrl, drive: await driveOut(c, s.id),
   }, 200)
 })
