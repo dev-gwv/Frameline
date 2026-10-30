@@ -6,6 +6,12 @@ creates album folders in the studio's own Drive and uploads there. Its face matc
 servers, reading photos from Drive. Google Photos isn't involved. Its low price (₹1,299–1,999 a year) works because
 the studio pays Google for storage.
 
+## Status (30 Oct 2026): switched on in production
+
+The client's Google Cloud project ("IPC Ads Automation", 946264784405) now holds the OAuth client for sign-in and
+Drive, plus the Picker key. All keys are Cloudflare secrets. Still to do: restrict the Picker key, confirm the
+consent screen is "In production", run `/drive-test.html`, and brand verification once the real domain exists.
+
 ## Status (28 Oct 2026): both phases built, switched off until Google is set up
 
 Both phases below are built and tested against a fake Google (17 tests in `apps/api/test/drive.test.ts`). The

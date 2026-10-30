@@ -84,7 +84,7 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
   carry `needs` and are hidden for switched-off features.
 - Google Drive (`/v1/meta` `features.drive`, `features.driveImport`): on only with GOOGLE_CLIENT_ID/SECRET +
   `DRIVE_TOKEN_KEY` (+ `GOOGLE_PICKER_API_KEY` for imports). Off: Settings → Google Drive, the import menu and the
-  event "Full-size photos" card are hidden. See "Google Drive" below.
+  event "Full-size photos" card are hidden. See "Google Drive" below. **On in production since 30 Oct.**
 - Photos get a 2048 px web copy from the studio's browser at upload (`PUT /v1/photos/:id/web`, `photos.web_copy`,
   `Photo.webUrl`); show photos with `displayUrl(photo)`, download originals from `photo.url`.
 - **Photo files open only with a signature** (24 Oct, `lib/media-sign.ts`): never hand out a bare `/v1/media/...`
@@ -98,6 +98,13 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
   year from creation even for a past date (0014, `galleryExpiry`). Big ZIPs come in parts (`services/zips.ts`).
 
 ## Google Drive (28 Oct; docs/GOOGLE_DRIVE_PLAN.md)
+
+- **Google Cloud project (30 Oct): the client's project "IPC Ads Automation", number `946264784405`.** Google
+  sign-in and Drive both use its OAuth web client (`946264784405-l48t…`); the dev account's old client was replaced.
+  Redirect URIs on it: `<api>/v1/auth/google/callback` and `<api>/v1/drive/callback`; JS origin: the admin site.
+  All five values are Cloudflare **secrets** (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_PICKER_API_KEY`,
+  `GOOGLE_PROJECT_NUMBER`, `DRIVE_TOKEN_KEY`), not wrangler vars, so nothing is in this public repo. Never change
+  `DRIVE_TOKEN_KEY`: it decrypts every studio's stored Drive token (changing it disconnects them all).
 
 - **Scope `drive.file` only**, never `drive`/`drive.readonly` (restricted: yearly CASA audit). Connect is its own
   consent (`POST /v1/drive/connect`, owner), never at sign-in. One `drive_connections` row per studio; the refresh
@@ -184,8 +191,10 @@ hidden or says so: selling, payouts, card/UPI, invoices without a seller, "Notif
 - Make both GitHub repos private.
 - Northlight sample studio stays for testing until launch, then delete it.
 - Hosting the processor (then `AI_FEATURES` on).
-- Google Drive: the Google Cloud setup and verification in docs/GOOGLE_DRIVE_PLAN.md (needs the real domain
-  first), then the test page, then `GOOGLE_PICKER_API_KEY`, `GOOGLE_PROJECT_NUMBER` and the secret `DRIVE_TOKEN_KEY`.
+- Google Drive (keys in, switched on 30 Oct): restrict the Picker API key (Picker API only, websites
+  `https://frameline-admin.pages.dev/*`); confirm the consent screen is published "In production" (in Testing only
+  test users can sign in with Google); run `/drive-test.html`; brand verification once the real domain exists;
+  Google user data section in `privacy.html`.
 
 Live test data: event "Frameline Test – Demo Wedding" (`ev_2iat4iwano8v`, gallery `B6F105B`, PIN 7883,
 full-access 2378) in the owner's studio, with 23 screenshots and test guests. Delete when done.

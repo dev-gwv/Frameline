@@ -105,9 +105,8 @@
         "SUPPORT_CALL_URL": "https://calendly-common-meeting-web-bjvr.vercel.app/harsh-solanki/intro-call"
         // The company on studios' GST invoices, once the owner has it: "SELLER_NAME", "SELLER_GSTIN" (both needed)
         // and "SELLER_ADDRESS". Unset: the apps offer no invoice downloads (GET /v1/meta features.seller).
-        // Google Drive (docs/GOOGLE_DRIVE_PLAN.md), once the Google Cloud setup is done: "GOOGLE_PICKER_API_KEY" (the
-        // Picker's browser key, public) and "GOOGLE_PROJECT_NUMBER" here, plus the secret DRIVE_TOKEN_KEY
-        // (`wrangler secret put DRIVE_TOKEN_KEY --env production`). Unset: Drive is hidden (GET /v1/meta features.drive).
+        // Google Drive (docs/GOOGLE_DRIVE_PLAN.md): GOOGLE_PICKER_API_KEY, GOOGLE_PROJECT_NUMBER and DRIVE_TOKEN_KEY are
+        // Cloudflare secrets (set 30 Oct), not vars here. Unset: Drive is hidden (GET /v1/meta features.drive).
       },
       "triggers": { "crons": ["* * * * *", "0 3 * * *"] },
       "d1_databases": [{ "binding": "DB", "database_name": "frameline", "database_id": "32bf8f23-7594-4c5f-8e7a-51b5eed336a7", "migrations_dir": "migrations" }],
