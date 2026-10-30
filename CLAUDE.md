@@ -202,6 +202,9 @@ The owner's signed-in account is for testing (29 Oct: "you can create test data 
 29 Oct: event "Claude QA - Sharma Wedding" (`ev_aqpsc2hzm4vx`, 6 photos, albums Photos + Haldi, host
 qa-couple@example.com), guest "Claude Test Guest" (+91 90000 00001) on B6F105B with 2 approved guest photos,
 Smart QR "QA studio front desk", team invite qa-shooter@example.com, support ticket "QA test: …".
+30 Oct: Drive connected to the owner's Google account; a "Frameline test" folder in their Drive (8 generated
+photos, Haldi/ + Reception/) imported into the QA event; demo event "Demo - Kapoor Wedding" (`ev_d6l6ov3et1eu`,
+gallery 6C45B68, PIN 5751, 8 photos). Demo recordings (GIFs, not committed): `docs/demo/`.
 
 ## Session log
 
