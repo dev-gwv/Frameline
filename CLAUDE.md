@@ -210,6 +210,9 @@ Smart QR "QA studio front desk", team invite qa-shooter@example.com, support tic
 30 Oct: Drive connected to the owner's Google account; a "Frameline test" folder in their Drive (8 generated
 photos, Haldi/ + Reception/) imported into the QA event; demo event "Demo - Kapoor Wedding" (`ev_d6l6ov3et1eu`,
 gallery 6C45B68, PIN 5751, 8 photos). Demo recordings (GIFs, not committed): `docs/demo/`.
+30 Oct, Studio AutoPilot live test: the owner's Studio AutoPilot company is now linked to "Harsh Solanki's Studio";
+galleries made from its test projects "QA Test Project" (Drive on, 8 photos imported from the Drive test folder)
+and "QA Test Enquiry project" (Drive off, empty). Screenshots: `docs/demo/studio-autopilot-drive/`.
 
 ## Session log
 
