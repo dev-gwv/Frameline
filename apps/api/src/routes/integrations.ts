@@ -12,7 +12,10 @@ import { STUDIO_AUTOPILOT, ensurePartnerStudio, ensurePartnerUser, link, linkedI
 import { emit } from '../services/realtime'
 import { effectiveSettings, paymentsOn } from '../lib/features'
 import { issueSession } from '../services/sessions'
-import { driveConfigured, drivePickerOn, getConnection } from '../services/drive'
+import { DriveNotConnected, driveConfigured, drivePickerOn, getConnection } from '../services/drive'
+import { expandPicked, pickerConfig, startImport, stopImport } from '../services/drive-actions'
+import { importOut } from '../services/drive-import'
+import { DriveImportSchema, DriveItemSchema, DrivePickerSchema, ImportInput } from './drive'
 
 /**
  * Studio AutoPilot, the studio-management app, opens Frameline as its gallery add-on.
@@ -23,8 +26,9 @@ import { driveConfigured, drivePickerOn, getConnection } from '../services/drive
  * - GET  /events/:p  how that gallery is doing, for the project page.
  * - GET  /events     every gallery made for the company (Studio AutoPilot's Galleries list).
  * - GET  /studio     the joined Frameline studio: plan, wallet, photos used, Google Drive (Studio AutoPilot's settings).
- * Google Drive itself (connect, import, originals in Drive) is done in Frameline's admin, reached through /sso with
- * the paths these answers give (`importPath`, `drive.settingsPath`).
+ * - /drive/picker, /drive/expand, /events/:p/drive-imports  importing from Google Drive on Studio AutoPilot's own page.
+ * Connecting Drive and keeping originals in it are done in Frameline's admin, reached through /sso with the paths
+ * these answers give (`drive.settingsPath`; `importPath` is the admin's own import window).
  * And one door the other way: services/partner-notify.ts tells Studio AutoPilot when a gallery changed.
  *
  * Billing stays Frameline's: a studio made here starts on the same trial as any other and pays from its wallet.
@@ -290,4 +294,78 @@ integrationRoutes.openapi(createRoute({
     validTill: paymentsOn(c.env) ? s.validTill : null, walletRupees: s.walletPaise / 100,
     photosUsed: s.photosUsed, photosLimit: s.photosLimit, galleries: n, adminUrl, drive: await driveOut(c, s.id),
   }, 200)
+})
+
+// ── Google Drive import from Studio AutoPilot's own screen ──────────────────
+// Studio AutoPilot shows Google's picker on its Gallery tab with a token from here, then asks us to list what was
+// picked and copy it into the project's gallery. The copy, its checks and the Drive connection stay Frameline's
+// (services/drive-actions.ts, the same code the admin app's import window runs); connecting Drive stays in
+// Frameline's Settings → Google Drive, reached through /sso.
+
+/** The company's Frameline studio; one not set up here yet has no Drive either. */
+async function partnerStudioId(c: Context<AppEnv>, claims: PartnerClaims): Promise<string> {
+  const studioId = await linkedId(getDb(c.env.DB), 'studio', claims.cid)
+  if (!studioId) throw new DriveNotConnected()
+  return studioId
+}
+
+integrationRoutes.openapi(createRoute({
+  method: 'get', path: '/integrations/studioautopilot/drive/picker', tags: ['Integrations'], summary: 'What Google\'s picker needs, for Studio AutoPilot\'s page',
+  description: 'A short-lived drive.file token for the studio\'s connected Drive, the Picker\'s browser key and the Cloud project number. The Picker key must allow Studio AutoPilot\'s address as a referrer.',
+  responses: { 200: json(DrivePickerSchema), ...problems(401, 409, 501) },
+}), async (c) => {
+  const claims = await claimsFrom(c, bearerOf(c), 'api')
+  c.header('Cache-Control', 'no-store')
+  return c.json(await pickerConfig(c.env, await partnerStudioId(c, claims)), 200)
+})
+
+integrationRoutes.openapi(createRoute({
+  method: 'post', path: '/integrations/studioautopilot/drive/expand', tags: ['Integrations'], summary: 'List what picked Drive items hold',
+  description: 'The same answer as the admin app\'s POST /drive/expand: each picked file, and every file inside each picked folder (three levels) with its folder path.',
+  request: { body: body(z.object({ ids: z.array(z.string().regex(/^[\w-]{10,200}$/)).min(1).max(500) })) },
+  responses: { 200: json(z.object({ items: z.array(DriveItemSchema), closedFolders: z.array(z.object({ id: z.string(), name: z.string() })) })), ...problems(401, 409, 422, 501, 503) },
+}), async (c) => {
+  const claims = await claimsFrom(c, bearerOf(c), 'api')
+  return c.json(await expandPicked(c.env, await partnerStudioId(c, claims), c.req.valid('json').ids), 200)
+})
+
+integrationRoutes.openapi(createRoute({
+  method: 'post', path: '/integrations/studioautopilot/events/{projectId}/drive-imports', tags: ['Integrations'], summary: 'Import picked Drive files into a project\'s gallery',
+  description: 'The admin app\'s import, for the project\'s gallery: albums by name (reused when one exists), the plan and event checked for room (402), files already in the gallery skipped, the copy run in the background.',
+  request: { params: ProjectParam, body: body(ImportInput) },
+  responses: { 201: json(DriveImportSchema, 'Import started'), ...problems(401, 402, 404, 409, 422, 501) },
+}), async (c) => {
+  const claims = await claimsFrom(c, bearerOf(c), 'api')
+  const { projectId } = c.req.valid('param')
+  const ev = await linkedEvent(c, claims, projectId)
+  if (!ev) throw new NotFound('Gallery', projectId)
+  const user = await ensurePartnerUser(getDb(c.env.DB), claims)
+  return c.json(await startImport(c, ev, user.id, c.req.valid('json')), 201)
+})
+
+integrationRoutes.openapi(createRoute({
+  method: 'get', path: '/integrations/studioautopilot/events/{projectId}/drive-imports', tags: ['Integrations'], summary: 'A project gallery\'s Drive imports, newest first',
+  request: { params: ProjectParam },
+  responses: { 200: json(z.object({ items: z.array(DriveImportSchema) })), ...problems(401, 404, 501) },
+}), async (c) => {
+  const claims = await claimsFrom(c, bearerOf(c), 'api')
+  const { projectId } = c.req.valid('param')
+  const ev = await linkedEvent(c, claims, projectId)
+  if (!ev) throw new NotFound('Gallery', projectId)
+  const t = schema.driveImports
+  const rows = await getDb(c.env.DB).select().from(t).where(eq(t.eventId, ev.id)).orderBy(desc(t.createdAt)).limit(30)
+  return c.json({ items: rows.map(importOut) }, 200)
+})
+
+integrationRoutes.openapi(createRoute({
+  method: 'delete', path: '/integrations/studioautopilot/events/{projectId}/drive-imports/{importId}', tags: ['Integrations'], summary: 'Stop a project gallery\'s Drive import',
+  description: 'Photos already copied stay; the rest are skipped.',
+  request: { params: ProjectParam.extend({ importId: z.string().min(1).max(64).openapi({ param: { name: 'importId', in: 'path' } }) }) },
+  responses: { 200: json(DriveImportSchema), ...problems(401, 404, 501) },
+}), async (c) => {
+  const claims = await claimsFrom(c, bearerOf(c), 'api')
+  const { projectId, importId } = c.req.valid('param')
+  const ev = await linkedEvent(c, claims, projectId)
+  if (!ev) throw new NotFound('Gallery', projectId)
+  return c.json(await stopImport(c, ev.studioId, importId, (eventId) => { if (eventId !== ev.id) throw new NotFound('Import', importId) }), 200)
 })

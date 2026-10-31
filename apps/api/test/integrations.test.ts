@@ -1,6 +1,7 @@
 import { SELF, env } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { matchFaces } from '../src/services/faces'
+import { seal } from '../src/lib/seal'
 import { BASE, call, expectProblem, freshIp, SEED } from './helpers'
 
 /**
@@ -278,6 +279,53 @@ describe('Google Drive through Studio AutoPilot', () => {
       expect(inDrive.json.originalsIn).toBe('drive')
     } finally {
       off()
+    }
+  })
+
+  it("imports from Studio AutoPilot's own picker into the project's gallery, and stops it", async () => {
+    const key = btoa('k'.repeat(32))
+    const keys = [...KEYS, 'PHOTO_QUEUE'] as const
+    for (const k of keys) saved[k] = bag[k]
+    const queued: unknown[] = []
+    Object.assign(bag, { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', DRIVE_TOKEN_KEY: key, GOOGLE_PICKER_API_KEY: 'pk', PHOTO_QUEUE: { send: async () => {}, sendBatch: async (m: unknown[]) => { queued.push(...m) } } })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+      const json = (v: unknown) => new Response(JSON.stringify(v), { headers: { 'content-type': 'application/json' } })
+      if (url.href.startsWith('https://oauth2.googleapis.com/token')) return json({ access_token: 'at-sa', expires_in: 3600 })
+      if (url.pathname === '/drive/v3/files') return json({ files: [{ id: 'fileSaHaldi001', name: 'H1.JPG', mimeType: 'image/jpeg', size: '100' }, { id: 'fileSaHaldiRaw', name: 'H2.CR3', mimeType: 'image/x-canon-cr3', size: '100' }] })
+      if (url.pathname === '/drive/v3/files/folderSaHaldi1') return json({ id: 'folderSaHaldi1', name: 'Haldi', mimeType: 'application/vnd.google-apps.folder' })
+      return new Response('unexpected', { status: 500 })
+    }))
+    try {
+      const cid = uid()
+      const sub = uid()
+      const tok = () => mint({ cid, sub, purpose: 'api' })
+      // Nothing set up here yet: Drive is not connected.
+      expectProblem(await api('/drive/picker', await tok()), 409, 'drive_not_connected')
+      const g = await api('/events', await tok(), { projectId: 'sa-drive', name: 'Mehta Wedding', date: '2026-12-01T00:00:00.000Z' })
+      const ev = await env.DB.prepare('SELECT studio_id FROM events WHERE id = ?').bind(g.json.eventId).first<{ studio_id: string }>()
+      await env.DB.prepare(`INSERT INTO drive_connections (studio_id, google_sub, email, refresh_token_enc, scope, status, default_for_new_events, missing_files, connected_by, connected_at)
+        VALUES (?, 'g-sa', 'studio@gmail.com', ?, 'drive.file', 'ok', 0, 0, 'u', ?)`).bind(ev!.studio_id, await seal(key, 'rt-sa'), new Date().toISOString()).run()
+
+      expect((await api('/drive/picker', await tok())).json).toMatchObject({ accessToken: 'at-sa', apiKey: 'pk' })
+      const picked = await api('/drive/expand', await tok(), { ids: ['folderSaHaldi1'] })
+      expect(picked.json.items.map((i: { name: string; importable: boolean; folderPath: string }) => [i.name, i.importable, i.folderPath])).toEqual([['H1.JPG', true, 'Haldi'], ['H2.CR3', false, 'Haldi']])
+
+      const items = [{ fileId: 'fileSaHaldi001', name: 'H1.JPG', size: 100, mimeType: 'image/jpeg', albumName: 'Haldi' }]
+      expectProblem(await api('/events/not-a-project/drive-imports', await tok(), { name: 'Haldi', quality: 'web', items }), 404)
+      const start = await api('/events/sa-drive/drive-imports', await tok(), { name: 'Haldi', quality: 'web', items })
+      expect(start.status).toBe(201)
+      expect(start.json).toMatchObject({ eventId: g.json.eventId, status: 'running', total: 1, albumsCreated: 1 })
+      expect(queued).toHaveLength(1)
+      expect((await api('/events/sa-drive/drive-imports', await tok())).json.items[0]).toMatchObject({ id: start.json.id, status: 'running' })
+
+      // Another company cannot stop it, even knowing the project id and the import id.
+      expectProblem(await call(`/v1/integrations/studioautopilot/events/sa-drive/drive-imports/${start.json.id}`, { method: 'DELETE', token: await mint({ purpose: 'api' }) }), 404)
+      const stop = await call(`/v1/integrations/studioautopilot/events/sa-drive/drive-imports/${start.json.id}`, { method: 'DELETE', token: await tok() })
+      expect(stop.json).toMatchObject({ status: 'cancelled', skipped: 1 })
+    } finally {
+      vi.unstubAllGlobals()
+      for (const k of keys) bag[k] = saved[k]
     }
   })
 

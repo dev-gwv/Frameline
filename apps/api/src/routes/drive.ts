@@ -1,13 +1,13 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import type { Context } from 'hono'
-import type { DriveItem, DriveStatus } from '@frameline/shared'
+import type { DriveStatus } from '@frameline/shared'
 import type { AppEnv } from '../env'
 import { getDb, schema } from '../db/client'
 import { eventOut } from '../db/mappers'
-import { AppError, BadRequest, NotFound, ValidationFailed } from '../lib/errors'
+import { BadRequest } from '../lib/errors'
 import { randomToken, toBase64Url } from '../lib/crypto'
-import { newId, nowIso } from '../lib/ids'
+import { nowIso } from '../lib/ids'
 import { IdParam, IdempotencyHeader, NoContent, body, createRouter, json, problems, security } from '../lib/openapi'
 import { membershipOf, requireStudio, userOf } from '../middleware/auth'
 import { idempotent } from '../middleware/idempotency'
@@ -15,10 +15,10 @@ import { PhotoEvent } from '../schemas/domain'
 import { assertEventVisible } from '../services/access'
 import { audit } from '../services/audit'
 import {
-  DRIVE_SCOPE, FOLDER_MIME, accessToken, assertDriveConfigured, driveConfigured, drivePickerOn, getConnection, getFile, listChildren,
-  requireConnection, revokeAtGoogle, sealToken, DriveFileMissing, type DriveFile,
+  DRIVE_SCOPE, assertDriveConfigured, driveConfigured, drivePickerOn, getConnection, requireConnection, revokeAtGoogle, sealToken,
 } from '../services/drive'
-import { importOut, notImportable, queueImport } from '../services/drive-import'
+import { importOut } from '../services/drive-import'
+import { MAX_IMPORT_ITEMS, expandPicked, pickerConfig, startImport, stopImport } from '../services/drive-actions'
 import { eventForMember } from '../services/events'
 import { emit } from '../services/realtime'
 
@@ -31,9 +31,6 @@ export const driveRoutes = createRouter()
 const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth'
 const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token'
 const GOOGLE_USERINFO = 'https://openidconnect.googleapis.com/v1/userinfo'
-const MAX_IMPORT_ITEMS = 5000
-const MAX_EXPAND_FILES = 5000
-const MAX_FOLDER_DEPTH = 3
 
 const callbackUrl = (c: Context<AppEnv>) => `${(c.env.API_PUBLIC_URL || new URL(c.req.url).origin).replace(/\/$/, '')}/v1/drive/callback`
 const settingsUrl = (c: Context<AppEnv>, q: Record<string, string>) => `${c.env.APP_URL.replace(/\/$/, '')}/settings/drive?${new URLSearchParams(q)}`
@@ -164,29 +161,21 @@ driveRoutes.openapi(createRoute({
   return c.body(null, 204)
 })
 
+export const DrivePickerSchema = z.object({ accessToken: z.string(), expiresAt: z.string(), apiKey: z.string(), appId: z.string().optional() }).openapi('DrivePickerConfig')
+
 driveRoutes.openapi(createRoute({
   method: 'get', path: '/drive/picker', tags: ['Google Drive'], summary: 'What the Google Picker needs (editors)',
   description: 'A short-lived access token for the connected Drive (drive.file), the Picker’s browser key and the Cloud project number.',
   security, middleware: [requireStudio('editor', 'import from Google Drive')] as const,
-  responses: { 200: json(z.object({ accessToken: z.string(), expiresAt: z.string(), apiKey: z.string(), appId: z.string().optional() }).openapi('DrivePickerConfig')), ...problems(401, 403, 409, 501) },
+  responses: { 200: json(DrivePickerSchema), ...problems(401, 403, 409, 501) },
 }), async (c) => {
-  if (!drivePickerOn(c.env)) assertDriveConfigured(c.env)
-  if (!c.env.GOOGLE_PICKER_API_KEY) throw new AppError(501, 'not_configured', 'Not configured', 'Choosing files from Google Drive isn’t set up on this server (GOOGLE_PICKER_API_KEY).')
-  const m = membershipOf(c)
-  const t = await accessToken(c.env, m.studioId)
   c.header('Cache-Control', 'no-store')
-  return c.json({ accessToken: t.token, expiresAt: t.expiresAt, apiKey: c.env.GOOGLE_PICKER_API_KEY, ...(c.env.GOOGLE_PROJECT_NUMBER ? { appId: c.env.GOOGLE_PROJECT_NUMBER } : {}) }, 200)
+  return c.json(await pickerConfig(c.env, membershipOf(c).studioId), 200)
 })
 
-const DriveItemSchema = z.object({
+export const DriveItemSchema = z.object({
   id: z.string(), name: z.string(), mimeType: z.string(), size: z.number(), folderPath: z.string().optional(), importable: z.boolean(), reason: z.string().optional(),
 }).openapi('DriveItem')
-
-const itemOf = (f: DriveFile, folderPath?: string): DriveItem => {
-  const size = Number(f.size ?? 0)
-  const reason = f.trashed ? 'In the Drive trash' : notImportable({ mimeType: f.mimeType, size })
-  return { id: f.id, name: f.name, mimeType: f.mimeType, size, ...(folderPath ? { folderPath } : {}), importable: !reason, ...(reason ? { reason } : {}) }
-}
 
 driveRoutes.openapi(createRoute({
   method: 'post', path: '/drive/expand', tags: ['Google Drive'], summary: 'List what picked Drive items hold (editors)',
@@ -194,40 +183,15 @@ driveRoutes.openapi(createRoute({
   security, middleware: [requireStudio('editor', 'import from Google Drive')] as const,
   request: { body: body(z.object({ ids: z.array(z.string().regex(/^[\w-]{10,200}$/)).min(1).max(500) })) },
   responses: { 200: json(z.object({ items: z.array(DriveItemSchema), closedFolders: z.array(z.object({ id: z.string(), name: z.string() })) })), ...problems(401, 403, 409, 422, 501, 503) },
-}), async (c) => {
-  const m = membershipOf(c)
-  await requireConnection(c.env, m.studioId)
-  const items: DriveItem[] = []
-  const closedFolders: { id: string; name: string }[] = []
-  const seen = new Set<string>()
-  const walk = async (folder: DriveFile, path: string, depth: number) => {
-    const children = await listChildren(c.env, m.studioId, folder.id, MAX_EXPAND_FILES - items.length)
-    if (!children.length && depth === 0) { closedFolders.push({ id: folder.id, name: folder.name }); return }
-    for (const ch of children) {
-      if (items.length >= MAX_EXPAND_FILES) return
-      if (ch.mimeType === FOLDER_MIME) { if (depth < MAX_FOLDER_DEPTH) await walk(ch, `${path}/${ch.name}`, depth + 1); continue }
-      if (seen.has(ch.id)) continue
-      seen.add(ch.id)
-      items.push(itemOf(ch, path))
-    }
-  }
-  for (const id of c.req.valid('json').ids) {
-    if (items.length >= MAX_EXPAND_FILES) break
-    let f: DriveFile
-    try { f = await getFile(c.env, m.studioId, id) } catch (e) { if (e instanceof DriveFileMissing) continue; throw e }
-    if (f.mimeType === FOLDER_MIME) await walk(f, f.name, 0)
-    else if (!seen.has(f.id)) { seen.add(f.id); items.push(itemOf(f)) }
-  }
-  return c.json({ items, closedFolders }, 200)
-})
+}), async (c) => c.json(await expandPicked(c.env, membershipOf(c).studioId, c.req.valid('json').ids), 200))
 
-const DriveImportSchema = z.object({
+export const DriveImportSchema = z.object({
   id: z.string(), eventId: z.string(), name: z.string(), status: z.enum(['running', 'done', 'failed', 'cancelled']),
   total: z.number().int(), done: z.number().int(), skipped: z.number().int(), failed: z.number().int(), albumsCreated: z.number().int(),
   quality: z.enum(['web', 'original']), watermark: z.boolean(), createdAt: z.string(), finishedAt: z.string().optional(), error: z.string().optional(),
 }).openapi('DriveImport')
 
-const ImportInput = z.object({
+export const ImportInput = z.object({
   name: z.string().trim().min(1).max(200),
   quality: z.enum(['web', 'original']).default('original'),
   watermark: z.boolean().default(false),
@@ -244,65 +208,8 @@ driveRoutes.openapi(createRoute({
   request: { params: IdParam, headers: IdempotencyHeader, body: body(ImportInput) },
   responses: { 201: json(DriveImportSchema, 'Import started'), ...problems(401, 402, 403, 404, 409, 422, 501) },
 }), async (c) => {
-  const m = membershipOf(c)
-  const me = userOf(c)
-  const db = getDb(c.env.DB)
-  const ev = await eventForMember(db, m, c.req.valid('param').id)
-  await requireConnection(c.env, m.studioId)
-  const input = c.req.valid('json')
-
-  // Albums: the given ids must be this event's; names reuse an album of that name or make one.
-  const albums = await db.select().from(schema.albums).where(and(eq(schema.albums.eventId, ev.id), isNull(schema.albums.deletedAt)))
-  const byId = new Map(albums.filter((a) => a.kind === 'album').map((a) => [a.id, a]))
-  const byName = new Map(albums.filter((a) => a.kind === 'album').map((a) => [a.name.toLowerCase(), a.id]))
-  const badAlbum = input.items.find((i) => i.albumId && !byId.has(i.albumId))
-  if (badAlbum) throw new ValidationFailed([{ field: 'items.albumId', in: 'body', message: `Album ${badAlbum.albumId} isn’t in this event`, code: 'unknown_album' }])
-
-  // A file already in the event, or listed twice, comes in once.
-  const unique = [...new Map(input.items.map((i) => [i.fileId, i])).values()]
-  const have = new Set<string>()
-  for (let i = 0; i < unique.length; i += 90) {
-    const part = unique.slice(i, i + 90).map((u) => u.fileId)
-    for (const r of await db.select({ f: schema.photos.driveFileId }).from(schema.photos).where(and(eq(schema.photos.eventId, ev.id), isNull(schema.photos.deletedAt), sql`${schema.photos.driveFileId} IN (SELECT value FROM json_each(${JSON.stringify(part)}))`))) if (r.f) have.add(r.f)
-  }
-  const wanted = unique.filter((i) => !have.has(i.fileId) && !notImportable({ mimeType: i.mimeType, size: i.size }))
-  const [studio] = await db.select().from(schema.studios).where(eq(schema.studios.id, m.studioId)).limit(1)
-  const cost = wanted.length * (input.quality === 'original' ? 2 : 1)
-  if (cost && studio.photosUsed + cost > studio.photosLimit) {
-    throw new AppError(402, 'quota_exceeded', 'Photo quota exceeded', `This import needs room for ${cost} photos but your plan has ${Math.max(0, studio.photosLimit - studio.photosUsed)} left. Add a photo pack or upgrade, or import fewer photos.`)
-  }
-  if (ev.photoCount + wanted.length > ev.photoLimit) {
-    const left = Math.max(0, ev.photoLimit - ev.photoCount)
-    throw new AppError(402, 'event_limit_reached', 'Event photo limit reached', `${ev.name} has room for ${left} more ${left === 1 ? 'photo' : 'photos'}. Add a photo pack to this event, or import fewer photos.`)
-  }
-
-  const now = nowIso()
-  let created = 0
-  const top = albums.filter((a) => a.kind === 'album').reduce((n, a) => Math.max(n, a.order), 0)
-  for (const name of new Set(wanted.filter((i) => i.albumName).map((i) => i.albumName!))) {
-    if (byName.has(name.toLowerCase())) continue
-    const id = newId('al')
-    await db.insert(schema.albums).values({ id, eventId: ev.id, studioId: m.studioId, name, order: top + ++created, photoCount: 0, kind: 'album', createdAt: now }).run()
-    byName.set(name.toLowerCase(), id)
-  }
-
-  const importId = newId('di')
-  const skippedItems = unique.length - wanted.length + (input.items.length - unique.length)
-  await db.insert(schema.driveImports).values({
-    id: importId, studioId: m.studioId, eventId: ev.id, userId: me.id, name: input.name, quality: input.quality, watermark: input.watermark,
-    status: wanted.length ? 'running' : 'done', total: input.items.length, skipped: skippedItems, albumsCreated: created, createdAt: now,
-    ...(wanted.length ? {} : { finishedAt: now }),
-  }).run()
-  const rows = wanted.map((i) => ({
-    id: newId('dii'), importId, fileId: i.fileId, name: i.name, size: i.size, mimeType: i.mimeType,
-    albumId: i.albumId ?? byName.get(i.albumName!.toLowerCase())!, status: 'waiting' as const,
-  }))
-  for (let i = 0; i < rows.length; i += 50) await db.batch(rows.slice(i, i + 50).map((r) => db.insert(schema.driveImportItems).values(r)) as [never, ...never[]])
-  await queueImport(c.env, { id: importId, studioId: m.studioId }, rows.map((r) => r.id))
-  audit(c, 'drive.import', { type: 'event', id: ev.id }, { files: wanted.length, skipped: skippedItems, albumsCreated: created })
-  emit(c, m.studioId, 'albums', 'misc')
-  const [imp] = await db.select().from(schema.driveImports).where(eq(schema.driveImports.id, importId)).limit(1)
-  return c.json(importOut(imp), 201)
+  const ev = await eventForMember(getDb(c.env.DB), membershipOf(c), c.req.valid('param').id)
+  return c.json(await startImport(c, ev, userOf(c).id, c.req.valid('json')), 201)
 })
 
 driveRoutes.openapi(createRoute({
@@ -326,22 +233,7 @@ driveRoutes.openapi(createRoute({
   responses: { 200: json(DriveImportSchema), ...problems(401, 403, 404) },
 }), async (c) => {
   const m = membershipOf(c)
-  const db = getDb(c.env.DB)
-  const t = schema.driveImports
-  const [imp] = await db.select().from(t).where(and(eq(t.id, c.req.valid('param').id), eq(t.studioId, m.studioId))).limit(1)
-  if (!imp) throw new NotFound('Import', c.req.valid('param').id)
-  assertEventVisible(m, imp.eventId)
-  if (imp.status === 'running') {
-    const items = schema.driveImportItems
-    const waiting = await db.select({ id: items.id }).from(items).where(and(eq(items.importId, imp.id), eq(items.status, 'waiting')))
-    await db.batch([
-      db.update(items).set({ status: 'skipped', error: 'Import stopped' }).where(and(eq(items.importId, imp.id), eq(items.status, 'waiting'))),
-      db.update(t).set({ status: 'cancelled', finishedAt: nowIso(), skipped: sql`${t.skipped} + ${waiting.length}` }).where(eq(t.id, imp.id)),
-    ])
-    emit(c, m.studioId, 'misc')
-  }
-  const [out] = await db.select().from(t).where(eq(t.id, imp.id)).limit(1)
-  return c.json(importOut(out), 200)
+  return c.json(await stopImport(c, m.studioId, c.req.valid('param').id, (eventId) => assertEventVisible(m, eventId)), 200)
 })
 
 driveRoutes.openapi(createRoute({
