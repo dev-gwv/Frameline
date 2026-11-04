@@ -6,6 +6,7 @@ import { Button, Card, Chip, ConfirmDialog, SettingRow, Skeleton, Toggle, useToa
 import { errorMessage, useApi, useServerFeatures } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { GoogleDriveIcon, startDriveConnect, takeDriveReturn } from '../../lib/drive'
+import { embedded } from '../../lib/embed'
 import { useAction, useDrive, useEvents } from '../../lib/queries'
 import { SectionTitle } from './SideList'
 
@@ -52,6 +53,7 @@ export function DriveTab() {
     try {
       // Sample data connects at once.
       if (await startDriveConnect(() => api.connectDrive())) { setConnecting(false); setParams({ drive: 'connected' }, { replace: true }) }
+      else if (embedded) { setConnecting(false); toast.success('Opened in a new tab', 'Connect Google Drive there; this page catches up when you come back.') }
     } catch (e) {
       setConnecting(false)
       toast.error('Couldn’t start connecting', errorMessage(e))

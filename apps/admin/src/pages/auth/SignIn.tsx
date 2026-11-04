@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { cn } from '@frameline/ui'
+import { Button, LogoMark, cn } from '@frameline/ui'
+import { embedded, tellParent } from '../../lib/embed'
 import { DEMO_USER, useAuth, type VerifyResult } from '../../lib/auth'
 import { safeDestination } from './signin/authHelpers'
 import { PhotoPanel } from './signin/PhotoPanel'
@@ -35,6 +36,9 @@ export default function SignIn() {
     finish({ user: DEMO_USER, isNewUser: false })
   }
 
+  // Inside Studio AutoPilot, Google's sign-in can't open in the frame: Studio AutoPilot signs the person in again.
+  if (embedded) return <EmbeddedSignedOut />
+
   const form = <SignInForm onDone={finish} onGoogle={google} googleBusy={googleBusy} expired={expired} googleError={googleError} onView={onView} />
 
   // One tree for every step so the form keeps its state when the layout changes.
@@ -45,6 +49,32 @@ export default function SignIn() {
         <div className={cn('w-full', start ? 'max-w-[380px]' : 'max-w-[400px]')}>{form}</div>
       </div>
       {start && <PhotoPanel />}
+    </div>
+  )
+}
+
+/**
+ * /login inside Studio AutoPilot: the frame's session ended (or a Studio AutoPilot link failed). Studio AutoPilot
+ * loads a fresh sign-in link when told; the button asks again.
+ */
+function EmbeddedSignedOut() {
+  const [params] = useSearchParams()
+  const error = params.get('error')
+  useEffect(() => { if (!error) tellParent({ type: 'signed-out' }) }, [error])
+  const why = error === 'sa_studio_not_set_up'
+    ? 'Your studio owner hasn’t opened the gallery yet. Once they do, you can use it here too.'
+    : error === 'sa_not_configured'
+      ? 'The gallery isn’t connected to Studio AutoPilot on this server yet.'
+      : error ? 'That sign-in link didn’t work.' : 'Signing you in again…'
+  return (
+    <div className="grid min-h-dvh place-items-center bg-surface px-4">
+      <div className="flex max-w-[360px] flex-col items-center gap-3 text-center">
+        <LogoMark size={32} />
+        <p className="text-[14.5px] text-ink-2">{why}</p>
+        {error !== 'sa_studio_not_set_up' && error !== 'sa_not_configured' && (
+          <Button variant="primary" onClick={() => tellParent({ type: 'signed-out' })}>Sign in again</Button>
+        )}
+      </div>
     </div>
   )
 }

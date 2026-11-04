@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom'
 import { CheckCircle2, ChevronDown, CircleSlash, Folder, HardDriveDownload, Image as ImageIcon, XCircle } from 'lucide-react'
 import { SAMPLE_DRIVE, fmt, type Album, type DriveExpandResult, type DriveImportInput, type PhotoEvent } from '@frameline/shared'
 import { Button, Chip, EmptyState, Meter, Modal, RadioCardGroup, TabBar, Toggle, cn, useToast } from '@frameline/ui'
-import { errorMessage, useApi } from '../../lib/api'
+import { API_URL, errorMessage, useApi } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { GoogleDriveIcon, startDriveConnect } from '../../lib/drive'
+import { embedded, openOutside } from '../../lib/embed'
 import { useAction, useDrive, useDriveImports } from '../../lib/queries'
 import { pickFromDrive } from './drivePicker'
 import { photosLabel } from './lib'
@@ -55,6 +56,9 @@ export function ImportModal({ open, onOpenChange, event, albums, initialTab, alb
   // makes everything outside it unclickable (the picker included) and closes on the first click outside it.
   const [inPicker, setInPicker] = useState(false)
   const choose = async () => {
+    // Inside Studio AutoPilot: Google's picker won't run in a frame, so this window opens in a signed-in tab. Asked
+    // straight away, while the click still lets Studio AutoPilot open a tab.
+    if (API_URL && openOutside(`/events/${event.id}?modal=import`)) { toast.success('Opened in a new tab', 'Pick from Google Drive there. Imports show here as they run.'); return }
     setChoosing(true)
     try {
       const cfg = await api.getDrivePicker()
@@ -115,6 +119,7 @@ export function ImportModal({ open, onOpenChange, event, albums, initialTab, alb
     try {
       // Google sends the studio back to Settings, which returns them to this window.
       if (await startDriveConnect(() => api.connectDrive(), `/events/${event.id}?modal=import`)) { await drive.refetch(); toast.success('Google Drive connected') }
+      else if (embedded) toast.success('Opened in a new tab', 'Connect Google Drive there, then pick your photos.')
     } catch (e) {
       toast.error('Couldn’t start connecting', errorMessage(e))
     } finally {

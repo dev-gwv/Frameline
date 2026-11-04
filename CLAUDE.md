@@ -77,6 +77,15 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
   Drive isn't connected). Studio AutoPilot never rebuilds Drive: its buttons sign the person in (`sso` `to`) at the
   import window or `/settings/drive`.
 
+- **Frameline inside Studio AutoPilot** (4 Nov): Projects → **Gallery app** (`/galleries/app` there) frames the
+  studio site, signed in by a fresh `sso` link each load (its `POST /galleries/app/open`, projects edit, any `to`
+  path). Works because the admin keeps its session in the frame's own (partitioned) localStorage, not cookies.
+  `apps/admin/src/lib/embed.ts`: `embedded`, `tellParent` (`ready`, `route`, `open`, `signed-out`), `openOutside`.
+  Google won't run in a frame, so inside it: Drive connect and the Drive picker ask Studio AutoPilot to open that
+  page in a signed-in tab (`open`); /login shows "Signing you in again" and asks for a fresh link (`signed-out`);
+  no Sign out. Studio site `_headers` frame-ancestors = self + studioautopilot.in; Studio AutoPilot's `frame-src`
+  lists `frameline-api.dev-d9b.workers.dev` and `frameline-admin.pages.dev` (**change both on a new domain**).
+
 ## Switches
 
 - `AI_FEATURES` (wrangler var, production **"off"** until the processor runs): `lib/features.ts`. While off, guests

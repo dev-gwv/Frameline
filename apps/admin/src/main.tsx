@@ -6,6 +6,8 @@ import { ApiProvider } from './lib/api'
 import { AuthProvider } from './lib/auth'
 import { UploadProvider } from './layout/UploadDock'
 import { router } from './routes'
+// Shown inside Studio AutoPilot: says hello to the dashboard before anything renders.
+import './lib/embed'
 import './index.css'
 
 createRoot(document.getElementById('root')!).render(

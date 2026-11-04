@@ -5,6 +5,7 @@ import { fmt } from '@frameline/shared'
 import { Avatar, BottomSheet, LogoMark, Menu, Tip, cn, type MenuItem } from '@frameline/ui'
 import { useServerFeatures } from '../lib/api'
 import { useAuth } from '../lib/auth'
+import { embedded, tellParent } from '../lib/embed'
 import { useStudio, useUsage } from '../lib/queries'
 import { CommandPalette } from './CommandPalette'
 import { ACCOUNT_NAV, MORE_NAV, PHONE_MORE_NAV, PHONE_TABS, PRIMARY_NAV, isActive, isMorePage, uploadTarget, withDrive, withSelling } from './nav'
@@ -31,6 +32,8 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
   useEffect(() => setMoreSheet(false), [location.pathname])
+  // Inside Studio AutoPilot: it reopens on this page next time.
+  useEffect(() => tellParent({ type: 'route', path: location.pathname + location.search }), [location.pathname, location.search])
 
   return (
     <div className="flex min-h-full flex-col bg-paper">
@@ -138,8 +141,8 @@ function AccountMenu() {
       }
       items={[
         ...ACCOUNT_NAV.map((it): MenuItem => ({ label: it.label, icon: <it.icon size={16} />, onSelect: () => navigate(it.to) })),
-        'separator',
-        { label: 'Sign out', icon: <LogOut size={16} />, onSelect: () => void signOut() },
+        // Inside Studio AutoPilot the person signs out of Studio AutoPilot, not of this frame.
+        ...(embedded ? [] : ['separator' as const, { label: 'Sign out', icon: <LogOut size={16} />, onSelect: () => void signOut() }]),
       ]}
       trigger={
         <button type="button" aria-label={`Account: ${name}`} className="rounded-full outline-offset-2 max-md:grid max-md:size-10 max-md:place-items-center">
@@ -199,7 +202,7 @@ function MoreSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
       {ACCOUNT_NAV.filter((it) => it.to !== '/settings/team').map((it) => (
         <Link key={it.to} to={it.to} onClick={() => onOpenChange(false)} className={row}><it.icon size={18} className="text-ink-2" />{it.label}</Link>
       ))}
-      <button type="button" onClick={() => { onOpenChange(false); void signOut() }} className={cn(row, 'w-full text-left')}><LogOut size={18} className="text-ink-2" />Sign out</button>
+      {!embedded && <button type="button" onClick={() => { onOpenChange(false); void signOut() }} className={cn(row, 'w-full text-left')}><LogOut size={18} className="text-ink-2" />Sign out</button>}
     </BottomSheet>
   )
 }

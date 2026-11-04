@@ -1,4 +1,5 @@
 import type { SVGProps } from 'react'
+import { openOutside } from './embed'
 
 /** Google Drive's own mark, for buttons that open Drive (Google's branding allows it next to "Google Drive"). */
 export function GoogleDriveIcon({ size = 16, ...props }: SVGProps<SVGSVGElement> & { size?: number }) {
@@ -22,6 +23,9 @@ const RETURN_KEY = 'frameline.drive-return'
  * once (sample data), false when the browser is on its way to Google.
  */
 export async function startDriveConnect(connect: () => Promise<{ authorizationUrl: string }>, returnTo?: string) {
+  // Inside Studio AutoPilot: Google's consent page won't open in a frame, so the page this started from opens in a
+  // signed-in tab of its own, where Connect works. Resolves false: nothing connected here yet.
+  if (openOutside(returnTo ?? '/settings/drive')) return false
   const { authorizationUrl } = await connect()
   if (authorizationUrl.startsWith('/')) return true
   try { if (returnTo) sessionStorage.setItem(RETURN_KEY, returnTo); else sessionStorage.removeItem(RETURN_KEY) } catch { /* private window: stay in Settings */ }
