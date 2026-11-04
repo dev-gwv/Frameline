@@ -159,8 +159,12 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
 - Measured 4 Nov: 2.5–2.9 CPU-s per 24 MP photo (i3-12100). On the VPS six 12 MP photos took 8.4 s together
   (~2,500/hour at 12 MP, ~1,300–1,800/hour expected at 24 MP), ~1.4–1.6 cores busy, ~550–630 MB RAM, idle ~100 MB.
   A crowd photo found 21 faces.
-- Selfie search still needs the browser side (gallery `SelfieFlow` sends a placeholder; embeddings via
-  onnxruntime-web reusing `packages/faces`).
+- **Selfie search (4 Nov, `10c26cf`)**: the guest's browser sends the selfie itself (upright JPEG ≤ 1280 px) to
+  `POST /v1/public/events/:shortId/faces/selfie` (studio face links: `POST /v1/events/:id/faces/selfie`); the API
+  passes it to the processor's `/embed` (same YuNet + SFace, in memory, jumps the photo line), takes the biggest
+  face and matches in Vectorize (`searchBySelfie`, services/faces.ts). Never stored. Chosen over onnxruntime-web
+  because SFace is 39 MB per guest phone. Live check: same face 0.93–0.96, next best ≤ 0.32 (match floor 0.5),
+  0.3–0.5 s a selfie. Not yet tried with a real selfie against a real event's photos (different photo, light).
 
 ## Email and the support desk
 
@@ -207,7 +211,9 @@ hidden or says so: selling, payouts, card/UPI, invoices without a seller, "Notif
 - A real domain.
 - Make both GitHub repos private.
 - Northlight sample studio stays for testing until launch, then delete it.
-- Processor hosted (4 Nov). `AI_FEATURES` stays off until gallery selfie search really matches faces.
+- Processor hosted and selfie search built (4 Nov). Before `AI_FEATURES` on: re-index faces of events uploaded
+  before 4 Nov (`POST /events/:id/faces/reindex`), a real selfie test on a real event, legal review of the new
+  face-data wording in `privacy.html`.
 - Google Drive (keys in, switched on 30 Oct): restrict the Picker API key (Picker API only, websites
   `https://frameline-admin.pages.dev/*`); confirm the consent screen is published "In production" (in Testing only
   test users can sign in with Google); run `/drive-test.html`; brand verification once the real domain exists;
