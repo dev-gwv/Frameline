@@ -146,12 +146,19 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
 ## The processor (apps/processor) and the VPS
 
 - VPS: Hostinger + Coolify, 4 vCPU / 16 GB / 193 GB, shared with Studio AutoPilot and other apps (~40 containers,
-  load ~0.5). SSH key on the owner's PC; the server has a GitHub key `gh_deploy`. **Not installed yet** (no
-  `/root/frameline`). Compose: `apps/processor/docker-compose.vps.yml` (2 CPUs, 3 GB cap, Traefik).
+  load ~0.5). SSH: `ssh -i ~/.ssh/id_ed25519_studioautopilot_vps root@72.61.239.209`.
+- **Installed 4 Nov 2026**: `/root/frameline` (public https clone), `apps/processor/.env` (chmod 600: PROCESSOR_TOKEN,
+  R2_* from an R2 token scoped to frameline-media, IP-locked to the VPS, PROCESSOR_HOST), models in
+  `apps/processor/models`. Address `https://processor.72-61-239-209.sslip.io` (Traefik, Let's Encrypt). Worker
+  secrets `PROCESSOR_URL` + `PROCESSOR_TOKEN` set (`/health` → `processor: http`); `AI_FEATURES` still "off".
+  Update: `cd /root/frameline && git pull && docker compose -p frameline-processor -f apps/processor/docker-compose.vps.yml up -d --build`
+  (not automatic: CI doesn't deploy it). Image is 3.3 GB (worth slimming).
 - Load limits: the photo queue has `max_concurrency: 2`; the processor's `Limiter` runs 2 photos at once with 20
   waiting (`PROCESSOR_MAX_JOBS`, `PROCESSOR_MAX_WAITING`), then answers 503 `{"error":"busy"}`; the API re-queues a
   busy photo as a fresh message (never spends its retries); other 503s count as an outage. 2-minute timeout per photo.
-- Estimate (not yet measured): 1.5–3 CPU-s per 24 MP photo → ~2,500–4,500 photos/hour on 2 cores.
+- Measured 4 Nov: 2.5–2.9 CPU-s per 24 MP photo (i3-12100). On the VPS six 12 MP photos took 8.4 s together
+  (~2,500/hour at 12 MP, ~1,300–1,800/hour expected at 24 MP), ~1.4–1.6 cores busy, ~550–630 MB RAM, idle ~100 MB.
+  A crowd photo found 21 faces.
 - Selfie search still needs the browser side (gallery `SelfieFlow` sends a placeholder; embeddings via
   onnxruntime-web reusing `packages/faces`).
 
@@ -200,7 +207,7 @@ hidden or says so: selling, payouts, card/UPI, invoices without a seller, "Notif
 - A real domain.
 - Make both GitHub repos private.
 - Northlight sample studio stays for testing until launch, then delete it.
-- Hosting the processor (then `AI_FEATURES` on).
+- Processor hosted (4 Nov). `AI_FEATURES` stays off until gallery selfie search really matches faces.
 - Google Drive (keys in, switched on 30 Oct): restrict the Picker API key (Picker API only, websites
   `https://frameline-admin.pages.dev/*`); confirm the consent screen is published "In production" (in Testing only
   test users can sign in with Google); run `/drive-test.html`; brand verification once the real domain exists;
