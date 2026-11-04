@@ -161,7 +161,7 @@ export function PinGate({ event, studio, session }: { event: PublicEvent; studio
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 /** The privacy policy lives on the studio site (apps/admin/public/privacy.html); VITE_ADMIN_URL is set by CI. */
-const PRIVACY_URL = `${(import.meta.env.VITE_ADMIN_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/privacy`
+export const PRIVACY_URL = `${(import.meta.env.VITE_ADMIN_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/privacy`
 export const validPhone = (v: string) => { const d = v.replace(/[\s()-]/g, ''); return /^\+?\d{10,13}$/.test(d) }
 
 /** Registration gate: api.registerGuest adds the guest to the studio's Guests list and returns a session. */

@@ -1,0 +1,1 @@
+CREATE INDEX `photos_copied_from_idx` ON `photos` (`copied_from`);

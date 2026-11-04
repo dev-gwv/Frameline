@@ -7,6 +7,7 @@ import { guest } from '../lib/guest'
 import { friendlyError } from '../lib/errors'
 import { PrimaryButton, WideButton } from './common'
 import { Sheet } from './Sheet'
+import { PRIVACY_URL } from './Gates'
 
 const MAX_BYTES = 25 * 1024 * 1024
 
@@ -128,7 +129,10 @@ export function SelfieFlow({ open, onOpenChange, event, base }: {
               <li key={t} className="flex items-center gap-2.5"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-ok-soft text-ok"><Check size={14} /></span>{t}</li>
             ))}
           </ul>
-          <p className="text-[12.5px] text-ink-3">Your selfie is only used for this search and is never saved. {event.studio.name} never sees it.</p>
+          <p className="text-[12.5px] text-ink-3">
+            By continuing, you agree to Frameline using your selfie once to find your photos in this event. It is never
+            saved, and {event.studio.name} never sees it. <a href={PRIVACY_URL} target="_blank" rel="noreferrer noopener" className="underline hover:text-ink-2">Privacy policy</a>
+          </p>
         </div>
       )}
       {step === 'confirm' && preview && (

@@ -263,6 +263,8 @@ export const photos = sqliteTable('photos', {
   index('photos_album_name_idx').on(t.albumId, t.filename, t.id),
   index('photos_album_seq_idx').on(t.albumId, t.index, t.id),
   index('photos_event_status_idx').on(t.eventId, t.status),
+  // Picks albums' copies are found by the photo they were copied from (deleting, hiding, counting).
+  index('photos_copied_from_idx').on(t.copiedFrom),
 ])
 
 export const people = sqliteTable('people', {

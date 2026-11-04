@@ -50,6 +50,8 @@ export const MAX_PROCESS_ATTEMPTS = 5
 const WEB_COPY_WAITS = 6
 
 const PROCESS_TIMEOUT_MS = 120_000
+/** Photos of one queue batch sent to the processor at once (it runs 2 at a time, PROCESSOR_MAX_JOBS). */
+const PARALLEL_PHOTOS = 2
 
 /** The processor is at capacity: try the photo again later, without counting it as a failed attempt. */
 export class ProcessorBusy extends Error {
@@ -195,59 +197,70 @@ export async function applyResult(env: Env, job: ProcessPhotoJob, result: Proces
 export async function handlePhotoQueue(batch: MessageBatch<PhotoJob>, env: Env): Promise<void> {
   const processor = getProcessor(env)
   const touched = new Map<string, Set<string>>() // studioId → eventIds
+  const touch = (studioId: string, eventId: string) => {
+    if (!touched.has(studioId)) touched.set(studioId, new Set())
+    touched.get(studioId)!.add(eventId)
+  }
   const memory: ClusterMemory = new Map()
-  for (const msg of batch.messages) {
+  // Results are saved one at a time (face clustering shares `memory`), while the processor works on two photos at
+  // once: one at a time left half of it idle (a batch of 10 took ~30 s).
+  let saving: Promise<unknown> = Promise.resolve()
+  const serially = <T,>(fn: () => Promise<T>): Promise<T> => { const run = saving.then(fn, fn); saving = run.catch(() => undefined); return run }
+
+  async function handle(msg: Message<PhotoJob>) {
     const job = msg.body
     try {
-      if (job.kind === 'build-zip') { await buildZip(env, job); msg.ack(); continue }
+      if (job.kind === 'build-zip') { await buildZip(env, job); msg.ack(); return }
       if (job.kind === 'drive-import') {
         try { await runDriveImport(env, job) } catch (e) {
-          if (e instanceof DriveRevoked) { await failImport(env, job.importId, 'Google Drive was disconnected'); msg.ack(); continue }
+          if (e instanceof DriveRevoked) { await failImport(env, job.importId, 'Google Drive was disconnected'); msg.ack(); return }
           throw e
         }
         msg.ack()
-        continue
+        return
       }
-      if (job.kind !== 'process-photo') { msg.ack(); continue }
+      if (job.kind !== 'process-photo') { msg.ack(); return }
       // Original in Drive: work from the web copy the studio's browser sends just after the upload. Wait for it a
       // little (fresh messages, like a busy processor), then go ahead without it.
       if (job.webOnly && job.key && !(await env.MEDIA.head(job.key)) && (job.webWaits ?? 0) < WEB_COPY_WAITS) {
         await env.PHOTO_QUEUE.send({ ...job, webWaits: (job.webWaits ?? 0) + 1 }, { delaySeconds: 20 })
         msg.ack()
-        continue
+        return
       }
       // Photos registered by URL have no file in R2 for the processor to read; nor has a Drive photo whose web copy
       // never came (it goes live without faces rather than failing).
       const readable = !!job.key && (!job.webOnly || !!(await env.MEDIA.head(job.key)))
       const result = await (readable ? processor : new SimulatedProcessor(env)).process(job)
-      if (await applyResult(env, job, result, memory)) {
-        if (!touched.has(job.studioId)) touched.set(job.studioId, new Set())
-        touched.get(job.studioId)!.add(job.eventId)
-      }
+      if (await serially(() => applyResult(env, job, result, memory))) touch(job.studioId, job.eventId)
       msg.ack()
     } catch (e) {
       if (e instanceof ProcessorBusy && job.kind === 'process-photo') {
         // Re-queued as a fresh message so a busy processor never uses up the photo's retries (max_retries).
         await env.PHOTO_QUEUE.send(job, { delaySeconds: Math.min(300, Math.max(10, e.retryAfterSec)) })
         msg.ack()
-        continue
+        return
       }
       console.error(JSON.stringify({ level: 'error', msg: 'queue job failed', job, attempt: msg.attempts, error: String(e) }))
       if (job.kind === 'drive-import' && msg.attempts >= MAX_PROCESS_ATTEMPTS) {
         await failImport(env, job.importId, 'Google Drive kept failing. Try the import again later.').catch(() => undefined)
         msg.ack()
-        continue
+        return
       }
       if (job.kind === 'process-photo' && (e instanceof ProcessingRejected || msg.attempts >= MAX_PROCESS_ATTEMPTS)) {
         await markFailed(env, job, String(e)).catch(() => undefined)
-        if (!touched.has(job.studioId)) touched.set(job.studioId, new Set())
-        touched.get(job.studioId)!.add(job.eventId)
+        touch(job.studioId, job.eventId)
         msg.ack()
-        continue
+        return
       }
       msg.retry({ delaySeconds: Math.min(300, 2 ** msg.attempts * 5) })
     }
   }
+
+  // Two at a time: the processor's own limit (PROCESSOR_MAX_JOBS); more would only wait in its line.
+  const queue = [...batch.messages]
+  await Promise.all(Array.from({ length: Math.min(PARALLEL_PHOTOS, queue.length) }, async () => {
+    for (let msg = queue.shift(); msg; msg = queue.shift()) await handle(msg)
+  }))
   const db = getDb(env.DB)
   // People's photo counts, for the events where faces were clustered in this batch.
   await recountPeople(env, [...memory.keys()]).catch((e) => console.error(JSON.stringify({ level: 'error', msg: 'people recount failed', error: String(e) })))

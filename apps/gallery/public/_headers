@@ -1,0 +1,8 @@
+# Cloudflare Pages response headers for the guest gallery.
+# Galleries may be framed anywhere (a studio's own website, Studio AutoPilot), so no frame-ancestors limit here;
+# guests take no account-changing actions a framed page could trick them into.
+/*
+  Content-Security-Policy: object-src 'none'; base-uri 'self'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=()

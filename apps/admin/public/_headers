@@ -1,0 +1,8 @@
+# Cloudflare Pages response headers for the studio site.
+# Only Frameline itself and Studio AutoPilot (its CRM, which may show Frameline inside its dashboard) may frame
+# these pages: anywhere else a framed page could be used to trick a studio into clicking (clickjacking).
+/*
+  Content-Security-Policy: frame-ancestors 'self' https://studioautopilot.in https://*.studioautopilot.in; object-src 'none'; base-uri 'self'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=()
