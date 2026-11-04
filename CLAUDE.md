@@ -95,6 +95,10 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
   event "Full-size photos" card are hidden. See "Google Drive" below. **On in production since 30 Oct.**
 - Photos get a 2048 px web copy from the studio's browser at upload (`PUT /v1/photos/:id/web`, `photos.web_copy`,
   `Photo.webUrl`); show photos with `displayUrl(photo)`, download originals from `photo.url`.
+  **A photo is `ready` (guests see it) as soon as its web copy is stored** (4 Nov, `showOnceWebCopy` in
+  services/add-photos.ts; Drive imports insert ready): processing (faces, EXIF, 3072 copy) finishes in the
+  background, so a 3,000-photo upload isn't hidden for an hour. Without a web copy a photo waits for processing.
+  A processor rejection never hides an already-shown photo (`markFailed` only touches `processing`).
 - **Photo files open only with a signature** (24 Oct, `lib/media-sign.ts`): never hand out a bare `/v1/media/...`
   photo address. Studio routes use `studioPhotosOut`, guest routes `guestPhotosOut` (web copy only, the original
   only when the gallery offers full-size downloads; a guest signature dies when the photo is hidden). Previews are

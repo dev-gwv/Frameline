@@ -170,6 +170,38 @@ describe('uploads (proxy mode) + queue consumer', () => {
     expect((await SELF.fetch(`https://api.test/v1/photos/${riyaPhoto}/web`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'image/jpeg' }, body: new Uint8Array([0xff, 0xd8, 0xff]) })).status).toBe(404)
   })
 
+  it('shows a photo to guests as soon as its web copy is in, before processing, and processing still runs after', async () => {
+    const token = await tokenFor('uploader')
+    const { SELF } = await import('cloudflare:test')
+    const bytes = new TextEncoder().encode('fake-jpeg-bytes'.repeat(50))
+    const start = await call('/v1/events/ev_tessera/uploads', {
+      token, headers: { 'idempotency-key': `up-${crypto.randomUUID()}` },
+      body: { albumId: 'ev_tessera_al0', quality: 'web', files: [{ filename: 'EARLY.JPG', size: bytes.length, contentType: 'image/jpeg', width: 6000, height: 4000 }] },
+    })
+    const file = start.json.files[0]
+    const partUrl = new URL(file.parts[0].url)
+    const etag = (await SELF.fetch(`https://api.test${partUrl.pathname}${partUrl.search}`, { method: 'PUT', body: bytes })).headers.get('etag')!
+    await call(`/v1/events/ev_tessera/uploads/${start.json.uploadId}/complete`, { token, body: { files: [{ photoId: file.photoId, parts: [{ partNumber: 1, etag }] }] } })
+    const guestSees = async () => (await call('/v1/public/events/3F9E21D/photos?limit=200')).json.items.some((p: { id: string }) => p.id === file.photoId)
+    expect(await guestSees()).toBe(false)
+
+    const web = await SELF.fetch(`https://api.test/v1/photos/${file.photoId}/web`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'image/jpeg' }, body: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]) })
+    expect(web.status).toBe(204)
+    expect((await call(`/v1/photos/${file.photoId}`, { token })).json.status).toBe('ready')
+    expect(await guestSees()).toBe(true)
+
+    // Processing still finishes the job (faces, details), and a photo the processor can't read stays shown.
+    const batch = createMessageBatch<PhotoJob>('frameline-photos', [
+      { id: 'm2', timestamp: new Date(), attempts: 1, body: { kind: 'process-photo', photoId: file.photoId, eventId: 'ev_tessera', studioId: 'st_northlight', key: file.key, quality: 'web' } },
+    ])
+    const ctx = createExecutionContext()
+    await worker.queue(batch, env as never)
+    expect((await getQueueResult(batch, ctx)).explicitAcks).toEqual(['m2'])
+    const after = await call(`/v1/photos/${file.photoId}`, { token })
+    expect(after.json.status).toBe('ready')
+    expect(await guestSees()).toBe(true)
+  })
+
   it('gives guests the web copy, and the original only when the gallery offers full-size downloads', () => {
     const row = { id: 'ph_x', eventId: 'ev_x', albumId: 'al_x', studioId: 'st_x', filename: 'a.jpg', index: 1, capturedAt: '2026-01-01T00:00:00.000Z', tone: { angle: 0, stops: ['#000', '#111', '#222'] }, url: null, r2Key: 'studios/st_x/events/ev_x/originals/ph_x/a.jpg', status: 'ready', hidden: false, favourites: 0, downloads: 0, faces: [], exif: { width: 1, height: 1, sizeBytes: 1 }, uploadedBy: 'x', source: 'web', quality: 'web', createdAt: '2026-01-01T00:00:00.000Z', reviewStatus: null, enhancedFrom: null, views: 0, rotation: 0, facesIndexedAt: null, deletedAt: null, copiedFrom: null, webCopy: true } as unknown as Parameters<typeof guestPhotoOut>[0]
     const web = guestPhotoOut(row, undefined, false)

@@ -45,7 +45,8 @@ export async function addPhotos(env: Env, a: {
   const rows: (typeof p.$inferInsert)[] = a.files.map((f, i) => ({
     id: f.photoId, eventId: ev.id, albumId: a.albumId, studioId: a.studioId, filename: f.filename, index: (top ?? 0) + i + 1,
     capturedAt: f.capturedAt && !Number.isNaN(Date.parse(f.capturedAt)) ? new Date(f.capturedAt).toISOString() : now,
-    tone: tone(hash(f.filename)), url: f.url ?? null, r2Key: f.key, status: 'processing', hidden: false, favourites: 0, downloads: 0, faces: [],
+    // With its web copy already stored (Drive imports) a photo shows at once; processing adds faces and details later.
+    tone: tone(hash(f.filename)), url: f.url ?? null, r2Key: f.key, status: f.webCopy ? 'ready' : 'processing', hidden: false, favourites: 0, downloads: 0, faces: [],
     exif: { width: f.width ?? 0, height: f.height ?? 0, sizeBytes: f.size }, uploadedBy: opts.uploadedBy ?? a.uploaderName,
     source, quality: a.quality, createdAt: now, reviewStatus,
     storage: f.storage ?? 'r2', driveFileId: f.driveFileId ?? null, webCopy: f.webCopy ?? false,
@@ -59,9 +60,31 @@ export async function addPhotos(env: Env, a: {
     // Camera sync: the camera feeding this album last sent something now.
     ...(source === 'camera' ? [db.update(schema.cameras).set({ lastUploadAt: now }).where(and(eq(schema.cameras.eventId, ev.id), eq(schema.cameras.albumId, a.albumId)))] : []),
   ])
+  if (rows.some((r) => r.status === 'ready')) await goLiveWhenShown(env, ev.id)
   const jobs: { body: ProcessPhotoJob }[] = rows.map((r) => ({ body: processJob(r, a.quality, opts.watermark) }))
   for (let i = 0; i < jobs.length; i += 100) await env.PHOTO_QUEUE.sendBatch(jobs.slice(i, i + 100))
   return rows
+}
+
+/**
+ * A photo is `ready` (guests see it) as soon as its 2048 px web copy is stored: that copy is what galleries show
+ * and the web-size download, and it proves the browser could read the file. Processing (faces, camera details,
+ * the high-resolution copy) carries on in the background. Without a web copy, the photo waits for processing.
+ */
+export async function showOnceWebCopy(env: Env, studioId: string, r2Key: string): Promise<string[]> {
+  const db = getDb(env.DB)
+  const p = schema.photos
+  const shown = await db.update(p).set({ status: 'ready' })
+    .where(and(eq(p.studioId, studioId), eq(p.r2Key, r2Key), eq(p.status, 'processing'))).returning({ eventId: p.eventId })
+  const events = [...new Set(shown.map((s) => s.eventId))]
+  for (const id of events) await goLiveWhenShown(env, id)
+  return events
+}
+
+/** An event still `uploading` goes live once none of its photos is waiting to be shown (as the photo queue does). */
+async function goLiveWhenShown(env: Env, eventId: string) {
+  await getDb(env.DB).run(sql`UPDATE events SET status = 'live' WHERE id = ${eventId} AND status = 'uploading'
+    AND NOT EXISTS (SELECT 1 FROM photos WHERE event_id = ${eventId} AND status = 'processing')`)
 }
 
 /**

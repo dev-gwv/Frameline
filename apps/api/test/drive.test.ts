@@ -229,7 +229,7 @@ describe('importing from Google Drive', () => {
     const photos = await db().select().from(schema.photos).where(and(eq(schema.photos.eventId, 'ev_riya'), eq(schema.photos.source, 'drive')))
     expect(photos.map((p) => p.filename).sort()).toEqual(['REC_0001.JPG', 'REC_0002.JPG'])
     const first = photos.find((p) => p.filename === 'REC_0001.JPG')!
-    expect(first).toMatchObject({ driveFileId: 'fileaRecep0001', storage: 'r2', webCopy: true, status: 'processing' })
+    expect(first).toMatchObject({ driveFileId: 'fileaRecep0001', storage: 'r2', webCopy: true, status: 'ready' })
     expect(first.capturedAt).toBe(new Date('2026-10-20T18:30:05').toISOString())
     expect(new Uint8Array(await (await env.MEDIA.get(first.r2Key!))!.arrayBuffer())).toEqual(JPEG)
     expect(await env.MEDIA.head(first.r2Key!.replace(/\/[^/]+$/, '/renditions/2048.jpg'))).not.toBeNull()

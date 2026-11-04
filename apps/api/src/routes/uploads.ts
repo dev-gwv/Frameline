@@ -19,7 +19,7 @@ import { paymentsLive } from '../services/payments'
 import { eventForMember } from '../services/events'
 import { emit } from '../services/realtime'
 import { queuePartnerNotice } from '../services/partner-notify'
-import { addPhotos, type StoredFile } from '../services/add-photos'
+import { addPhotos, showOnceWebCopy, type StoredFile } from '../services/add-photos'
 import { openOriginal } from '../services/originals'
 import { DriveFileMissing, ensureAlbumFolder, getFile, startResumableUpload } from '../services/drive'
 import { background } from '../lib/http'
@@ -275,7 +275,9 @@ uploadRoutes.put('/photos/:id/web', requireStudio('uploader', 'upload'), async (
   await c.env.MEDIA.put(webCopyKey(photo.r2Key), bytes, { httpMetadata: { contentType: 'image/jpeg' } })
   // Copies of the photo (picks albums) share its file, so they share the web copy too.
   await db.update(p).set({ webCopy: true }).where(and(eq(p.studioId, m.studioId), eq(p.r2Key, photo.r2Key))).run()
-  emit(c, m.studioId, 'photos')
+  // Guests see it now; faces and the high-resolution copy follow from processing.
+  const shown = await showOnceWebCopy(c.env, m.studioId, photo.r2Key)
+  emit(c, m.studioId, 'photos', ...(shown.length ? ['events' as const] : []))
   return c.body(null, 204)
 })
 
