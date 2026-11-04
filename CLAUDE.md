@@ -215,9 +215,12 @@ hidden or says so: selling, payouts, card/UPI, invoices without a seller, "Notif
 - A real domain.
 - Make both GitHub repos private.
 - Northlight sample studio stays for testing until launch, then delete it.
-- Processor hosted and selfie search built (4 Nov). Before `AI_FEATURES` on: re-index faces of events uploaded
-  before 4 Nov (`POST /events/:id/faces/reindex`), a real selfie test on a real event, legal review of the new
-  face-data wording in `privacy.html`.
+- Processor hosted and selfie search built (4 Nov). All 88 older photos re-processed (pushed straight onto the
+  `frameline-photos` queue with the Cloudflare API, 35 faces, 0 failed). Before `AI_FEATURES` on: a real selfie
+  test (the owner's own photos + a selfie), legal review of `privacy.html` (DPDP wording added 4 Nov: grievance
+  officer, Board, nomination, children, storage outside India) and the gallery's selfie consent line.
+- Security headers (4 Nov): `apps/*/public/_headers`. Studio site: `frame-ancestors 'self' studioautopilot.in`
+  (ready for showing Frameline inside Studio AutoPilot); gallery may be framed anywhere.
 - Google Drive (keys in, switched on 30 Oct): restrict the Picker API key (Picker API only, websites
   `https://frameline-admin.pages.dev/*`); confirm the consent screen is published "In production" (in Testing only
   test users can sign in with Google); run `/drive-test.html`; brand verification once the real domain exists;
