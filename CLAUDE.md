@@ -47,6 +47,9 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
   no enums. The API is bundled by wrangler and may use them.
 - **Refresh tokens rotate.** A saved browser session (Playwright `storageState`) must be re-saved after every run,
   or the next run is signed out "for safety" (reuse detection).
+- **Never pipe a secret into `wrangler secret put` from PowerShell**: it appends `\r\n` and wrangler keeps the
+  `\r` (Gmail then answered 535 bad credentials). Use bash `printf %s '…' | node node_modules/wrangler/bin/wrangler.js
+  secret put NAME --env production`. See a Worker's errors with `wrangler tail --env production`.
 - **Smart App Control** on the owner's PC (since 19 Oct 2026) blocks `git.exe`; node works. If git fails with "An
   Application Control policy has blocked this file", the owner has to switch Smart App Control off (Windows
   Security → App & browser control) or git must run elsewhere.
@@ -176,7 +179,7 @@ Works live (checked as a studio and as a guest on a phone): Google sign-in, crea
 full-access PIN, Studio AutoPilot link. Ready for a pilot with friendly studios on the trial; not for a paid launch.
 
 Before real studios: delete the production sample studio "Northlight Studio" (its galleries 6402F9F, 7A1C0B2 are
-public, PIN 5211 is in this public repo) — needs the owner's yes; make sure email works (SMTP secrets).
+public, PIN 5211 is in this public repo) — needs the owner's yes.
 Before charging: Razorpay keys; KYC/payouts for selling (keep selling off). Soon: a real domain, real Terms and
 Privacy (guests give phone numbers), the support AI key.
 
@@ -186,7 +189,9 @@ hidden or says so: selling, payouts, card/UPI, invoices without a seller, "Notif
 **Pending (owner):**
 - Real company name, GSTIN and address for invoices: wrangler vars `SELLER_NAME`, `SELLER_GSTIN`, `SELLER_ADDRESS`
   (production vars in `apps/api/wrangler.jsonc`). Until then no invoice downloads.
-- SMTP secrets (`SMTP_USER`, `SMTP_PASS`) so email really goes out.
+- Email: **done 4 Nov** (`SMTP_USER` = dev@gratefulworldventures.in, Workspace App Password; `features.email` true,
+  sign-in code delivered). The App Password was pasted in chat: replace it with a fresh one. Set up DKIM/SPF/DMARC
+  for gratefulworldventures.in if not done; move to a Frameline address once the domain exists.
 - Razorpay keys. **Before adding them, extend trial studios' `valid_till`**: a lapsed trial is only enforced once
   payments are live, so every old trial would be locked out of uploads the moment the keys go in. Renewals stop
   being free at the same moment.
