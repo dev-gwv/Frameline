@@ -52,7 +52,7 @@ export function Landing() {
           <div className="rounded-card border border-line bg-surface p-4 shadow-card">
             <CodeForm />
           </div>
-          <p className="flex items-center gap-2 text-[12.5px] text-ink-3"><ScanFace size={15} />No app or account needed.{ai && ' Your selfie is deleted after 30 days.'}</p>
+          <p className="flex items-center gap-2 text-[12.5px] text-ink-3"><ScanFace size={15} />No app or account needed.{ai && ' Your selfie is never saved.'}</p>
         </section>
 
         {recent.length > 0 && (

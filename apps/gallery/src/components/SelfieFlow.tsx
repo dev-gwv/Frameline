@@ -10,15 +10,28 @@ import { Sheet } from './Sheet'
 
 const MAX_BYTES = 25 * 1024 * 1024
 
-/** Small square thumbnail (data URL) so "Matched to your selfie" survives a reload; null if the image can't be read. */
-async function readSelfie(file: File, size = 160): Promise<{ thumb: string; w: number; h: number } | null> {
+/** Longest side of the selfie sent for face search: a face fills a selfie, and a small file sends fast on a phone. */
+const SEND_SIZE = 1280
+
+/**
+ * Reads the selfie once: a small square thumbnail (data URL) so "Matched to your selfie" survives a reload, and
+ * an upright JPEG of at most 1280 px to send. Null if the browser can't read the image.
+ */
+async function readSelfie(file: File, size = 160): Promise<{ thumb: string; image: Blob } | null> {
   try {
     const bmp = await createImageBitmap(file)
     const c = document.createElement('canvas')
     c.width = size; c.height = size
     const s = Math.min(bmp.width, bmp.height)
     c.getContext('2d')!.drawImage(bmp, (bmp.width - s) / 2, (bmp.height - s) / 2, s, s, 0, 0, size, size)
-    return { thumb: c.toDataURL('image/jpeg', 0.8), w: bmp.width, h: bmp.height }
+    const thumb = c.toDataURL('image/jpeg', 0.8)
+    const k = Math.min(1, SEND_SIZE / Math.max(bmp.width, bmp.height))
+    const big = document.createElement('canvas')
+    big.width = Math.round(bmp.width * k); big.height = Math.round(bmp.height * k)
+    big.getContext('2d')!.drawImage(bmp, 0, 0, big.width, big.height)
+    bmp.close()
+    const image = await new Promise<Blob | null>((done) => big.toBlob(done, 'image/jpeg', 0.9))
+    return image ? { thumb, image } : null
   } catch { return null }
 }
 
@@ -40,12 +53,12 @@ export function SelfieFlow({ open, onOpenChange, event, base }: {
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [thumb, setThumb] = useState<string | undefined>()
-  const [size, setSize] = useState<{ width: number; height: number } | undefined>()
+  const [image, setImage] = useState<Blob | null>(null)
   const [problem, setProblem] = useState<Problem | null>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
   const libraryRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { if (!open) { setStep('tips'); setFile(null); setProblem(null) } }, [open])
+  useEffect(() => { if (!open) { setStep('tips'); setFile(null); setImage(null); setProblem(null) } }, [open])
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
 
   async function pick(f: File | undefined) {
@@ -55,16 +68,16 @@ export function SelfieFlow({ open, onOpenChange, event, base }: {
     const read = await readSelfie(f)
     // A photo the browser can't decode has no face we could send; everything else goes to the API, which decides.
     if (!read) { setProblem(NO_FACE); setStep('tips'); return }
-    setProblem(null); setFile(f); setThumb(read.thumb); setSize({ width: read.w, height: read.h }); setPreview(URL.createObjectURL(f)); setStep('confirm')
+    setProblem(null); setFile(f); setThumb(read.thumb); setImage(read.image); setPreview(URL.createObjectURL(f)); setStep('confirm')
   }
 
   async function find() {
-    if (!file) return
+    if (!file || !image) return
     setStep('finding'); setProblem(null)
-    // Same key as the API's deterministic dev match; the real API uses `embedding` once an on-device model exists.
+    // Only a label for this match: the server finds the face in the image itself (and never keeps the image).
     const key = `${event.id}:${file.name}:${file.size}`
     try {
-      const [res] = await Promise.all([api.searchFaces(event.shortId, { key, ...(size ? { image: size } : {}) }), new Promise((r) => setTimeout(r, 1400))])
+      const [res] = await Promise.all([api.searchFacesBySelfie(event.shortId, image), new Promise((r) => setTimeout(r, 1400))])
       if (res.faceFound === false) { setProblem(NO_FACE); setStep('tips'); return }
       const personId = res.personId ?? undefined
       guest.patchSession(event.shortId, {
@@ -115,7 +128,7 @@ export function SelfieFlow({ open, onOpenChange, event, base }: {
               <li key={t} className="flex items-center gap-2.5"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-ok-soft text-ok"><Check size={14} /></span>{t}</li>
             ))}
           </ul>
-          <p className="text-[12.5px] text-ink-3">Your selfie is deleted after 30 days. {event.studio.name} never sees it.</p>
+          <p className="text-[12.5px] text-ink-3">Your selfie is only used for this search and is never saved. {event.studio.name} never sees it.</p>
         </div>
       )}
       {step === 'confirm' && preview && (

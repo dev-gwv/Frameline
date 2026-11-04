@@ -17,7 +17,7 @@ import {
 import { getMailer } from '../services/mailer'
 import { debitWallet } from '../services/billing'
 import { extendEvent, grantStudioPurchase, openStudioPayment, paymentMode } from '../services/payments'
-import { matchFaces } from '../services/faces'
+import { matchFaces, searchBySelfie } from '../services/faces'
 import { purchaseOut } from '../db/mappers'
 import { sql } from 'drizzle-orm'
 import { createSignedLink } from '../services/guest-links'
@@ -653,4 +653,12 @@ eventRoutes.openapi(createRoute({
   const input = c.req.valid('json')
   if (selfieHasNoFace(input)) return c.json({ faceFound: false, reason: 'no_face' as const, personId: null, photoIds: [] }, 200)
   return c.json({ faceFound: true, ...(await matchFaces(c.env, ev.id, input.key, input.embedding, input.minScore)) }, 200)
+})
+
+/** The same from the photo itself (raw JPEG/PNG/WebP body, never stored): what the admin's face link picker sends. */
+eventRoutes.post('/events/:id/faces/selfie', requireStudio('editor', 'create personal links'), async (c) => {
+  const m = membershipOf(c)
+  const ev = await eventForMember(getDb(c.env.DB), m, c.req.param('id'))
+  if (!aiOn(c.env)) throw new Forbidden('Face search is turned off.', 'face_search_disabled')
+  return c.json(await searchBySelfie(c.env, ev.id, new Uint8Array(await c.req.arrayBuffer()), c.req.header('content-type') ?? ''), 200)
 })

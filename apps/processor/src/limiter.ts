@@ -23,11 +23,15 @@ export class Limiter {
   get busy() { return this.running >= this.max && this.waiting.length >= this.maxWaiting }
   get stats() { return { running: this.running, waiting: this.waiting.length, max: this.max } }
 
-  /** Runs `fn` when a slot is free; null when the wait line is full (the caller answers 503). */
-  async run<T>(fn: () => Promise<T>): Promise<T | null> {
+  /**
+   * Runs `fn` when a slot is free; null when the wait line is full (the caller answers 503).
+   * `first`: a person is waiting on the answer (a guest's selfie), so it goes to the front of the line and is
+   * never turned away for a full line; it still waits for a running photo to finish, never runs beside it.
+   */
+  async run<T>(fn: () => Promise<T>, opts: { first?: boolean } = {}): Promise<T | null> {
     if (this.running >= this.max) {
-      if (this.waiting.length >= this.maxWaiting) return null
-      await new Promise<void>((go) => this.waiting.push(go))
+      if (!opts.first && this.waiting.length >= this.maxWaiting) return null
+      await new Promise<void>((go) => (opts.first ? this.waiting.unshift(go) : this.waiting.push(go)))
     } else {
       this.running++
     }

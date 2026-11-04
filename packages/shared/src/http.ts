@@ -837,6 +837,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
       return { total, items }
     },
     searchFaces: (shortId, selfie) => request('POST', `/v1/public/events/${enc(shortId)}/faces/search`, { body: selfie, guest: g(shortId) }),
+    searchFacesBySelfie: (shortId, image) => request('POST', `/v1/public/events/${enc(shortId)}/faces/selfie`, { raw: { body: image, contentType: image.type || 'image/jpeg' }, guest: g(shortId) }),
     setFavourite: (photoId, on, shortId) => request<{ favourites: number }>('POST', `/v1/public/photos/${enc(photoId)}/favourite`, { body: { on }, guest: shortId ? g(shortId) : (lastGallery ?? '') }),
     createEnquiry: (target, input) => 'shortId' in target
       ? request<Enquiry>('POST', `/v1/public/events/${enc(target.shortId)}/enquiries`, { body: input, guest: g(target.shortId) })
@@ -858,6 +859,7 @@ export function createHttpApi(options: HttpApiOptions): FramelineHttpApi {
     restoreEvent: (id) => request<PhotoEvent>('POST', `/v1/events/${enc(id)}/restore`, { idempotent: true }),
     buyPack: async (eventId, photos, opts) => paid(await request<PackPurchase | { payment: PendingPaymentWire }>('POST', `/v1/events/${enc(eventId)}/packs`, { body: { photos, payWith: opts.payWith }, idempotent: true }), 'Photo pack'),
     matchFaceForLink: (eventId, selfie) => request('POST', `/v1/events/${enc(eventId)}/faces/match`, { body: selfie }),
+    matchSelfieForLink: (eventId, image) => request('POST', `/v1/events/${enc(eventId)}/faces/selfie`, { raw: { body: image, contentType: image.type || 'image/jpeg' } }),
     async uploadAsset(kind, file: AssetFile) {
       const blob = file.blob ?? (file.uri ? await (await fetchImpl(file.uri)).blob() : null)
       if (!blob) throw new ApiError({ status: 0, code: 'file_unreadable', detail: `Could not read ${file.filename}.` })

@@ -111,11 +111,23 @@ function AlbumLink({ event, albums, brand }: { event: PhotoEvent; albums: Album[
 
 type FaceState = { kind: 'idle' } | { kind: 'checking'; url: string } | { kind: 'noface'; url: string } | { kind: 'nobody'; url: string } | { kind: 'broken' } | { kind: 'found'; url: string; personId: string; count: number } | { kind: 'error'; message: string }
 
-/** Loads the image to check it opens and to tell the API its size (the API decides whether it holds a usable face). */
+/**
+ * Loads the image and makes the JPEG (≤ 1280 px) the API looks for a face in. Null when it won't open, or when
+ * a pasted address's site doesn't let the browser read its pixels (then: download it and upload it instead).
+ */
 function probe(url: string) {
-  return new Promise<{ w: number; h: number } | null>((resolve) => {
+  return new Promise<Blob | null>((resolve) => {
     const img = new Image()
-    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight })
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      try {
+        const k = Math.min(1, 1280 / Math.max(img.naturalWidth, img.naturalHeight))
+        const c = document.createElement('canvas')
+        c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k)
+        c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height)
+        c.toBlob((b) => resolve(b), 'image/jpeg', 0.9)
+      } catch { resolve(null) }
+    }
     img.onerror = () => resolve(null)
     img.src = url
   })
@@ -130,13 +142,13 @@ function PersonLink({ event, brand }: { event: PhotoEvent; brand: string }) {
   const g = useGuestLink(event)
   const { make, clear } = g
 
-  const check = async (url: string, key: string) => {
+  const check = async (url: string) => {
     clear()
     setState({ kind: 'checking', url })
-    const size = await probe(url)
-    if (!size) { setState({ kind: 'broken' }); return }
+    const image = await probe(url)
+    if (!image) { setState({ kind: 'broken' }); return }
     try {
-      const r = await api.matchFaceForLink(event.id, { key, image: { width: size.w, height: size.h } })
+      const r = await api.matchSelfieForLink(event.id, image)
       if (!r.faceFound) { setState({ kind: 'noface', url }); return }
       if (!r.personId || !r.photoIds.length) { setState({ kind: 'nobody', url }); return }
       setState({ kind: 'found', url, personId: r.personId, count: r.photoIds.length })
@@ -150,12 +162,12 @@ function PersonLink({ event, brand }: { event: PhotoEvent; brand: string }) {
     if (!f) return
     if (!f.type.startsWith('image/')) { setState({ kind: 'error', message: 'Choose a photo (JPG or PNG) with one clear face.' }); return }
     setPasted('')
-    void check(URL.createObjectURL(f), `${f.name}|${f.size}|${f.lastModified}`)
+    void check(URL.createObjectURL(f))
   }
   const paste = () => {
     const v = pasted.trim()
     if (!/^https?:\/\/\S+\.\S+/.test(v)) { setState({ kind: 'error', message: 'Paste a full photo address starting with https://' }); return }
-    void check(v, v)
+    void check(v)
   }
   const retry = () => { setState({ kind: 'idle' }); clear(); fileRef.current?.click() }
   const person = state.kind === 'found' ? people?.find((p) => p.id === state.personId) : undefined

@@ -2,11 +2,51 @@ import { and, asc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
 import { hash } from '@frameline/shared'
 import type { Env } from '../env'
 import { getDb, schema } from '../db/client'
-import { ServiceUnavailable, ValidationFailed } from '../lib/errors'
+import { PayloadTooLarge, ServiceUnavailable, UnsupportedMediaType, ValidationFailed } from '../lib/errors'
 import { vectorIndex } from './vectors'
+import { embedSelfie, ProcessingRejected, ProcessorBusy } from './processor'
 
 /** Photos a guest may see: not hidden, processed, not in the trash, and not waiting for (or failed) review. */
 export const visiblePhotos = (p = schema.photos): SQL => and(eq(p.hidden, false), eq(p.status, 'ready'), isNull(p.deletedAt), or(isNull(p.reviewStatus), eq(p.reviewStatus, 'approved')))!
+
+/** Selfie images a guest may send (their browser shrinks them to ≤ 1280 px JPEG first). */
+export const SELFIE_MAX_BYTES = 8 * 1024 * 1024
+const SELFIE_TYPES = /^image\/(jpeg|png|webp)\b/
+
+export type SelfieSearch = { faceFound: boolean; reason?: 'no_face'; personId: string | null; photoIds: string[] }
+
+/**
+ * Find my photos from the selfie image itself: the processor finds the face (the biggest, when there are several)
+ * and its embedding with the same models as the event's photos, then the usual match. The image is never stored.
+ * Without a processor, development and tests match deterministically on the image's bytes; production says
+ * face search is unavailable.
+ */
+export async function searchBySelfie(env: Env, eventId: string, image: Uint8Array, contentType: string, minScore = 0.5): Promise<SelfieSearch> {
+  if (!SELFIE_TYPES.test(contentType)) throw new UnsupportedMediaType('Send the selfie as a JPEG, PNG or WebP image.')
+  if (!image.byteLength) throw new ValidationFailed([{ field: '(body)', in: 'body', message: 'No image', code: 'required' }])
+  if (image.byteLength > SELFIE_MAX_BYTES) throw new PayloadTooLarge(SELFIE_MAX_BYTES)
+  let found: Awaited<ReturnType<typeof embedSelfie>>
+  try {
+    found = await embedSelfie(env, image, contentType)
+  } catch (err) {
+    if (err instanceof ProcessingRejected) return { faceFound: false, reason: 'no_face', personId: null, photoIds: [] }
+    if (err instanceof ProcessorBusy) throw new ServiceUnavailable('Lots of photos are being processed right now. Try again in a minute.', 'face_search_busy')
+    console.error(JSON.stringify({ level: 'error', msg: 'selfie embed failed', error: String(err) }))
+    throw new ServiceUnavailable('Face search is not available right now.', 'face_search_unavailable')
+  }
+  if (!found) {
+    if (env.ENVIRONMENT === 'development' || env.ENVIRONMENT === 'test') {
+      let sum = 0
+      for (let i = 0; i < image.byteLength; i += 97) sum = (sum * 31 + image[i]!) >>> 0
+      return { faceFound: true, ...await matchFaces(env, eventId, `selfie:${image.byteLength}:${sum}`, undefined, minScore) }
+    }
+    throw new ServiceUnavailable('Face search is not available right now.', 'face_search_unavailable')
+  }
+  const area = (b: [number, number, number, number]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1])
+  const face = [...found.faces].sort((a, b) => area(b.box) - area(a.box))[0]
+  if (!face) return { faceFound: false, reason: 'no_face', personId: null, photoIds: [] }
+  return { faceFound: true, ...await matchFaces(env, eventId, 'selfie', face.embedding, minScore) }
+}
 
 const chunk = <T,>(xs: T[], n = 80): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n))
 

@@ -82,6 +82,28 @@ export class HttpProcessor implements PhotoProcessor {
   }
 }
 
+/** A guest is waiting on a selfie: give up well before they do. */
+const SELFIE_TIMEOUT_MS = 25_000
+
+/**
+ * The faces in a selfie (apps/processor `/embed`): the image goes in the request and is never stored, here or
+ * there. Null when no processor is connected. Throws ProcessingRejected for an image it can't read and
+ * ProcessorBusy when it can't take it now.
+ */
+export async function embedSelfie(env: Env, image: Uint8Array, contentType: string): Promise<{ width: number; height: number; faces: { box: [number, number, number, number]; embedding: number[] }[] } | null> {
+  if (!env.PROCESSOR_URL) return null
+  const res = await fetch(`${env.PROCESSOR_URL.replace(/\/$/, '')}/embed`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(SELFIE_TIMEOUT_MS),
+    headers: { 'Content-Type': contentType, ...(env.PROCESSOR_TOKEN ? { Authorization: `Bearer ${env.PROCESSOR_TOKEN}` } : {}) },
+    body: image,
+  })
+  if (res.status === 422) throw new ProcessingRejected('processor could not read the selfie')
+  if (res.status === 503) throw new ProcessorBusy(Number(res.headers.get('retry-after')) || 30)
+  if (!res.ok) throw new Error(`processor responded ${res.status}`)
+  return res.json()
+}
+
 /**
  * Stand-in while no processor runs (production until the VPS is set up): confirms the original exists, reads its
  * pixel size from the file's first bytes when the client didn't send it, and keeps any faces already known.

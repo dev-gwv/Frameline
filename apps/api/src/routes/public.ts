@@ -29,7 +29,7 @@ import { logDownload, logDownloadsBatch, type DownloadLogRow } from '../services
 import { bumpDaily } from '../services/stats'
 import { PhotoSortEnum } from './photos'
 import { addLedger } from '../services/billing'
-import { matchFaces, visiblePhotos as visible } from '../services/faces'
+import { matchFaces, searchBySelfie, visiblePhotos as visible } from '../services/faces'
 import { resolveLink } from '../services/guest-links'
 import { markOrderPaid, sendReceipt, verifyCheckoutSignature, verifyReceiptToken } from '../services/orders'
 import { createProviderOrder, grantStudioPurchase, openStudioPayment, paymentMode, settleStudioPayment } from '../services/payments'
@@ -366,6 +366,29 @@ publicRoutes.openapi(createRoute({
     emit(c, e.studioId, 'activity', 'events')
   }
   return c.json({ faceFound: true, ...result }, 200)
+})
+
+/**
+ * Find my photos from the selfie image itself (the body: a JPEG, PNG or WebP, ≤ 8 MB; the gallery sends ≤ 1280 px).
+ * The processor finds the face with the same models as the event's photos; the image is never stored. Answers
+ * like faces/search. Raw body, so a plain route (outside the OpenAPI document, like PUT /photos/:id/web).
+ */
+publicRoutes.post('/events/:shortId/faces/selfie', async (c) => {
+  const { e } = await openEvent(c, c.req.param('shortId'))
+  await guestAccess(c, e)
+  if (!e.settings.faceSearch) throw new Forbidden('Face search is turned off for this gallery.', 'face_search_disabled')
+  const image = new Uint8Array(await c.req.arrayBuffer())
+  const result = await searchBySelfie(c.env, e.id, image, c.req.header('content-type') ?? '')
+  if (result.photoIds.length) {
+    const db = getDb(c.env.DB)
+    background(c, bumpDaily(db, e.studioId, e.id, 'faceSearches'))
+    background(c, db.batch([
+      db.update(schema.events).set({ faceMatches: sql`${schema.events.faceMatches} + 1` }).where(eq(schema.events.id, e.id)),
+      db.insert(schema.activity).values({ id: newId('act'), studioId: e.studioId, kind: 'face', title: `A guest found ${result.photoIds.length} photos of themselves`, detail: e.name, at: nowIso() }),
+    ]))
+    emit(c, e.studioId, 'activity', 'events')
+  }
+  return c.json(result, 200)
 })
 
 async function visiblePhoto(c: Context<AppEnv>, photoId: string) {

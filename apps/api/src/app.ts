@@ -93,7 +93,8 @@ export function createApp() {
     const isPart = c.req.method === 'PUT' && c.req.path.includes('/uploads/') && c.req.path.includes('/parts/')
     const isAsset = c.req.method === 'POST' && c.req.path === '/v1/assets'
     const isWebCopy = c.req.method === 'PUT' && /^\/v1\/photos\/[^/]+\/web$/.test(c.req.path)
-    const max = isPart ? PART_LIMIT : isAsset || isWebCopy ? ASSET_LIMIT : JSON_LIMIT
+    const isSelfie = c.req.method === 'POST' && /\/faces\/selfie$/.test(c.req.path)
+    const max = isPart ? PART_LIMIT : isAsset || isWebCopy || isSelfie ? ASSET_LIMIT : JSON_LIMIT
     return bodyLimit({ maxSize: max, onError: () => { throw new PayloadTooLarge(max) } })(c, next)
   })
   v1.use('*', peekUser)

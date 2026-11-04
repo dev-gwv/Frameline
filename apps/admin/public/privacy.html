@@ -50,10 +50,13 @@
       gallery that asks for them.</li>
     <li><strong>Event photos</strong> a studio uploads, and photos a guest uploads back (if a studio allows it).
       We also keep a smaller web-size copy of each photo so galleries load quickly.</li>
-    <li><strong>Selfies and face data: not collected at the moment.</strong> Face matching ("Find my photos with a
-      selfie") is switched off. We may offer it later; if we do, it will only run when a guest chooses to take a
-      selfie, the face data will be used only to find that guest's photos in that one event, and this policy will
-      say so before it starts.</li>
+    <li><strong>Face data from event photos.</strong> When a studio uploads photos, our photo processor finds the
+      faces in each one and turns each face into a list of numbers (a "face signature"). A face signature can't be
+      turned back into a picture. It is kept only with that one event, used only to find a person's photos within
+      that event, and deleted when the photo or the event is permanently deleted.</li>
+    <li><strong>Selfies.</strong> "Find my photos with a selfie" only runs when a guest chooses to take or pick a
+      selfie. The selfie is used once to make its face signature, compared with that one event's photos, and then
+      thrown away: we never store the selfie or its signature.</li>
     <li><strong>Order and payment information</strong> once selling photos is switched on (it is not yet): name,
       shipping address for prints, and order amount. Card and UPI details would be handled directly by our payment
       processor (Razorpay); we never see or store your card number.</li>
@@ -81,6 +84,8 @@
   <ul>
     <li><strong>Cloudflare</strong>: hosting, file storage and our database. All photos and account data are
       stored with Cloudflare.</li>
+    <li><strong>Hostinger</strong>: the server our photo processor runs on, in India. It reads each uploaded photo
+      to make the download copies and face signatures, and a guest's selfie to search with, and keeps none of them.</li>
     <li><strong>Google (Gmail / Google Workspace)</strong>: sending our emails (the recipient's address and the
       email itself), and sign-in if you choose "Continue with Google".</li>
     <li><strong>Groq and NVIDIA</strong>: the assistant that answers support questions in Help. The question, the

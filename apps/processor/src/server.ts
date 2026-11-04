@@ -39,6 +39,8 @@ const RenderJob = z.object({
 
 /** Long-edge sizes of the download renditions (web size, and high resolution when the gallery allows it). */
 const RENDITION_SIZES = [2048, 3072] as const
+/** A selfie as sent by apps/api (the guest's browser makes it ≤ 1280 px, so this is generous). */
+const SELFIE_MAX_BYTES = 10 * 1024 * 1024
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a), bb = Buffer.from(b)
@@ -70,6 +72,35 @@ export function buildServer(env: ProcessorEnv) {
       console.error(JSON.stringify({ level: 'error', msg: 'render failed', key: job.key, error: String(err) }))
       return c.json({ error: 'render_failed', detail: String(err) }, 502)
     } })
+    return out ?? busy(c)
+  })
+
+  // A guest's selfie (apps/api faces/selfie): the image itself in the body, kept in memory only and never stored.
+  // Same models and steps as a photo's faces, so the embedding compares with the event's. It goes to the front of
+  // the line: a guest is watching "Finding your photos…".
+  app.post('/embed', async (c) => {
+    const auth = c.req.header('authorization')
+    const token = auth?.match(/^Bearer\s+(.+)$/i)?.[1]
+    if (!token || !safeEqual(token, env.authToken)) return c.json({ error: 'unauthorized' }, 401)
+    const bytes = Buffer.from(await c.req.arrayBuffer())
+    if (!bytes.byteLength) return c.json({ error: 'no_image' }, 400)
+    if (bytes.byteLength > SELFIE_MAX_BYTES) return c.json({ error: 'too_large' }, 413)
+    const out = await limiter.run(async () => {
+      let upright: Buffer
+      try {
+        // Upright, and no bigger than it needs to be: a face fills a selfie, so 1600 px is plenty.
+        upright = await sharp(bytes).rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer()
+      } catch (err) {
+        return c.json({ error: 'unsupported_file', detail: String(err) }, 422)
+      }
+      try {
+        const result = await detectAndEmbed(upright)
+        return c.json({ width: result.width, height: result.height, faces: result.faces.map((f) => ({ box: f.box, embedding: f.embedding })) })
+      } catch (err) {
+        console.error(JSON.stringify({ level: 'error', msg: 'embed failed', error: String(err) }))
+        return c.json({ error: 'embed_failed' }, 502)
+      }
+    }, { first: true })
     return out ?? busy(c)
   })
 

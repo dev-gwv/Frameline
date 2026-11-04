@@ -286,6 +286,11 @@ export interface FramelineApi {
   listPublicPhotos(shortId: string, q?: PublicPhotosQuery): Promise<{ total: number; items: Photo[] }>
   /** `faceFound: false` when the selfie has no usable face (see FaceSearchInput.faces / image). */
   searchFaces(shortId: string, selfie: FaceSearchInput): Promise<FaceSearchResult>
+  /**
+   * Find my photos from the selfie image itself (JPEG/PNG/WebP, the gallery sends ≤ 1280 px): the server finds the
+   * face with the same models as the event's photos and never stores the image. Same answer as searchFaces.
+   */
+  searchFacesBySelfie(shortId: string, image: Blob): Promise<FaceSearchResult>
   setFavourite(photoId: ID, on: boolean, shortId?: string): Promise<{ favourites: number }>
   createEnquiry(target: EnquiryTarget, input: EnquiryInput): Promise<Enquiry>
   createOrder(shortId: string, input: OrderInput): Promise<Order>
@@ -302,6 +307,8 @@ export interface FramelineApi {
   buyPack(eventId: ID, photos: number, opts: { payWith: 'credits' | 'card' }): Promise<PackPurchase>
   /** Studio-side face lookup (e.g. building a personal link from an uploaded photo). */
   matchFaceForLink(eventId: ID, selfie: FaceSearchInput): Promise<FaceSearchResult>
+  /** The same from the photo itself (as searchFacesBySelfie). */
+  matchSelfieForLink(eventId: ID, image: Blob): Promise<FaceSearchResult>
   /** Uploads a logo / cover / broadcast image / QR logo / KYC document; returns a URL for the matching field. */
   uploadAsset(kind: AssetKind, file: AssetFile): Promise<Asset>
   listCarts(): Promise<AbandonedCart[]>
@@ -1552,6 +1559,11 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
       emit('events')
       return { faceFound: true, personId, photoIds: photos.filter((p) => p.faces.some((f) => f.personId === personId)).map((p) => p.id) }
     },
+    // Sample data has no faces to compare: the same deterministic match, keyed on the image.
+    async searchFacesBySelfie(shortId, image) {
+      if (!image.size) return { faceFound: false, reason: 'no_face' as const, personId: null, photoIds: [] }
+      return api.searchFaces(shortId, { key: `selfie:${image.type}:${image.size}` })
+    },
     async setFavourite(photoId, on, shortId) {
       await wait(latency / 2)
       const p = getPhotoMerged(photoId)
@@ -1689,6 +1701,9 @@ export function createMockApi(persist?: Persistence, opts: { latency?: number } 
     async matchFaceForLink(eventId, selfie) {
       const e = findEvent(eventId)
       return api.searchFaces(e.shortId, selfie)
+    },
+    async matchSelfieForLink(eventId, image) {
+      return api.searchFacesBySelfie(findEvent(eventId).shortId, image)
     },
     async uploadAsset(kind, file) {
       await wait(latency)

@@ -17,6 +17,18 @@ test('runs at most `max` jobs at once; the rest wait their turn', async () => {
   assert.deepEqual(lim.stats, { running: 0, waiting: 0, max: 2 })
 })
 
+test('a `first` job jumps the line and is never turned away', async () => {
+  const lim = new Limiter(1, 1)
+  const gate = later()
+  const order: string[] = []
+  const running = lim.run(async () => { await gate.p; order.push('running') })
+  const queued = lim.run(async () => { order.push('queued') })
+  const selfie = lim.run(async () => { order.push('selfie') }, { first: true })
+  gate.done()
+  await Promise.all([running, queued, selfie])
+  assert.deepEqual(order, ['running', 'selfie', 'queued'])
+})
+
 test('answers null (busy) once the wait line is full, and frees the slot after a failure', async () => {
   const lim = new Limiter(1, 1)
   const gate = later()

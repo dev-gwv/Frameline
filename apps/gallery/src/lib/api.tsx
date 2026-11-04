@@ -51,6 +51,7 @@ const SHORT_ID_ARG: Partial<Record<keyof FramelineApi, (args: unknown[]) => unkn
   registerGuest: (a) => a[0],
   listPublicPhotos: (a) => a[0],
   searchFaces: (a) => a[0],
+  searchFacesBySelfie: (a) => a[0],
   recordPhotoViews: (a) => a[1],
   requestNotify: (a) => a[0],
   createOrder: (a) => a[0],
