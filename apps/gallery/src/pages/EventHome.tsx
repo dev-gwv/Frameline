@@ -21,8 +21,9 @@ export function EventHome() {
   const albums = guestAlbums(event.albums, event)
   const guestAlbum = event.albums.find((a) => a.kind === 'guest')
   const films = event.films
-  // Photos a guest can browse (the event total also counts guest uploads awaiting review).
-  const total = albums.reduce((n, a) => n + a.photoCount, 0)
+  // Photos in "All photos": the studio's albums only, as the server lists them (guest uploads have their own album,
+  // and the event total also counts ones awaiting review).
+  const total = albums.reduce((n, a) => n + (a.kind === 'album' ? a.photoCount : 0), 0)
   const s = event.settings
   const locked = !seeAll && !session.match
   const highlights = event.highlights && seeAll ? highlightsQ.data ?? [] : []
