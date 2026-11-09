@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { Copy, Download } from 'lucide-react'
-import { DEMO_NOW, fmt, type Guest, type PhotoEvent } from '@frameline/shared'
+import { DEMO_NOW, displayUrl, fmt, type Guest, type PhotoEvent } from '@frameline/shared'
 import { Button, EmptyState, Modal, PhotoTile, Skeleton, useToast } from '@frameline/ui'
 import { useApi } from '../../lib/api'
 import { useAction, useStudio } from '../../lib/queries'
@@ -67,7 +67,7 @@ export function PicksModal({ event, guest, onClose }: { event: PhotoEvent; guest
       ) : (
         <>
           <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
-            {photos.slice(0, SHOWN).map((p) => <PhotoTile key={p.id} tone={p.tone} url={p.url} alt={p.filename} />)}
+            {photos.slice(0, SHOWN).map((p) => <PhotoTile key={p.id} tone={p.tone} url={displayUrl(p)} alt={p.filename} />)}
           </div>
           <div className="text-[12.5px] text-ink-3 tnum">
             {photos.length < total ? `Showing ${Math.min(SHOWN, photos.length)} of ${fmt.count(total)} · ${fmt.count(total - photos.length)} were deleted or moved out of the event` : total > SHOWN ? `Showing ${SHOWN} of ${fmt.count(total)}` : `All ${fmt.count(total)} photos`}

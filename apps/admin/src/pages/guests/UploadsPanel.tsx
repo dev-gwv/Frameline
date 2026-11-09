@@ -1,5 +1,5 @@
 import { Check, ImageIcon, Settings2, Trash2, X } from 'lucide-react'
-import { fmt, type Photo, type PhotoEvent } from '@frameline/shared'
+import { displayUrl, fmt, type Photo, type PhotoEvent } from '@frameline/shared'
 import { Button, Card, EmptyState, PhotoTile, Skeleton, Tip, useToast } from '@frameline/ui'
 import { errorMessage, useApi } from '../../lib/api'
 
@@ -78,7 +78,7 @@ export function UploadsPanel({ event, photos, loading, query, onOpenSettings }: 
       <div className="grid grid-cols-2 gap-2.5 min-[480px]:grid-cols-3 sm:grid-cols-4 lg:grid-cols-6">
         {list.map((p) => (
           <div key={p.id} className="min-w-0">
-            <PhotoTile tone={p.tone} url={p.url} alt={`${p.filename}, from ${p.uploadedBy}`} />
+            <PhotoTile tone={p.tone} url={displayUrl(p)} alt={`${p.filename}, from ${p.uploadedBy}`} />
             <div className="mt-1 flex items-center justify-between gap-1 text-[12px]">
               <span className="truncate text-ink-3" title={p.filename}>{p.uploadedBy}</span>
               {reviewing ? (
