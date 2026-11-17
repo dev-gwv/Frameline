@@ -9,6 +9,7 @@ import { audit } from './audit'
 import { FOLDER_MIME, DriveFileMissing, accessToken, assertDriveConfigured, drivePickerOn, getFile, listChildren, requireConnection, type DriveFile } from './drive'
 import { importOut, notImportable, queueImport } from './drive-import'
 import { emit } from './realtime'
+import { coverFullMessage, coverOf } from './sa-cover'
 
 /**
  * The Drive import's two steps, shared by the admin app's routes (routes/drive.ts) and Studio AutoPilot's
@@ -96,7 +97,14 @@ export async function startImport(c: Context<AppEnv>, ev: EventRow, userId: stri
   const wanted = unique.filter((i) => !have.has(i.fileId) && !notImportable({ mimeType: i.mimeType, size: i.size }))
   const [studio] = await db.select().from(schema.studios).where(eq(schema.studios.id, studioId)).limit(1)
   const cost = wanted.length * (input.quality === 'original' ? 2 : 1)
-  if (cost && studio.photosUsed + cost > studio.photosLimit) {
+  // A studio whose Studio AutoPilot plan covers Drive imports counts them against that plan (photos kept), never
+  // against Frameline's own quota; a full cover is said in its own words with the way to get more (WhatsApp).
+  const cover = await coverOf(db, studioId)
+  const covered = !!cover?.active
+  if (cover && covered && wanted.length && cover.used + wanted.length > cover.photos) {
+    throw new AppError(402, 'cover_full', 'Plan’s gallery photos used', coverFullMessage(cover, wanted.length))
+  }
+  if (!covered && cost && studio.photosUsed + cost > studio.photosLimit) {
     throw new AppError(402, 'quota_exceeded', 'Photo quota exceeded', `This import needs room for ${cost} photos but your plan has ${Math.max(0, studio.photosLimit - studio.photosUsed)} left. Add a photo pack or upgrade, or import fewer photos.`)
   }
   if (ev.photoCount + wanted.length > ev.photoLimit) {
@@ -118,7 +126,7 @@ export async function startImport(c: Context<AppEnv>, ev: EventRow, userId: stri
   const skippedItems = unique.length - wanted.length + (input.items.length - unique.length)
   await db.insert(schema.driveImports).values({
     id: importId, studioId, eventId: ev.id, userId, name: input.name, quality: input.quality, watermark: input.watermark,
-    status: wanted.length ? 'running' : 'done', total: input.items.length, skipped: skippedItems, albumsCreated: created, createdAt: now,
+    status: wanted.length ? 'running' : 'done', total: input.items.length, skipped: skippedItems, albumsCreated: created, createdAt: now, covered,
     ...(wanted.length ? {} : { finishedAt: now }),
   }).run()
   const rows = wanted.map((i) => ({

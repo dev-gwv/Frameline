@@ -335,6 +335,79 @@ describe('Google Drive through Studio AutoPilot', () => {
   })
 })
 
+describe("Studio AutoPilot's plan covers Drive imports", () => {
+  const api = (path: string, token: string, body?: unknown) => call(`/v1/integrations/studioautopilot${path}`, { token, body })
+  const post = (path: string, token: string) => call(`/v1/integrations/studioautopilot${path}`, { token, method: 'POST' })
+  const bag = env as unknown as Record<string, unknown>
+  const KEYS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'DRIVE_TOKEN_KEY', 'GOOGLE_PICKER_API_KEY', 'PHOTO_QUEUE'] as const
+  const key = btoa('k'.repeat(32))
+  const until = new Date(Date.now() + 30 * 86_400_000).toISOString()
+  const items = (n: number) => Array.from({ length: n }, (_, i) => ({ fileId: `fileCover${String(i).padStart(4, '0')}`, name: `C${i}.JPG`, size: 100, mimeType: 'image/jpeg', albumName: 'Wedding' }))
+
+  async function connected(cid: string, sub: string, cover: unknown) {
+    const g = await api('/events', await mint({ cid, sub, purpose: 'api', cover }), { projectId: 'cover-1', name: 'Covered wedding', date: '2026-12-01T00:00:00.000Z' })
+    const ev = await env.DB.prepare('SELECT studio_id FROM events WHERE id = ?').bind(g.json.eventId).first<{ studio_id: string }>()
+    await env.DB.prepare(`INSERT INTO drive_connections (studio_id, google_sub, email, refresh_token_enc, scope, status, default_for_new_events, missing_files, connected_by, connected_at)
+      VALUES (?, ?, 'studio@gmail.com', ?, 'drive.file', 'ok', 0, 0, 'u', ?)`).bind(ev!.studio_id, `g-${cid}`, await seal(key, 'rt'), new Date().toISOString()).run()
+    return ev!.studio_id
+  }
+
+  async function withDrive(run: () => Promise<void>) {
+    const saved: Record<string, unknown> = {}
+    for (const k of KEYS) saved[k] = bag[k]
+    Object.assign(bag, { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', DRIVE_TOKEN_KEY: key, GOOGLE_PICKER_API_KEY: 'pk', PHOTO_QUEUE: { send: async () => {}, sendBatch: async () => {} } })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), { headers: { 'content-type': 'application/json' } })))
+    try { await run() } finally { vi.unstubAllGlobals(); for (const k of KEYS) bag[k] = saved[k] }
+  }
+
+  it('saves the cover from the token, reports it, and counts a covered import against it, not Frameline’s quota', async () => {
+    await withDrive(async () => {
+      const cid = uid()
+      const sub = uid()
+      const studioId = await connected(cid, sub, { plan: 'Diamond Pro', until, photos: 3 })
+      const studio = await api('/studio', await mint({ cid, sub, purpose: 'api' }))
+      expect(studio.json.cover).toMatchObject({ plan: 'Diamond Pro', photos: 3, used: 0, active: true })
+
+      // Frameline's own quota is full, but the plan covers Drive imports: it starts, marked covered.
+      await env.DB.prepare('UPDATE studios SET photos_used = photos_limit WHERE id = ?').bind(studioId).run()
+      const start = await api('/events/cover-1/drive-imports', await mint({ cid, sub, purpose: 'api' }), { name: 'Wedding', quality: 'original', items: items(3) })
+      expect(start.status).toBe(201)
+      const row = await env.DB.prepare('SELECT covered FROM drive_imports WHERE id = ?').bind(start.json.id).first<{ covered: number }>()
+      expect(row?.covered).toBe(1)
+
+      // More than the plan's photos is refused in its own words.
+      const big = await api('/events/cover-1/drive-imports', await mint({ cid, sub, purpose: 'api' }), { name: 'Too many', quality: 'web', items: items(4) })
+      expectProblem(big, 402, 'cover_full')
+      expect(big.json.detail).toContain('Diamond Pro plan includes 3 photos')
+    })
+  })
+
+  it('falls back to Frameline’s own quota once the plan covers nothing, and keeps the last cover when a token says nothing', async () => {
+    await withDrive(async () => {
+      const cid = uid()
+      const sub = uid()
+      const studioId = await connected(cid, sub, { plan: 'Pro', until, photos: 25000 })
+      // A token without `cover` leaves it; an explicit null (Starter) clears it.
+      expect((await api('/studio', await mint({ cid, sub, purpose: 'api' }))).json.cover).toMatchObject({ plan: 'Pro', photos: 25000 })
+      expect((await post('/cover', await mint({ cid, sub, purpose: 'api', cover: null }))).json).toEqual({ linked: true })
+      expect((await api('/studio', await mint({ cid, sub, purpose: 'api' }))).json.cover).toBeNull()
+
+      await env.DB.prepare('UPDATE studios SET photos_used = photos_limit WHERE id = ?').bind(studioId).run()
+      expectProblem(await api('/events/cover-1/drive-imports', await mint({ cid, sub, purpose: 'api' }), { name: 'Wedding', quality: 'web', items: items(1) }), 402, 'quota_exceeded')
+      // A cover that has ended covers nothing either.
+      await post('/cover', await mint({ cid, sub, purpose: 'api', cover: { plan: 'Pro', until: new Date(Date.now() - 1000).toISOString(), photos: 25000 } }))
+      expectProblem(await api('/events/cover-1/drive-imports', await mint({ cid, sub, purpose: 'api' }), { name: 'Wedding', quality: 'web', items: items(1) }), 402, 'quota_exceeded')
+    })
+  })
+
+  it('ignores a cover whose shape is wrong', async () => {
+    const cid = uid()
+    const sub = uid()
+    await api('/events', await mint({ cid, sub, purpose: 'api', cover: { plan: 'Pro', until: 'soon', photos: -1 } }), { projectId: 'bad-cover', name: 'x', date: '2026-12-01T00:00:00.000Z' })
+    expect((await api('/studio', await mint({ cid, sub, purpose: 'api' }))).json.cover).toBeNull()
+  })
+})
+
 describe('telling Studio AutoPilot a gallery changed', () => {
   const api = (path: string, token: string, body?: unknown) => call(`/v1/integrations/studioautopilot${path}`, { token, body })
 

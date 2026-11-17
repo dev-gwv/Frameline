@@ -18,6 +18,7 @@ import { audit } from '../services/audit'
 import { getMailer } from '../services/mailer'
 import { normalizeEmail } from '../services/provisioning'
 import { emit } from '../services/realtime'
+import { coverOf } from '../services/sa-cover'
 
 export const studioRoutes = createRouter()
 
@@ -120,7 +121,12 @@ studioRoutes.openapi(createRoute({
   method: 'get', path: '/studio/usage', tags: ['Billing'], summary: 'Plan, photo usage and wallet', security,
   middleware: [requireStudio('uploader')] as const,
   responses: { 200: json(Usage), ...problems(401, 403) },
-}), async (c) => c.json(usageOut(await loadStudio(getDb(c.env.DB), membershipOf(c).studioId)), 200))
+}), async (c) => {
+  const db = getDb(c.env.DB)
+  const studioId = membershipOf(c).studioId
+  const cover = await coverOf(db, studioId)
+  return c.json({ ...usageOut(await loadStudio(db, studioId)), ...(cover ? { saCover: cover } : {}) }, 200)
+})
 
 studioRoutes.openapi(createRoute({
   method: 'post', path: '/studio/credits', tags: ['Billing'], summary: 'Add money to the wallet (owner)', security,

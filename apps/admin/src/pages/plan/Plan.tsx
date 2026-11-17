@@ -11,6 +11,8 @@ import { CheckoutModal, PackModal, PaidModal } from './Checkout'
 import { AddMoneyModal, CapacityModal, RedeemModal, RenewalPriceModal } from './PlanModals'
 import { RenewModal } from './RenewModal'
 import { usePlanState, yearlySavingPct, type Period } from './usePlanState'
+import { useTalkToUs } from './talkToUs'
+import { MessageCircle } from 'lucide-react'
 
 const SAVING = yearlySavingPct()
 const lakh = (n: number) => (n >= 100_000 ? `${fmt.count(n / 100_000)} lakh` : fmt.count(n))
@@ -29,6 +31,8 @@ export default function Plan() {
   const [upgrade, setUpgrade] = useState<PlanT | null>(null)
   const [paid, setPaid] = useState<{ r: PlanChange; plan: PlanT } | null>(null)
   const { payments } = useServerFeatures()
+  // Buying is a conversation with the team (talkToUs.ts); checkout and packs stay for their deep links.
+  const talk = useTalkToUs()
 
   if (isError) return <Page title="Plan and billing"><QueryError error={error} retry={() => refetch()} what="your plan" /></Page>
 
@@ -55,8 +59,25 @@ export default function Plan() {
             {wallet.data && wallet.data.earnings > 0 && <div className="text-[12.5px] text-ink-3">{fmt.rupees(Math.round(wallet.data.prepaid))} added · {fmt.rupees(Math.round(wallet.data.earnings))} from sales</div>}
           </div>
           <div className="flex flex-wrap gap-2 md:justify-end">
-            <Button onClick={() => set({ add: '1' })}>Add money</Button>
+            <Button icon={<MessageCircle size={14} />} className="bg-[#1fa855] text-white hover:bg-[#178a45]" onClick={() => talk('to add money to my wallet')}>WhatsApp us</Button>
             <Button variant="ghost" onClick={() => set({ redeem: '1' })}>Redeem a code</Button>
+          </div>
+        </Card>
+      )}
+
+      {usage?.saCover && (
+        <Card className="mb-4 grid items-center gap-4 border-[1.5px] border-accent md:grid-cols-[1.2fr_auto]">
+          <div>
+            <b className="block text-[15px]">Google Drive galleries · included in your Studio AutoPilot {usage.saCover.plan} plan</b>
+            <Meter value={usage.saCover.used} max={Math.max(1, usage.saCover.photos)} className="my-2" label="Drive gallery photos" tone={usage.saCover.used / Math.max(1, usage.saCover.photos) > 0.9 ? 'warn' : 'gold'} />
+            <div className="text-[13px] text-ink-2 tnum">
+              {usage.saCover.active
+                ? `${fmt.count(usage.saCover.used)} of ${fmt.count(usage.saCover.photos)} photos kept · until ${fmt.date(usage.saCover.until)} · imports from Google Drive count here, not in Photos used`
+                : `Your Studio AutoPilot plan ended on ${fmt.date(usage.saCover.until)}. Galleries stay open; renew it to import from Google Drive again.`}
+            </div>
+          </div>
+          <div className="flex md:justify-end">
+            <Button variant="secondary" icon={<MessageCircle size={14} />} onClick={() => talk(`more Google Drive gallery photos on my Studio AutoPilot ${usage.saCover!.plan} plan`)}>Ask for more photos</Button>
           </div>
         </Card>
       )}
@@ -74,8 +95,9 @@ export default function Plan() {
               <div className="text-[13px] text-ink-2">{lakh(p.photos)} photos · {p.seats} team seats</div>
               <div className="mt-auto pt-1">
                 {current ? <Button disabled className="w-full">Current plan</Button>
-                  : <Button variant={popular && !lower && p.id !== plan.id ? 'primary' : 'secondary'} className="w-full" disabled={!usage} onClick={() => setUpgrade(p)}>
-                    {p.id === plan.id ? `Switch to ${period}` : lower ? `Switch to ${p.name}` : 'Upgrade'}
+                  : <Button variant={popular && !lower && p.id !== plan.id ? 'primary' : 'secondary'} className="w-full" disabled={!usage} icon={<MessageCircle size={14} />}
+                    onClick={() => talk(`the ${p.name} plan, paid ${period} (${fmt.rupees(planPrice(p, period))} + GST)`)}>
+                    WhatsApp us
                   </Button>}
               </div>
             </Card>
@@ -83,7 +105,7 @@ export default function Plan() {
         })}
       </div>
       <p className="mt-3.5 text-[13.5px] text-ink-3">
-        Need photos for one event only? <button type="button" className="font-bold text-accent-text hover:underline" onClick={() => set({ pack: '1' })}>Buy an event pack</button>
+        Need photos for one event only? <button type="button" className="font-bold text-accent-text hover:underline" onClick={() => talk('an event photo pack')}>Ask us on WhatsApp for an event pack</button>
         {' · '}<button type="button" className="font-bold text-accent-text hover:underline" onClick={() => setModal('renewal-price')}>What clients pay to renew</button>
         {' · '}Prices exclude GST.
       </p>

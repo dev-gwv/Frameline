@@ -8,6 +8,7 @@ import { addPhotos, type StoredFile } from './add-photos'
 import { DriveBusy, DriveFileMissing, DriveRevoked, IMPORTABLE, MAX_IMPORT_FILE_BYTES, downloadFile, driveFetch, getFile, type DriveFile } from './drive'
 import { queuePartnerNotice } from './partner-notify'
 import { publishTopics } from './realtime'
+import { coveredUsed } from './sa-cover'
 import { objectKey } from './storage'
 
 /**
@@ -135,9 +136,13 @@ export async function runDriveImport(env: Env, job: DriveImportJob): Promise<voi
     .where(and(inArray(schema.albums.id, albumIds), eq(schema.albums.eventId, ev.id), isNull(schema.albums.deletedAt)))).map((a) => a.id))
   const already = new Set((await db.select({ f: schema.photos.driveFileId }).from(schema.photos)
     .where(and(eq(schema.photos.eventId, ev.id), inArray(schema.photos.driveFileId, items.map((i) => i.fileId)), isNull(schema.photos.deletedAt)))).map((r) => r.f))
-  const [studio] = await db.select({ used: schema.studios.photosUsed, limit: schema.studios.photosLimit }).from(schema.studios).where(eq(schema.studios.id, imp.studioId)).limit(1)
-  const unit = imp.quality === 'original' ? 2 : 1
-  let room = Math.min(studio ? studio.limit - studio.used : 0, (ev.photoLimit - ev.photoCount) * unit)
+  const [studio] = await db.select({ used: schema.studios.photosUsed, limit: schema.studios.photosLimit, coverPhotos: schema.studios.saCoverPhotos })
+    .from(schema.studios).where(eq(schema.studios.id, imp.studioId)).limit(1)
+  // An import started under the studio's Studio AutoPilot plan counts photos kept against that plan, one each,
+  // and never touches Frameline's own quota (services/sa-cover.ts).
+  const unit = imp.covered ? 1 : imp.quality === 'original' ? 2 : 1
+  const planRoom = !studio ? 0 : imp.covered ? studio.coverPhotos - await coveredUsed(db, imp.studioId) : studio.limit - studio.used
+  let room = Math.min(planRoom, (ev.photoLimit - ev.photoCount) * unit)
 
   const byAlbum = new Map<string, { item: ItemRow; file: StoredFile }[]>()
   let skipped = 0
@@ -191,7 +196,7 @@ async function addCopied(env: Env, imp: ImportRow, ev: typeof schema.events.$inf
   for (const [albumId, list] of byAlbum) {
     if (!list.length) continue
     await addPhotos(env, {
-      event: ev, albumId, studioId: imp.studioId, quality: imp.quality, uploaderName: uploader,
+      event: ev, albumId, studioId: imp.studioId, quality: imp.quality, uploaderName: uploader, covered: imp.covered,
       options: { source: 'drive', uploadedBy: uploader, watermark: imp.watermark || undefined }, files: list.map((l) => l.file),
     })
     for (const l of list) await setItem(env, l.item.id, { status: 'done', photoId: l.file.photoId })

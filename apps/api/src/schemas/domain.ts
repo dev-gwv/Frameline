@@ -83,6 +83,8 @@ export const Usage = z.object({
   guestReserved: z.number().int(),
   walletCredits: z.number(),
   renewalMultiplier: z.number(),
+  saCover: z.object({ plan: z.string(), until: z.string(), photos: z.number().int(), used: z.number().int(), active: z.boolean() }).optional()
+    .openapi({ description: 'What the studio\'s Studio AutoPilot plan covers: Google Drive imports and their galleries, up to `photos` kept, until `until`. Absent when Studio AutoPilot never sent one.' }),
 }).openapi('Usage')
 
 export const EventSettings = z.object({

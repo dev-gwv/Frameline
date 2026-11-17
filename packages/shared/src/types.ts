@@ -77,6 +77,11 @@ export interface Usage {
   guestReserved: number
   walletCredits: number
   renewalMultiplier: number
+  /**
+   * What the studio's Studio AutoPilot plan covers (Google Drive imports and their galleries): photos allowed and
+   * kept, until when. Absent for a studio Studio AutoPilot never sent a cover for.
+   */
+  saCover?: { plan: string; until: string; photos: number; used: number; active: boolean }
 }
 
 export interface EventSettings {

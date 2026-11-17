@@ -127,6 +127,13 @@
       "when": 1793788236516,
       "tag": "0017_photos_copied_from_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1794910831885,
+      "tag": "0018_sa_cover",
+      "breakpoints": true
     }
   ]
 }

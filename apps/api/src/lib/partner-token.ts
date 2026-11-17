@@ -31,6 +31,29 @@ export interface PartnerClaims {
   role: 'owner' | 'editor'
   /** SSO only: an admin path to open after sign-in, e.g. /events/ev_x. */
   to?: string
+  /**
+   * What the company's Studio AutoPilot plan covers here (Google Drive imports and their galleries): the plan's
+   * name, when it ends and how many photos may be kept. null: nothing (Starter, or no plan). Absent: an older
+   * Studio AutoPilot that does not say, so what was saved before stands.
+   */
+  cover?: PartnerCover | null
+}
+
+export interface PartnerCover {
+  plan: string
+  /** ISO time the cover ends. */
+  until: string
+  photos: number
+}
+
+/** A cover as sent, or null when it is missing or not one whose shape we can trust. */
+export function readCover(v: unknown): PartnerCover | null {
+  if (!v || typeof v !== 'object') return null
+  const c = v as Record<string, unknown>
+  if (typeof c.plan !== 'string' || !c.plan || c.plan.length > 80) return null
+  if (typeof c.until !== 'string' || Number.isNaN(Date.parse(c.until))) return null
+  if (typeof c.photos !== 'number' || !Number.isInteger(c.photos) || c.photos < 0 || c.photos > 10_000_000) return null
+  return { plan: c.plan, until: new Date(Date.parse(c.until)).toISOString(), photos: c.photos }
 }
 
 export type PartnerTokenError = 'malformed' | 'bad_signature' | 'expired' | 'wrong_audience' | 'too_long_lived' | 'wrong_purpose'
@@ -75,6 +98,7 @@ export async function verifyPartnerToken(
       ...(claims as PartnerClaims),
       name: typeof claims.name === 'string' ? claims.name.slice(0, 120) : '',
       email_verified: claims.email_verified === true,
+      ...('cover' in claims ? { cover: readCover(claims.cover) } : {}),
     },
   }
 }

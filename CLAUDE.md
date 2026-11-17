@@ -3,7 +3,10 @@
 Frameline is a Kamero-style event photo gallery for Indian wedding and event studios: the studio uploads, guests
 open a link (+ PIN), browse, download and buy. It is also **Studio AutoPilot's gallery add-on** (the studio CRM at
 studioautopilot.in, repo dev-gwv/platform, local `E:\BuildOurs\IPC Studios CRM`), joined by sign-in and links,
-never merged. Billing stays Frameline's own (its wallet and plans).
+never merged. Billing stays Frameline's own (its wallet and plans), with one exception: **Studio AutoPilot's Pro and
+Studio Max plans and its trial cover Google Drive imports and the galleries made from them**, up to a number of
+photos kept (owner, 17 Nov; see "Studio AutoPilot's cover" below). **Buying is a conversation**: the Plan page's buy
+buttons are **WhatsApp us** (`pages/plan/talkToUs.ts`, SUPPORT_WHATSAPP else 91 91091 92065), the team sets it up.
 
 Read this before changing anything. When the owner gives a standing instruction, add it here.
 
@@ -77,6 +80,15 @@ sample sign-in = Continue with Google, code 123456). Production builds refuse to
   Drive isn't connected). Studio AutoPilot never rebuilds Drive: its buttons sign the person in (`sso` `to`) at the
   import window or `/settings/drive`.
 
+- **Studio AutoPilot's cover** (17 Nov, migration 0018, `services/sa-cover.ts`): every token Studio AutoPilot signs
+  carries `cover` = `{plan, until, photos}` (Pro 25,000, Studio Max 75,000, its trial 3,000, plus add-ons the team
+  gives) or `null` (Starter: nothing); absent = an older sender, the saved cover stands. `claimsFrom` saves it on
+  the studio (`studios.sa_cover_*`); `POST .../cover` exists so Give plan there can push it at once. While the cover
+  is active a Drive import (`startImport`, `drive_imports.covered`, `photos.covered`) counts photos **kept**
+  against it (deleting frees room), one per photo, and never touches `photosUsed` or Frameline's trial; full is
+  402 `cover_full` with words that say WhatsApp. Uploads from a computer or phone stay on Frameline's own plan. An
+  ended or null cover falls back to Frameline's quota. `GET .../studio` and `/v1/studio/usage` (`saCover`) report
+  it; the Plan page shows it with **Ask for more photos**.
 - **Frameline inside Studio AutoPilot** (4 Nov): Projects → **Gallery app** (`/galleries/app` there) frames the
   studio site, signed in by a fresh `sso` link each load (its `POST /galleries/app/open`, projects edit, any `to`
   path). Works because the admin keeps its session in the frame's own (partitioned) localStorage, not cookies.

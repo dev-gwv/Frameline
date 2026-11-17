@@ -16,6 +16,7 @@ import { DriveNotConnected, driveConfigured, drivePickerOn, getConnection } from
 import { expandPicked, pickerConfig, startImport, stopImport } from '../services/drive-actions'
 import { importOut } from '../services/drive-import'
 import { DriveImportSchema, DriveItemSchema, DrivePickerSchema, ImportInput } from './drive'
+import { coverOf, saveCover } from '../services/sa-cover'
 
 /**
  * Studio AutoPilot, the studio-management app, opens Frameline as its gallery add-on.
@@ -31,7 +32,9 @@ import { DriveImportSchema, DriveItemSchema, DrivePickerSchema, ImportInput } fr
  * these answers give (`drive.settingsPath`; `importPath` is the admin's own import window).
  * And one door the other way: services/partner-notify.ts tells Studio AutoPilot when a gallery changed.
  *
- * Billing stays Frameline's: a studio made here starts on the same trial as any other and pays from its wallet.
+ * Billing stays Frameline's (a studio made here starts on the same trial as any other), except Google Drive imports
+ * and their galleries: Studio AutoPilot's Pro and Studio Max plans and its trial cover those, up to a number of
+ * photos kept (`cover` on every token, services/sa-cover.ts, owner 17 Nov).
  */
 export const integrationRoutes = createRouter()
 
@@ -52,6 +55,12 @@ async function claimsFrom(c: Context<AppEnv>, token: string | undefined, purpose
       : new Unauthorized('This link from Studio AutoPilot is not valid.', 'invalid_partner_token')
   }
   await spendJti(c.env.KV, r.claims)
+  // Every token carries what the company's plan covers here (services/sa-cover.ts); a studio set up already keeps
+  // the latest. A studio made by this very call gets it from ensurePartnerStudio.
+  if (r.claims.cover !== undefined) {
+    const studioId = await linkedId(getDb(c.env.DB), 'studio', r.claims.cid)
+    if (studioId) await saveCover(getDb(c.env.DB), studioId, r.claims)
+  }
   return r.claims
 }
 
@@ -243,6 +252,8 @@ const PartnerStudio = z.object({
   walletRupees: z.number().nullable(),
   photosUsed: z.number().int().nullable(),
   photosLimit: z.number().int().nullable(),
+  /** What the company's Studio AutoPilot plan covers here (Drive imports): photos allowed and kept, until when. */
+  cover: z.object({ plan: z.string(), until: z.string(), photos: z.number().int(), used: z.number().int(), active: z.boolean() }).nullable(),
   galleries: z.number().int(),
   adminUrl: z.string(),
   /** Google Drive for this studio: whether Frameline offers it at all, and whether the studio connected it. */
@@ -282,7 +293,7 @@ integrationRoutes.openapi(createRoute({
   const adminUrl = c.env.APP_URL.replace(/\/$/, '')
   const studioId = await linkedId(db, 'studio', claims.cid)
   const [s] = studioId ? await db.select().from(schema.studios).where(eq(schema.studios.id, studioId)).limit(1) : []
-  if (!s) return c.json({ linked: false, studioName: null, plan: null, validTill: null, walletRupees: null, photosUsed: null, photosLimit: null, galleries: 0, adminUrl, drive: await driveOut(c, null) }, 200)
+  if (!s) return c.json({ linked: false, studioName: null, plan: null, validTill: null, walletRupees: null, photosUsed: null, photosLimit: null, cover: null, galleries: 0, adminUrl, drive: await driveOut(c, null) }, 200)
   const l = schema.partnerLinks
   const e = schema.events
   const [{ n }] = await db.select({ n: count() }).from(l).innerJoin(e, eq(e.id, l.localId))
@@ -292,8 +303,17 @@ integrationRoutes.openapi(createRoute({
     // While payments are off a lapsed plan isn't enforced and nothing can be bought, so there is no end to show
     // (Studio AutoPilot would say "plan ended, renew it" about something that hasn't ended).
     validTill: paymentsOn(c.env) ? s.validTill : null, walletRupees: s.walletPaise / 100,
-    photosUsed: s.photosUsed, photosLimit: s.photosLimit, galleries: n, adminUrl, drive: await driveOut(c, s.id),
+    photosUsed: s.photosUsed, photosLimit: s.photosLimit, cover: await coverOf(db, s.id), galleries: n, adminUrl, drive: await driveOut(c, s.id),
   }, 200)
+})
+
+integrationRoutes.openapi(createRoute({
+  method: 'post', path: '/integrations/studioautopilot/cover', tags: ['Integrations'], summary: 'The company\'s plan changed',
+  description: 'Studio AutoPilot calls this when the company\'s plan changes, so what it covers here (Drive imports, the token\'s `cover`) is saved at once instead of on the next gallery call. `linked: false` when the owner has not opened a gallery yet; the cover is then saved on that first call.',
+  responses: { 200: json(z.object({ linked: z.boolean() })), ...problems(401, 501) },
+}), async (c) => {
+  const claims = await claimsFrom(c, bearerOf(c), 'api')
+  return c.json({ linked: !!await linkedId(getDb(c.env.DB), 'studio', claims.cid) }, 200)
 })
 
 // ── Google Drive import from Studio AutoPilot's own screen ──────────────────

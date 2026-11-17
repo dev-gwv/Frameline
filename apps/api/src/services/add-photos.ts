@@ -31,6 +31,8 @@ type EventRow = typeof schema.events.$inferSelect
  */
 export async function addPhotos(env: Env, a: {
   event: EventRow; albumId: string; studioId: string; quality: 'web' | 'original'; options: UploadSessionOptions; uploaderName: string; files: StoredFile[]
+  /** A Drive import under the studio's Studio AutoPilot plan (services/sa-cover.ts): not charged to Frameline's quota. */
+  covered?: boolean
 }): Promise<(typeof schema.photos.$inferInsert)[]> {
   const db = getDb(env.DB)
   const ev = a.event
@@ -49,9 +51,9 @@ export async function addPhotos(env: Env, a: {
     tone: tone(hash(f.filename)), url: f.url ?? null, r2Key: f.key, status: f.webCopy ? 'ready' : 'processing', hidden: false, favourites: 0, downloads: 0, faces: [],
     exif: { width: f.width ?? 0, height: f.height ?? 0, sizeBytes: f.size }, uploadedBy: opts.uploadedBy ?? a.uploaderName,
     source, quality: a.quality, createdAt: now, reviewStatus,
-    storage: f.storage ?? 'r2', driveFileId: f.driveFileId ?? null, webCopy: f.webCopy ?? false,
+    storage: f.storage ?? 'r2', driveFileId: f.driveFileId ?? null, webCopy: f.webCopy ?? false, covered: !!a.covered,
   }))
-  const cost = source === 'guest' ? 0 : rows.length * (a.quality === 'original' ? 2 : 1)
+  const cost = source === 'guest' || a.covered ? 0 : rows.length * (a.quality === 'original' ? 2 : 1)
   await db.batch([
     db.update(schema.studios).set({ photosUsed: sql`${schema.studios.photosUsed} + ${cost}` }).where(eq(schema.studios.id, a.studioId)),
     ...rows.map((r) => db.insert(p).values(r)),

@@ -97,6 +97,14 @@ export const studios = sqliteTable('studios', {
   storeSettings: json<StoreSettings>('store_settings'),
   billing: json<StudioBilling>('billing'),
   whatsapp: text('whatsapp'),
+  /**
+   * What the studio's Studio AutoPilot plan covers here (Pro and Studio Max, or its trial): Google Drive imports
+   * and their galleries, up to `saCoverPhotos` photos kept, until `saCoverUntil`. Sent with every Studio AutoPilot
+   * token (`cover`); null for a studio not joined to Studio AutoPilot, or on a plan that covers nothing.
+   */
+  saCoverPlan: text('sa_cover_plan'),
+  saCoverUntil: ts('sa_cover_until'),
+  saCoverPhotos: integer('sa_cover_photos').notNull().default(0),
 }, (t) => [uniqueIndex('studios_handle_uq').on(t.handle), uniqueIndex('studios_follow_uq').on(t.followCode)])
 
 export const memberships = sqliteTable('memberships', {
@@ -254,6 +262,11 @@ export const photos = sqliteTable('photos', {
   storage: text('storage', { enum: ['r2', 'drive'] }).notNull().default('r2'),
   /** The Drive file: the original for `storage: drive`, the source of an import for `source: drive`. */
   driveFileId: text('drive_file_id'),
+  /**
+   * Imported from Google Drive under the studio's Studio AutoPilot plan (`studios.saCover*`): counted against that
+   * plan's photos while it is kept, never against Frameline's own quota (`photosUsed`).
+   */
+  covered: bool('covered').notNull().default(false),
 }, (t) => [
   index('photos_drive_file_idx').on(t.eventId, t.driveFileId),
   index('photos_deleted_idx').on(t.deletedAt),
@@ -729,6 +742,8 @@ export const driveImports = sqliteTable('drive_imports', {
   error: text('error'),
   createdAt: ts('created_at').notNull(),
   finishedAt: ts('finished_at'),
+  /** Started while the studio's Studio AutoPilot plan covered Drive imports: its photos are `covered`. */
+  covered: bool('covered').notNull().default(false),
 }, (t) => [index('drive_imports_event_idx').on(t.eventId, t.createdAt)])
 
 export const driveImportItems = sqliteTable('drive_import_items', {

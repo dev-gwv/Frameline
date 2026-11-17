@@ -5,6 +5,7 @@ import { Conflict, Unauthorized } from '../lib/errors'
 import { newId, nowIso } from '../lib/ids'
 import type { PartnerClaims } from '../lib/partner-token'
 import { createStudio, normalizeEmail } from './provisioning'
+import { saveCover } from './sa-cover'
 
 /**
  * Studio AutoPilot as a partner: its companies are our studios, its people our users, its projects our events.
@@ -98,6 +99,8 @@ export async function ensurePartnerStudio(db: DB, claims: PartnerClaims, user: U
       if (!claimed) { adopt = o.studioId; break }
     }
     studioId = await link(db, 'studio', claims.cid, adopt ?? await createStudio(db, user.id, claims.cname, user.email))
+    // Just joined: claimsFrom could not save the plan's cover before the studio existed.
+    await saveCover(db, studioId, claims)
   }
 
   const role = claims.role === 'owner' ? 'owner' : 'editor'
