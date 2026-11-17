@@ -93,6 +93,8 @@ describe('orders paid to the studio directly (international)', () => {
       buyerEmail: 'john@example.com', method: 'international', guestId: null, shipping: null, remindedAt: null, reminderCount: 0,
       refundedAt: null, refundReason: null, trackingNumber: null, linkSentAt: null,
     }).run()
+    // A Razorpay signature from some other payment can't mark it paid (it has no Razorpay order of its own).
+    expectProblem(await call(`/v1/public/orders/${id}/confirm`, { body: { providerOrderId: 'order_cheap_other', paymentId: 'pay_x', signature: 'x' } }), 409, 'order_not_checkout')
     const token = await tokenFor('owner')
     const r = await call(`/v1/orders/${id}/received`, { token, method: 'POST' })
     expect(r.status).toBe(200)

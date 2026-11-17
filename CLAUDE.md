@@ -276,6 +276,12 @@ and "QA Test Enquiry project" (Drive off, empty). Screenshots: `docs/demo/studio
   Cloud servers, not Google Photos), then Google Drive import + originals in Drive (migration 0016), off until the
   owner's Google setup. Note: `node_modules` links pointed at the old `E:\BuildOurs\Kamero-Clone` path; fixed with
   `pnpm install --frozen-lockfile --config.confirmModulesPurge=false` (CI=true).
+- 17 Nov 2026 small fixes: KYC documents open only with a studio signature (`isPrivateAssetKey`, not cached
+  publicly); `POST /public/orders/:id/confirm` refuses orders without their own Razorpay order (international
+  orders could be marked paid with another payment's signature); new events default to today; Home's fake
+  "Watch" video card removed; import window closes after handing off to a new tab inside Studio AutoPilot;
+  expiry/limit help guides have payments-off versions (`needs: 'paymentsOff'`); Renew no longer says photos are
+  deleted 7 days after expiry (nothing deletes expired events).
 - 29 Oct 2026: Drive made a main action (`00619df`), then a live test in Chrome. Fixed: studio profile couldn't be
   saved at all without a logo (`logoUrl: ""` was refused; now "" removes it) and demanded phone + city; no way to
   edit an event's city, last day or type (`endDate: ""` clears it); no way to change your own name (Settings → Your

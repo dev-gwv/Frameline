@@ -69,7 +69,7 @@ export function RenewModal({ eventId, faces: facesAsked, onClose }: { eventId: s
       title={ev ? `Renew ${ev.name}` : 'Renew an event'}
       description={ev && closes ? (faces
         ? `Face search data for this event is deleted on ${fmt.date(facesGone!.toISOString())} unless you renew.`
-        : `${expired ? 'Guests lost access on' : 'Guests lose access on'} ${fmt.date(ev.expiresAt)}. Photos are deleted ${EXPIRY_GRACE_DAYS} days later.`) : undefined}
+        : `${expired ? 'Guests lost access on' : 'Guests lose access on'} ${fmt.date(ev.expiresAt)}. Your photos stay in Frameline; renewing opens the gallery again.`) : undefined}
       footer={<><Button variant="ghost" onClick={onClose}>Not now</Button>{primary}</>}>
       {events.isLoading ? <Skeleton className="h-40" /> : !ev ? (
         <p className="text-[14px] text-ink-2">We couldn’t find that event. It may have been deleted. Pick it from Events and choose Renew from its ⋯ menu.</p>

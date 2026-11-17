@@ -58,7 +58,7 @@ export function ImportModal({ open, onOpenChange, event, albums, initialTab, alb
   const choose = async () => {
     // Inside Studio AutoPilot: Google's picker won't run in a frame, so this window opens in a signed-in tab. Asked
     // straight away, while the click still lets Studio AutoPilot open a tab.
-    if (API_URL && openOutside(`/events/${event.id}?modal=import`)) { toast.success('Opened in a new tab', 'Pick from Google Drive there. Imports show here as they run.'); return }
+    if (API_URL && openOutside(`/events/${event.id}?modal=import`)) { onOpenChange(false); toast.success('Opened in a new tab', 'Pick from Google Drive there. Imports show here as they run.'); return }
     setChoosing(true)
     try {
       const cfg = await api.getDrivePicker()

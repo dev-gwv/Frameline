@@ -3,6 +3,7 @@ import { ASSET_RULES } from '@frameline/shared'
 import { getDb, schema } from '../db/client'
 import { mediaUrl } from '../db/mappers'
 import { AppError, PayloadTooLarge } from '../lib/errors'
+import { isPrivateAssetKey, signMediaKey } from '../lib/media-sign'
 import { newId, nowIso } from '../lib/ids'
 import { IdempotencyHeader, createRouter, json, problems, security } from '../lib/openapi'
 import { membershipOf, requireStudio } from '../middleware/auth'
@@ -41,9 +42,12 @@ assetRoutes.openapi(createRoute({
   if (bytes.byteLength === 0) throw new AppError(422, 'empty_file', 'Empty file', 'The file is empty.')
   const id = newId('as')
   const key = `studios/${m.studioId}/assets/${kind}/${id}.${EXT[contentType]}`
-  await c.env.MEDIA.put(key, bytes, { httpMetadata: { contentType, cacheControl: 'public, max-age=31536000, immutable' }, customMetadata: { fileName: filename } })
+  // KYC documents (PAN, ID, cheque) are private: never cached publicly, and their address carries a studio signature.
+  const isPrivate = isPrivateAssetKey(key)
+  await c.env.MEDIA.put(key, bytes, { httpMetadata: { contentType, cacheControl: isPrivate ? 'private, no-store' : 'public, max-age=31536000, immutable' }, customMetadata: { fileName: filename } })
   const row = { id, studioId: m.studioId, kind, key, contentType, size: bytes.byteLength, fileName: filename, createdBy: c.get('user')?.id ?? null, createdAt: nowIso() }
   await getDb(c.env.DB).insert(schema.assets).values(row).run()
   audit(c, 'asset.upload', { type: 'asset', id }, { kind, size: row.size })
-  return c.json({ id, kind, url: assetUrl(c, key), contentType, size: row.size, fileName: filename, createdAt: row.createdAt }, 201)
+  const url = isPrivate ? `${assetUrl(c, key)}?${await signMediaKey(c.env.JWT_SECRET, key)}` : assetUrl(c, key)
+  return c.json({ id, kind, url, contentType, size: row.size, fileName: filename, createdAt: row.createdAt }, 201)
 })

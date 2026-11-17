@@ -1,7 +1,7 @@
 import { FEATURES, type ServerFeatures } from './features'
 
 /** What a guide needs switched on to be true: a product flag (features.ts) or a server switch (AI, payments, invoices). */
-export type ArticleNeeds = 'cameraSync' | 'drive' | 'driveImport' | 'aiEnhance' | 'ai' | 'payments' | 'invoices'
+export type ArticleNeeds = 'cameraSync' | 'drive' | 'driveImport' | 'aiEnhance' | 'ai' | 'payments' | 'paymentsOff' | 'invoices'
 export interface Article { id: string; title: string; answer: string; tags: string[]; video?: { en: string; hi: string }; needs?: ArticleNeeds }
 
 /** The help guides: the studio's Help page and the support assistant (apps/api services/support-ai.ts) read the same ones. */
@@ -22,10 +22,14 @@ export const ARTICLES: Article[] = [
     answer: 'Add your GSTIN in Settings → Billing and GST. Every plan, pack and wallet top-up then has a tax invoice under Settings → Invoices.' },
   { id: 'watermark', title: 'Watermark missing on downloads', tags: ['watermark', 'downloads'],
     answer: 'Check Watermark (in More) → More options → Add it to. “Guest downloads” must be on for downloads to carry the watermark (and “Full-size downloads” when the gallery lets guests save full-size files). A change applies to the next download. Photos shown while guests browse aren’t watermarked.' },
-  { id: 'expiry', title: 'What happens when an event expires', tags: ['expiry', 'renew', 'plan'],
-    answer: 'Guests see an “expired” page but nothing is deleted for 7 days. Renew it from Home (half price from your wallet) or send your client a renewal link so they pay for it.' },
-  { id: 'limit', title: 'Increase an event’s photo limit', tags: ['limit', 'pack', 'photos'],
+  { id: 'expiry', needs: 'payments', title: 'What happens when an event expires', tags: ['expiry', 'renew', 'plan'],
+    answer: 'A gallery stays open for a year after the event date (or a year from when you create it, for an event already past). After that, guests see a “This gallery has closed” page; your photos stay in Frameline. Renew it for another year from the event’s ⋯ menu → Renew, or from Home when it shows under Needs you: half price from your wallet, or the full price by UPI or card. Or choose “Send a link” so your client pays your price for it.' },
+  { id: 'expiry-free', needs: 'paymentsOff', title: 'What happens when an event expires', tags: ['expiry', 'renew', 'plan'],
+    answer: 'A gallery stays open for a year after the event date (or a year from when you create it, for an event already past). After that, guests see a “This gallery has closed” page; your photos stay in Frameline. Renew it for another year from the event’s ⋯ menu → Renew, or from Home when it shows under Needs you. Renewing is free while we’re starting out.' },
+  { id: 'limit', needs: 'payments', title: 'Increase an event’s photo limit', tags: ['limit', 'pack', 'photos'],
     answer: 'Open Plan and billing → Buy an event pack and pick the event. The extra photos are added straight away and last 12 months.' },
+  { id: 'limit-free', needs: 'paymentsOff', title: 'How many photos an event can hold', tags: ['limit', 'pack', 'photos'],
+    answer: 'Each event holds up to 25,000 photos while we’re starting out, and there are no packs to buy. If you need more in one event, book a call from Help.' },
   { id: 'team', title: 'Add a second shooter who can only upload', tags: ['team', 'uploader', 'roles'],
     answer: 'Go to Settings → Team, enter their email and pick Uploader. Uploaders can add photos to events you assign but can’t delete, share or see sales.' },
   { id: 'quickstart', title: 'Quick start: your first event in 5 minutes', tags: ['tutorial', 'start'],
@@ -37,7 +41,7 @@ export const ARTICLES: Article[] = [
 
 /** The guides that are true right now: never one for a switched-off feature. */
 export function availableArticles(server: Pick<ServerFeatures, 'ai' | 'payments' | 'seller'> & Partial<Pick<ServerFeatures, 'drive' | 'driveImport'>>): Article[] {
-  const on = (n: ArticleNeeds) => (n === 'ai' ? server.ai : n === 'payments' ? server.payments : n === 'invoices' ? !!server.seller
+  const on = (n: ArticleNeeds) => (n === 'ai' ? server.ai : n === 'payments' ? server.payments : n === 'paymentsOff' ? !server.payments : n === 'invoices' ? !!server.seller
     : n === 'drive' || n === 'driveImport' ? server[n] === true : FEATURES[n])
   return ARTICLES.filter((a) => !a.needs || on(a.needs))
 }

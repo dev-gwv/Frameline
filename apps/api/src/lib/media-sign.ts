@@ -21,6 +21,9 @@ const TTL_SEC = 24 * 3600
 type PhotoRow = typeof schema.photos.$inferSelect
 export type MediaScope = 'studio' | 'guest'
 
+/** Studio files only the studio may open (KYC documents): /v1/media serves them with a studio signature, never cached publicly. */
+export const isPrivateAssetKey = (key: string) => /^studios\/[^/]+\/assets\/kyc-document\//.test(key)
+
 export const guestCanSee = (r: Pick<PhotoRow, 'hidden' | 'deletedAt' | 'reviewStatus' | 'status'>) =>
   !r.hidden && !r.deletedAt && r.status === 'ready' && (!r.reviewStatus || r.reviewStatus === 'approved')
 

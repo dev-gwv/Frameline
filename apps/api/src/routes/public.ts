@@ -836,12 +836,15 @@ publicRoutes.openapi(createRoute({
   },
   responses: { 200: json(Order), ...problems(401, 404, 409, 422, 501) },
 }), async (c) => {
-  if (!c.env.RAZORPAY_KEY_SECRET) throw new NotConfigured('Payments', 'Online payments are not configured (RAZORPAY_KEY_SECRET).')
   const db = getDb(c.env.DB)
   const [order] = await db.select().from(schema.orders).where(eq(schema.orders.id, c.req.valid('param').id)).limit(1)
   if (!order) throw new NotFound('Order', c.req.valid('param').id)
   const input = c.req.valid('json')
-  if (order.providerRef && order.providerRef !== input.providerOrderId && order.status === 'pending') throw new AppError(409, 'order_mismatch', 'Conflict', 'This payment belongs to a different order.')
+  // Only an order opened with Razorpay, and only with its own Razorpay order: an international order (paid to the
+  // studio directly, no provider order) must never be marked paid by a signature from some other payment.
+  if (order.method === 'international' || !order.providerRef) throw new AppError(409, 'order_not_checkout', 'Conflict', 'This order isn’t paid through checkout. The studio marks it paid when the money arrives.')
+  if (order.providerRef !== input.providerOrderId) throw new AppError(409, 'order_mismatch', 'Conflict', 'This payment belongs to a different order.')
+  if (!c.env.RAZORPAY_KEY_SECRET) throw new NotConfigured('Payments', 'Online payments are not configured (RAZORPAY_KEY_SECRET).')
   if (!(await verifyCheckoutSignature(c.env.RAZORPAY_KEY_SECRET, input.providerOrderId, input.paymentId, input.signature))) {
     throw new Unauthorized('The payment signature is invalid.', 'invalid_signature')
   }

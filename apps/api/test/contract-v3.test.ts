@@ -193,7 +193,14 @@ describe('studio side', () => {
     expect((await up('studio-logo', 'image/svg+xml', '<svg/>')).status).toBe(415)
     expect((await up('kyc-document', 'image/gif', png)).status).toBe(415)
     expect((await up('broadcast-image', 'image/jpeg', new Uint8Array(10 * 1024 * 1024 + 1))).status).toBe(413)
-    const pdf = (await (await up('kyc-document', 'application/pdf', new TextEncoder().encode('%PDF-1.4 test'), 'cheque.pdf')).json()) as { id: string }
+    const pdf = (await (await up('kyc-document', 'application/pdf', new TextEncoder().encode('%PDF-1.4 test'), 'cheque.pdf')).json()) as { id: string; url: string }
+    // KYC files open only with the signature the upload handed back.
+    expect(pdf.url).toMatch(/\?exp=\d+&sig=/)
+    const kycServed = await SELF.fetch(pdf.url)
+    expect(kycServed.status).toBe(200)
+    expect(kycServed.headers.get('cache-control')).toBe('private, no-store')
+    expect((await SELF.fetch(pdf.url.split('?')[0])).status).toBe(404)
+    expect((await SELF.fetch(pdf.url.replace(/sig=[^&]+/, 'sig=AAAAAAAAAAAAAAAAAAAAAAAAAAA'))).status).toBe(404)
     const s = await call('/v1/store/settings', { token, method: 'PATCH', body: { kyc: { documents: [{ kind: 'cheque', status: 'needed', fileName: '', assetId: pdf.id }] } } })
     expect(s.json.kyc.documents[0]).toMatchObject({ kind: 'cheque', assetId: pdf.id, fileName: 'cheque.pdf', status: 'review' })
     expectProblem(await call('/v1/store/settings', { token, method: 'PATCH', body: { kyc: { documents: [{ kind: 'pan', status: 'needed', fileName: '', assetId: asset.id }] } } }), 422, 'validation_failed')

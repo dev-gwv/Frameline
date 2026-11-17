@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronDown, Info, Mail, Phone } from 'lucide-react'
-import { DEMO_NOW, EVENT_TYPES, fmt, type EventType } from '@frameline/shared'
+import { EVENT_TYPES, fmt, type EventType } from '@frameline/shared'
 import { Button, Field, Input, Modal, Select, Toggle, cn } from '@frameline/ui'
 import { useApi, useServerFeatures } from '../../lib/api'
 import { GoogleDriveIcon } from '../../lib/drive'
@@ -12,7 +12,7 @@ import { EMAIL_RE, guessType, PHONE_RE, toDateInput } from './lib'
 
 interface Form extends EventBasicsValue { type: EventType; typeTouched: boolean; hostEmail: string; hostPhone: string; guestLimit: string }
 const initial = (): Form => ({
-  name: '', date: toDateInput(DEMO_NOW + 7 * 86_400_000), city: '', preset: 'private-family',
+  name: '', date: toDateInput(Date.now()), city: '', preset: 'private-family',
   type: 'other', typeTouched: false, hostEmail: '', hostPhone: '', guestLimit: '300',
 })
 

@@ -7,7 +7,7 @@ import { webCopyKey } from '../db/mappers'
 import type { UploadFileRecord, UploadSessionOptions } from '../db/schema'
 import { AppError, Conflict, NotFound, Unauthorized, ValidationFailed } from '../lib/errors'
 import { newId, nowIso } from '../lib/ids'
-import { guestCanSee, studioPhotosOut, verifyMediaSig } from '../lib/media-sign'
+import { guestCanSee, isPrivateAssetKey, studioPhotosOut, verifyMediaSig } from '../lib/media-sign'
 import { signJwt, verifyJwt } from '../lib/jwt'
 import { IdempotencyHeader, body, createRouter, json, problems, security } from '../lib/openapi'
 import { membershipOf, requireStudio, userOf } from '../middleware/auth'
@@ -340,6 +340,10 @@ uploadRoutes.get('/media/:key{.+}', async (c) => {
     cache = 'private, max-age=3600'
     // Copies (picks albums) share the original's file, so any of them can say where it is.
     inDrive = rows.find((r) => r.storage === 'drive' && r.r2Key === key && r.driveFileId) ?? null
+  } else if (isPrivateAssetKey(key)) {
+    // KYC documents: only with the studio signature the upload handed back.
+    if (!(await verifyMediaSig(c.env.JWT_SECRET, key, c.req.query('exp'), c.req.query('sig')))) throw new NotFound('File')
+    cache = 'private, no-store'
   }
   if (inDrive) {
     // The original is in the studio's Google Drive (the web copy, in R2, is served below like any file).

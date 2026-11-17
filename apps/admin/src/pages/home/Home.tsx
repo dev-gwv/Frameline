@@ -13,7 +13,7 @@ import { EventCard, EventCardSkeleton } from '../events/EventCard'
 import { NewEventModal } from '../events/NewEventModal'
 import { recentFirst, totalVisits } from '../events/lib'
 import { useEventActions } from '../events/useEventActions'
-import { focusEvent, GettingStarted, HeardAboutCard, NextStepCard, VideoCard } from './FirstRun'
+import { focusEvent, GettingStarted, HeardAboutCard, NextStepCard } from './FirstRun'
 import { FollowCard, HelpCard, PlanCard } from './HomeCards'
 import { NeedsYouCard } from './NeedsYouCard'
 import { UploadPicker } from './UploadPicker'
@@ -63,7 +63,6 @@ export default function Home() {
         </div>
         <div className="mt-4 flex flex-col gap-4">
           {list.length > 0 && <HeardAboutCard studio={studio.data} />}
-          <VideoCard />
         </div>
         {modals}
       </Page>

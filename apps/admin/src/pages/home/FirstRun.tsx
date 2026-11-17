@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CalendarPlus, ExternalLink, ImageIcon, Play, Share2, Upload } from 'lucide-react'
+import { CalendarPlus, ImageIcon, Share2, Upload } from 'lucide-react'
 import { fmt, type PhotoEvent, type Studio, type WatermarkSettings } from '@frameline/shared'
-import { Button, Card, ChecklistSteps, CoverMosaic, EventStatusChip, IconTile, Modal, useToast } from '@frameline/ui'
+import { Button, Card, ChecklistSteps, CoverMosaic, EventStatusChip, useToast } from '@frameline/ui'
 import { useApi, useServerFeatures } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { GoogleDriveIcon } from '../../lib/drive'
@@ -82,35 +82,6 @@ export function GettingStarted({ studio, events, watermark, event }: { studio?: 
         { id: 'share', title: 'Share with guests', done: false, action: event && hasPhotos ? act('Share', () => navigate(`/events/${event.id}?modal=share`)) : undefined },
         { id: 'wm', title: 'Set your watermark (optional)', done: wmDone, action: act('Set', () => navigate('/watermark')) },
       ]} />
-    </Card>
-  )
-}
-
-const VIDEOS = [
-  { lang: 'English', url: 'https://www.youtube.com/results?search_query=frameline+first+event' },
-  { lang: 'हिन्दी', url: 'https://www.youtube.com/results?search_query=frameline+first+event+hindi' },
-]
-
-export function VideoCard() {
-  const [open, setOpen] = useState(false)
-  return (
-    <Card className="flex items-center gap-3">
-      <IconTile><Play size={15} aria-hidden /></IconTile>
-      <div className="min-w-0 flex-1">
-        <b className="text-[14px]">Watch: your first event in 3 minutes</b>
-        <div className="text-[13px] text-ink-2">English and हिन्दी</div>
-      </div>
-      <Button size="sm" className="max-sm:h-10" onClick={() => setOpen(true)}>Watch</Button>
-      <Modal open={open} onOpenChange={setOpen} title="Your first event in 3 minutes" description="Create an event, add photos and share the link. Pick a language; it opens on YouTube." width={420}>
-        <div className="flex flex-col gap-2">
-          {VIDEOS.map((v) => (
-            <a key={v.lang} href={v.url} target="_blank" rel="noreferrer" onClick={() => setOpen(false)}
-              className="flex min-h-[48px] items-center gap-3 rounded-[10px] border border-line px-3.5 hover:bg-sunk">
-              <Play size={16} className="text-accent-text" aria-hidden /><b className="flex-1 text-[14px]">Watch in {v.lang}</b><ExternalLink size={14} className="text-ink-3" aria-hidden />
-            </a>
-          ))}
-        </div>
-      </Modal>
     </Card>
   )
 }
