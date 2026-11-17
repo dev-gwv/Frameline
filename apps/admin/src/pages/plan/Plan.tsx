@@ -15,6 +15,11 @@ import { useTalkToUs } from './talkToUs'
 import { MessageCircle } from 'lucide-react'
 
 const SAVING = yearlySavingPct()
+/**
+ * The Studio AutoPilot cover card (Drive gallery photos in the plan) stays hidden from studios until the owner decides
+ * what they see (17 Nov). The cover still counts imports; turn this on to show the card again.
+ */
+const SHOW_SA_COVER = false
 const lakh = (n: number) => (n >= 100_000 ? `${fmt.count(n / 100_000)} lakh` : fmt.count(n))
 
 /**
@@ -65,7 +70,7 @@ export default function Plan() {
         </Card>
       )}
 
-      {usage?.saCover && (
+      {SHOW_SA_COVER && usage?.saCover && (
         <Card className="mb-4 grid items-center gap-4 border-[1.5px] border-accent md:grid-cols-[1.2fr_auto]">
           <div>
             <b className="block text-[15px]">Google Drive galleries · included in your Studio AutoPilot {usage.saCover.plan} plan</b>
