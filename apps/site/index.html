@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Frameline: wedding photo galleries guests actually open</title>
+<meta name="description" content="Event photo galleries for Indian wedding and event studios. Upload or import from Google Drive, share a link and PIN on WhatsApp, and guests open it on their phone. No app to install. Free for 14 days." />
+<meta property="og:title" content="Frameline: wedding photo galleries guests actually open" />
+<meta property="og:description" content="Upload or import from Google Drive, share a link and PIN on WhatsApp, and guests open it on their phone. Free for 14 days." />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="https://frameline-site.pages.dev/img/og.jpg" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="theme-color" content="#15120E" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap" />
+<style>
+  :root {
+    --paper: #F7F5F0; --surface: #FFFFFF; --sunk: #F2EEE6; --ink: #1C1814; --ink-2: #5F574B; --ink-3: #8C8374;
+    --line: #ECE7DD; --line-2: #DED6C8; --accent: #B8862B; --accent-soft: #F6EDDA; --accent-text: #8A5E14;
+    --side: #15120E; --side-2: #1F1A14; --side-ink: #F2EADB; --side-ink-2: #A89D8A; --side-line: #2C251D; --side-gold: #F2D38A;
+    --gold: linear-gradient(135deg, #E9C77A 0%, #C9973A 55%, #AE7A22 100%);
+    --shadow: 0 1px 2px rgba(40,28,10,.05), 0 4px 14px rgba(40,28,10,.06);
+    --shadow-lg: 0 24px 60px rgba(20,12,4,.35);
+    --display: 'Fraunces', Georgia, serif; --sans: 'Manrope', system-ui, sans-serif;
+    --wrap: 1160px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  img { max-width: 100%; height: auto; display: block; }
+  a { color: inherit; }
+  h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -0.015em; line-height: 1.12; margin: 0; text-wrap: balance; }
+  p { margin: 0; }
+  .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
+  .eyebrow { font-size: 12.5px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-text); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 22px; border-radius: 12px;
+    font: 700 15.5px/1 var(--sans); text-decoration: none; cursor: pointer; border: 1px solid transparent; transition: transform .15s, box-shadow .15s, background .15s; white-space: nowrap; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-gold { background: var(--gold); color: #1E1508; box-shadow: 0 1px 0 rgba(255,255,255,.35) inset, 0 6px 18px rgba(184,134,43,.35); }
+  .btn-ghost { background: transparent; color: var(--side-ink); border-color: #4A4135; }
+  .btn-ghost:hover { background: rgba(255,255,255,.06); }
+  .btn-line { background: var(--surface); color: var(--ink); border-color: var(--line-2); }
+  .btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+  /* Nav */
+  .nav { position: sticky; top: 0; z-index: 20; background: rgba(21,18,14,.88); backdrop-filter: saturate(1.4) blur(12px); -webkit-backdrop-filter: saturate(1.4) blur(12px); border-bottom: 1px solid var(--side-line); }
+  .nav .wrap { display: flex; align-items: center; gap: 28px; height: 68px; }
+  .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--side-ink); font: 600 22px/1 var(--display); }
+  .logo svg { width: 32px; height: 32px; }
+  .nav-links { display: flex; gap: 26px; margin-left: 12px; }
+  .nav-links a { color: var(--side-ink-2); text-decoration: none; font-weight: 600; font-size: 15px; }
+  .nav-links a:hover { color: var(--side-ink); }
+  .nav-cta { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  .nav-cta .signin { color: var(--side-ink); text-decoration: none; font-weight: 700; font-size: 15px; padding: 0 10px; }
+  .nav-cta .btn { min-height: 42px; padding: 0 18px; font-size: 14.5px; }
+
+  /* Hero */
+  .hero { background: var(--side); color: var(--side-ink); position: relative; overflow: hidden; }
+  .hero::before { content: ""; position: absolute; inset: 0; background:
+      radial-gradient(60% 70% at 85% 0%, rgba(221,168,72,.28), transparent 70%),
+      radial-gradient(40% 50% at 0% 100%, rgba(221,168,72,.10), transparent 70%); pointer-events: none; }
+  .hero .wrap { position: relative; display: grid; grid-template-columns: 1.02fr 1fr; gap: 56px; align-items: center; padding-top: 84px; padding-bottom: 96px; }
+  .hero h1 { font-size: clamp(40px, 5.6vw, 68px); color: #FBF6EC; }
+  .hero h1 em { font-style: italic; background: var(--gold); -webkit-background-clip: text; background-clip: text; color: transparent; padding-right: 4px; }
+  .hero .lead { margin-top: 22px; font-size: 19px; color: var(--side-ink-2); max-width: 520px; }
+  .hero .ctas { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .hero .fine { margin-top: 16px; font-size: 14px; color: var(--side-ink-2); }
+  .hero .eyebrow { color: var(--side-gold); margin-bottom: 18px; display: block; }
+
+  .stage { position: relative; min-height: 470px; }
+  .stage .desk { position: absolute; right: -120px; top: 10px; width: 640px; border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-lg); border: 1px solid #3A3226; background: var(--paper); }
+  .stage .desk .bar { height: 30px; background: #EFEAE0; display: flex; gap: 6px; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--line-2); }
+  .stage .desk .bar i { width: 9px; height: 9px; border-radius: 50%; background: #D8CFBF; display: block; }
+  .phone { width: 220px; aspect-ratio: 9 / 18.5; border-radius: 34px; padding: 8px; background: #0B0907; box-shadow: var(--shadow-lg); border: 1px solid #3A3226; }
+  .phone img { width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 27px; }
+  .stage .phone { position: absolute; left: 0; bottom: -20px; }
+  .stage .phone.second { left: 150px; bottom: -60px; transform: rotate(4deg); width: 200px; display: none; }
+
+  /* Strip */
+  .strip { background: var(--side-2); border-top: 1px solid var(--side-line); color: var(--side-ink-2); }
+  .strip .wrap { display: flex; flex-wrap: wrap; gap: 14px 36px; justify-content: center; padding-top: 20px; padding-bottom: 20px; font-weight: 600; font-size: 14.5px; }
+  .strip span { display: inline-flex; align-items: center; gap: 9px; }
+  .strip svg { width: 18px; height: 18px; color: var(--side-gold); }
+
+  /* Sections */
+  section { padding: 104px 0; }
+  .head { max-width: 680px; margin-bottom: 52px; }
+  .head h2 { font-size: clamp(32px, 4vw, 46px); margin-top: 12px; }
+  .head p { margin-top: 16px; color: var(--ink-2); font-size: 18px; }
+  .center { text-align: center; margin-left: auto; margin-right: auto; }
+
+  /* Problem */
+  .problem { background: var(--surface); border-bottom: 1px solid var(--line); }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .compare > div { border-radius: 18px; padding: 30px; border: 1px solid var(--line); }
+  .compare .before { background: var(--sunk); }
+  .compare .after { background: var(--accent-soft); border-color: #EBD9B4; }
+  .compare h3 { font-size: 22px; margin-bottom: 16px; }
+  .compare ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+  .compare li { display: flex; gap: 12px; color: var(--ink-2); }
+  .compare li svg { width: 20px; height: 20px; flex-shrink: 0; margin-top: 3px; }
+  .before li svg { color: #B23D2E; }
+  .after li svg { color: #2F7A4E; }
+
+  /* Steps */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; counter-reset: s; }
+  .step { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 28px; box-shadow: var(--shadow); }
+  .step .n { width: 40px; height: 40px; border-radius: 12px; background: var(--gold); color: #1E1508; display: grid; place-items: center; font: 700 18px/1 var(--display); }
+  .step h3 { font-size: 21px; margin: 18px 0 8px; }
+  .step p { color: var(--ink-2); }
+
+  /* Feature rows */
+  .row { display: grid; grid-template-columns: 1fr 1.15fr; gap: 64px; align-items: center; }
+  .row + .row { margin-top: 112px; }
+  .row.flip .copy { order: 2; }
+  .row .copy h2 { font-size: clamp(30px, 3.6vw, 40px); margin: 12px 0 16px; }
+  .row .copy > p { color: var(--ink-2); font-size: 17.5px; }
+  .ticks { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 12px; }
+  .ticks li { display: flex; gap: 12px; }
+  .ticks li svg { width: 22px; height: 22px; color: var(--accent); flex-shrink: 0; margin-top: 1px; }
+  .shot { border-radius: 16px; overflow: hidden; border: 1px solid var(--line-2); box-shadow: 0 20px 50px rgba(40,28,10,.14); background: var(--surface); }
+  .phones { display: flex; gap: 22px; justify-content: center; }
+  .phones .phone { width: 240px; }
+  .phones .phone:nth-child(2) { margin-top: 48px; }
+
+  /* Feature grid */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 24px; }
+  .card .ic { width: 42px; height: 42px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-text); display: grid; place-items: center; }
+  .card .ic svg { width: 21px; height: 21px; }
+  .card h3 { font: 700 17px/1.3 var(--sans); letter-spacing: 0; margin: 16px 0 6px; }
+  .card p { color: var(--ink-2); font-size: 15px; }
+
+  /* Studio AutoPilot */
+  .sa { background: var(--side); color: var(--side-ink); }
+  .sa .box { display: grid; grid-template-columns: 1.2fr 1fr; gap: 48px; align-items: center; }
+  .sa h2 { font-size: clamp(30px, 3.6vw, 42px); color: #FBF6EC; margin: 12px 0 16px; }
+  .sa p { color: var(--side-ink-2); font-size: 17.5px; }
+  .sa .eyebrow { color: var(--side-gold); }
+  .sa ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+  .sa li { display: flex; gap: 14px; background: var(--side-2); border: 1px solid var(--side-line); border-radius: 14px; padding: 16px 18px; }
+  .sa li svg { width: 22px; height: 22px; color: var(--side-gold); flex-shrink: 0; margin-top: 2px; }
+  .sa li b { display: block; color: var(--side-ink); }
+  .sa li span { color: var(--side-ink-2); font-size: 15px; }
+  .sa a.more { color: var(--side-gold); font-weight: 700; display: inline-block; margin-top: 22px; }
+
+  /* Pricing */
+  .trial { display: flex; align-items: center; justify-content: space-between; gap: 24px; background: var(--surface); border: 1px solid #EBD9B4; border-radius: 18px; padding: 26px 30px; margin-bottom: 20px;
+    background-image: linear-gradient(90deg, var(--accent-soft), var(--surface) 70%); }
+  .trial h3 { font-size: 24px; }
+  .trial p { color: var(--ink-2); margin-top: 4px; }
+  .plans { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .plan { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; }
+  .plan.pick { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); position: relative; }
+  .plan.pick::before { content: "Most studios"; position: absolute; top: -12px; left: 24px; background: var(--gold); color: #1E1508; font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 999px; }
+  .plan h3 { font: 700 18px/1.2 var(--sans); letter-spacing: 0; }
+  .plan .price { font: 600 34px/1 var(--display); margin: 16px 0 4px; }
+  .plan .per { color: var(--ink-3); font-size: 14px; }
+  .plan ul { list-style: none; padding: 0; margin: 18px 0 22px; display: grid; gap: 8px; font-size: 15px; color: var(--ink-2); }
+  .plan ul b { color: var(--ink); }
+  .plan .btn { margin-top: auto; min-height: 44px; font-size: 14.5px; }
+  .note { margin-top: 18px; color: var(--ink-3); font-size: 14px; text-align: center; }
+
+  /* FAQ */
+  .faq { max-width: 800px; margin: 0 auto; }
+  details { border-bottom: 1px solid var(--line-2); padding: 4px 0; }
+  summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 18px 0; font-weight: 700; font-size: 17.5px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; font: 400 26px/1 var(--sans); color: var(--accent-text); transition: transform .2s; }
+  details[open] summary::after { transform: rotate(45deg); }
+  details p { color: var(--ink-2); padding: 0 0 20px; max-width: 700px; }
+
+  /* Final CTA */
+  .final { padding: 0 0 104px; }
+  .final .box { background: var(--side); border-radius: 26px; padding: 64px 48px; text-align: center; color: var(--side-ink); position: relative; overflow: hidden; }
+  .final .box::before { content: ""; position: absolute; inset: 0; background: radial-gradient(50% 80% at 50% 0%, rgba(221,168,72,.25), transparent 70%); }
+  .final .box > * { position: relative; }
+  .final h2 { font-size: clamp(32px, 4.2vw, 50px); color: #FBF6EC; }
+  .final p { color: var(--side-ink-2); margin: 16px auto 30px; max-width: 540px; font-size: 18px; }
+  .final .ctas { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--ink-3); font-size: 14px; }
+  footer .wrap { display: flex; gap: 20px 32px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+  footer .logo { color: var(--ink); font-size: 19px; }
+  footer .logo svg { width: 26px; height: 26px; }
+  footer nav { display: flex; gap: 22px; flex-wrap: wrap; }
+  footer nav a { text-decoration: none; color: var(--ink-2); font-weight: 600; }
+  footer nav a:hover { color: var(--ink); }
+
+  /* Responsive */
+  @media (max-width: 1060px) {
+    .stage .desk { right: -220px; }
+  }
+  @media (max-width: 920px) {
+    .nav-links { display: none; }
+    .hero .wrap { grid-template-columns: 1fr; padding-top: 56px; padding-bottom: 64px; gap: 40px; }
+    .stage { min-height: 0; display: flex; justify-content: center; align-items: flex-start; gap: 16px; }
+    .stage .desk { display: none; }
+    .stage .phone { position: static; width: 200px; }
+    .stage .phone.second { display: block; position: static; transform: none; margin-top: 40px; width: 200px; }
+    .row, .row.flip, .sa .box { grid-template-columns: 1fr; gap: 36px; }
+    .row.flip .copy { order: 0; }
+    .row + .row { margin-top: 80px; }
+    .steps, .grid { grid-template-columns: 1fr 1fr; }
+    .plans { grid-template-columns: 1fr 1fr; }
+    section { padding: 76px 0; }
+  }
+  @media (max-width: 640px) {
+    .wrap { padding: 0 16px; }
+    .nav .wrap { height: 60px; gap: 12px; }
+    .nav-cta .signin { display: none; }
+    .logo { font-size: 20px; }
+    .hero .lead { font-size: 17px; }
+    .hero .ctas .btn { flex: 1 1 100%; }
+    .stage .phone, .stage .phone.second { width: calc(50% - 8px); max-width: 190px; }
+    .compare, .steps, .grid, .plans { grid-template-columns: 1fr; }
+    .phones { gap: 12px; }
+    .phones .phone { width: calc(50% - 6px); }
+    .phones .phone:nth-child(2) { margin-top: 32px; }
+    .trial { flex-direction: column; align-items: stretch; padding: 22px; }
+    .final .box { padding: 44px 22px; border-radius: 20px; }
+    .final .ctas .btn { flex: 1 1 100%; }
+    section { padding: 64px 0; }
+    .head { margin-bottom: 36px; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F2D38A"/><stop offset=".46" stop-color="#DDA848"/><stop offset="1" stop-color="#B37C22"/></linearGradient>
+    <symbol id="mark" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#15120E"/><rect x="8" y="10" width="16" height="12" rx="2" fill="url(#lg)"/><rect x="11" y="12.5" width="10" height="7" rx="1" fill="#15120E"/></symbol>
+    <symbol id="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5" stroke-width="1.6"/><path d="m8 12.5 2.7 2.7L16 9.8"/></symbol>
+    <symbol id="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9.5" stroke-width="1.6"/><path d="m9 9 6 6M15 9l-6 6"/></symbol>
+    <symbol id="wa" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.1l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.7 11.7 0 0 0 4.5 4c1.7.7 2.3.8 3.2.7.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3Z"/></symbol>
+    <symbol id="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="drive" viewBox="0 0 24 24"><path fill="#0066DA" d="m3.4 18.6.9 1.5c.2.3.4.5.7.7l3.1-5.4H2c0 .4.1.7.3 1l1.1 2.2Z"/><path fill="#00AC47" d="M12 8.4 8.9 3c-.3.2-.5.4-.7.7L2.3 14.4c-.2.3-.3.6-.3 1h6.2L12 8.4Z"/><path fill="#EA4335" d="M19 20.8c.3-.2.5-.4.7-.7l.4-.6 1.7-3c.2-.3.3-.7.3-1h-6.2l1.3 2.6 1.8 2.7Z"/><path fill="#00832D" d="M12 8.4 15.1 3c-.3-.2-.7-.3-1-.3H9.9c-.4 0-.7.1-1 .3L12 8.4Z"/><path fill="#2684FC" d="M15.8 15.4H8.2l-3.1 5.4c.3.2.7.3 1 .3h11.8c.4 0 .7-.1 1-.3l-3.1-5.4Z"/><path fill="#FFBA00" d="m19.7 8.8-2.9-5.1c-.2-.3-.4-.5-.7-.7L12 8.4l3.8 7h6.2c0-.4-.1-.7-.3-1l-2-5.6Z"/></symbol>
+    <symbol id="phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18.5h2"/></symbol>
+    <symbol id="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1"/><path d="M14 14h2.5v2.5H14zM18.5 18.5h2M14 20.5h2.5M20.5 14v2.5"/></symbol>
+    <symbol id="drop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M4 15.5v3A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5v-3"/></symbol>
+    <symbol id="stamp" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M14 15.5h4"/><circle cx="9" cy="10" r="2"/></symbol>
+    <symbol id="users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></symbol>
+    <symbol id="upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="9" cy="9" r="1.8"/><path d="m20.5 15-4.5-4.5L6 20.5"/></symbol>
+    <symbol id="heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.5-4.4-7.5-10A4.3 4.3 0 0 1 12 7.3 4.3 4.3 0 0 1 19.5 10c0 5.6-7.5 10-7.5 10Z"/></symbol>
+    <symbol id="chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/></symbol>
+    <symbol id="link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></symbol>
+    <symbol id="folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v7.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5Z"/></symbol>
+  </defs>
+</svg>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="Frameline home"><svg aria-hidden="true"><use href="#mark"/></svg>Frameline</a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">Questions</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="signin" href="https://frameline-admin.pages.dev/login">Sign in</a>
+      <a class="btn btn-gold" href="https://frameline-admin.pages.dev/login">Start free</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero" style="padding:0">
+    <div class="wrap">
+      <div>
+        <span class="eyebrow">For Indian wedding &amp; event studios</span>
+        <h1>Wedding galleries guests <em>actually open.</em></h1>
+        <p class="lead">Upload the shoot or bring it in from Google Drive. Send one link and a PIN on WhatsApp. Guests see every photo on their phone in seconds: no app, no sign-up maze.</p>
+        <div class="ctas">
+          <a class="btn btn-gold" href="https://frameline-admin.pages.dev/login">Start your 14-day free trial <svg aria-hidden="true"><use href="#arrow"/></svg></a>
+          <a class="btn btn-ghost" data-wa="Hi, I'd like to know more about Frameline for my studio." href="https://wa.me/919109192065"><svg aria-hidden="true"><use href="#wa"/></svg>Talk to us on WhatsApp</a>
+        </div>
+        <p class="fine">No card needed. Sign in with Google and make your first gallery in minutes.</p>
+      </div>
+      <div class="stage" aria-hidden="true">
+        <div class="desk"><div class="bar"><i></i><i></i><i></i></div><img src="/img/studio-home.webp" width="1600" height="803" alt="" /></div>
+        <div class="phone"><img src="/img/guest-home.webp" width="640" height="1385" alt="" /></div>
+        <div class="phone second"><img src="/img/guest-pin.webp" width="640" height="1385" alt="" /></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="strip">
+    <div class="wrap">
+      <span><svg aria-hidden="true"><use href="#phone"/></svg>Opens in any phone browser</span>
+      <span><svg aria-hidden="true"><use href="#wa"/></svg>Share on WhatsApp</span>
+      <span><svg aria-hidden="true"><use href="#drive"/></svg>Google Drive import</span>
+      <span><svg aria-hidden="true"><use href="#lock"/></svg>PIN-protected galleries</span>
+      <span><svg aria-hidden="true"><use href="#stamp"/></svg>Your watermark</span>
+    </div>
+  </div>
+
+  <section class="problem">
+    <div class="wrap">
+      <div class="head center">
+        <span class="eyebrow">The Monday after the wedding</span>
+        <h2>2,000 beautiful photos shouldn’t end up as a Drive link nobody opens.</h2>
+      </div>
+      <div class="compare">
+        <div class="before">
+          <h3>A shared folder</h3>
+          <ul>
+            <li><svg aria-hidden="true"><use href="#x"/></svg>Asks guests to sign in, or opens to a wall of file names</li>
+            <li><svg aria-hidden="true"><use href="#x"/></svg>Haldi, mehendi and reception all in one long scroll</li>
+            <li><svg aria-hidden="true"><use href="#x"/></svg>Anyone with the link can see everything, forever</li>
+            <li><svg aria-hidden="true"><use href="#x"/></svg>Your name is nowhere on it</li>
+          </ul>
+        </div>
+        <div class="after">
+          <h3>A Frameline gallery</h3>
+          <ul>
+            <li><svg aria-hidden="true"><use href="#check"/></svg>Opens straight to the photos on any phone</li>
+            <li><svg aria-hidden="true"><use href="#check"/></svg>An album for each function, plus highlights</li>
+            <li><svg aria-hidden="true"><use href="#check"/></svg>A PIN, and you choose who can download what</li>
+            <li><svg aria-hidden="true"><use href="#check"/></svg>Your studio name, cover and watermark on every gallery</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <div class="head">
+        <span class="eyebrow">How it works</span>
+        <h2>From the last photo to every guest’s phone in three steps.</h2>
+      </div>
+      <div class="steps">
+        <div class="step"><div class="n">1</div><h3>Create the event</h3><p>Name, date and city. Pick who it’s for (the family only, or every guest) and Frameline sets the privacy for you.</p></div>
+        <div class="step"><div class="n">2</div><h3>Add the photos</h3><p>Drag in the shoot from your computer, or pick folders from Google Drive. Each folder becomes an album. Photos show up for guests as they land.</p></div>
+        <div class="step"><div class="n">3</div><h3>Share once</h3><p>Send the link and PIN on WhatsApp, or put the QR poster at the venue. Guests open it, browse and download.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" style="background:var(--surface);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+    <div class="wrap">
+      <div class="row">
+        <div class="copy">
+          <span class="eyebrow">For the studio</span>
+          <h2>Every event, on one calm screen.</h2>
+          <p>See what’s live, what’s still uploading and what needs you, like guest photos waiting for your OK.</p>
+          <ul class="ticks">
+            <li><svg aria-hidden="true"><use href="#check"/></svg>Upload thousands of photos straight from the browser</li>
+            <li><svg aria-hidden="true"><use href="#check"/></svg>Albums per function, highlights picked for you</li>
+            <li><svg aria-hidden="true"><use href="#check"/></svg>Your team adds photos too: editors and upload-only shooters</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="/img/studio-home.webp" width="1600" height="803" alt="The studio home: events with their status, and a Needs you list of things to review" loading="lazy" /></div>
+      </div>
+
+      <div class="row flip">
+        <div class="copy">
+          <span class="eyebrow">Google Drive</span>
+          <h2>Already in Google Drive? Bring it straight in.</h2>
+          <p>Pick folders in Google’s own window; Frameline copies the photos and turns each folder into an album. Nothing to download and upload again.</p>
+          <ul class="ticks">
+            <li><svg aria-hidden="true"><use href="#check"/></svg>Haldi/, Sangeet/, Reception/ become three albums</li>
+            <li><svg aria-hidden="true"><use href="#check"/></svg>Or keep the full-size files in your own Drive</li>
+            <li><svg aria-hidden="true"><use href="#check"/></svg>Frameline only sees the files you pick</li>
+          </ul>
+        </div>
+        <div class="shot"><img src="/img/studio-event.webp" width="1600" height="858" alt="An event's photos in albums, with From Drive next to Upload" loading="lazy" /></div>
+      </div>
+
+      <div class="row">
+        <div class="copy">
+          <span class="eyebrow">For guests</span>
+          <h2>A gallery that feels like it was made for their phone.</h2>
+          <p>Because it was. Guests tap the link, type the PIN and they’re in, in a browser they already have.</p>
+          <ul class="ticks">
+            <li><svg aria-hidden="true"><use href="#check"/></svg>Albums, favourites, and download the photos they love</li>
+            <li><svg aria-hidden="true"><use href="#check"/></svg>Download a whole album at once</li>
+            <li><svg aria-hidden="true"><use href="#check"/></svg>Guests can add their own photos for you to approve</li>
+          </ul>
+        </div>
+        <div class="phones" aria-hidden="true">
+          <div class="phone"><img src="/img/guest-home.webp" width="640" height="1385" alt="" loading="lazy" /></div>
+          <div class="phone"><img src="/img/guest-all.webp" width="640" height="1385" alt="" loading="lazy" /></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="head">
+        <span class="eyebrow">Everything else you need</span>
+        <h2>The small things that make a studio look big.</h2>
+      </div>
+      <div class="grid">
+        <div class="card"><div class="ic"><svg aria-hidden="true"><use href="#lock"/></svg></div><h3>PIN and privacy</h3><p>Each gallery has its own PIN. Change it any time; guests already inside stay in.</p></div>
+        <div class="card"><div class="ic"><svg aria-hidden="true"><use href="#stamp"/></svg></div><h3>Your watermark</h3><p>Your logo on every guest download, placed where you want it.</p></div>
+        <div class="card"><div class="ic"><svg aria-hidden="true"><use href="#qr"/></svg></div><h3>QR poster for the venue</h3><p>Print it for the welcome desk. Guests scan and land on the gallery.</p></div>
+        <div class="card"><div class="ic"><svg aria-hidden="true"><use href="#drop"/></svg></div><h3>Download controls</h3><p>Let guests save web-size or full-size photos, whole albums, or nothing at all.</p></div>
+        <div class="card"><div class="ic"><svg aria-hidden="true"><use href="#upload"/></svg></div><h3>Guest uploads</h3><p>Guests share what they shot on their phones. Nothing shows until you approve it.</p></div>
+        <div class="card"><div class="ic"><svg aria-hidden="true"><use href="#users"/></svg></div><h3>Guest list</h3><p>Ask guests for a name and phone number before they browse, so you know who came.</p></div>
+        <div class="card"><div class="ic"><svg aria-hidden="true"><use href="#users"/></svg></div><h3>Your team</h3><p>Invite editors and second shooters. Upload-only roles can’t delete or share.</p></div>
+        <div class="card"><div class="ic"><svg aria-hidden="true"><use href="#chart"/></svg></div><h3>Reports</h3><p>See how many guests opened each gallery, so you know which ones land.</p></div>
+        <div class="card"><div class="ic"><svg aria-hidden="true"><use href="#heart"/></svg></div><h3>Your studio page</h3><p>Your name and cover on every gallery, and a page guests can follow.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sa">
+    <div class="wrap box">
+      <div>
+        <span class="eyebrow">Works with Studio AutoPilot</span>
+        <h2>Already run your studio on Studio AutoPilot?</h2>
+        <p>Frameline lives right inside it. Make a gallery from a project, open it without signing in again, and see when photos land, all next to your enquiries, shoots and payments.</p>
+        <a class="more" href="https://studioautopilot.in" target="_blank" rel="noopener">About Studio AutoPilot →</a>
+      </div>
+      <ul>
+        <li><svg aria-hidden="true"><use href="#link"/></svg><div><b>One click from a project</b><span>Create gallery on the project; it opens ready to upload.</span></div></li>
+        <li><svg aria-hidden="true"><use href="#folder"/></svg><div><b>Drive imports included</b><span>Studio AutoPilot’s Pro and Studio Max plans cover Google Drive galleries.</span></div></li>
+        <li><svg aria-hidden="true"><use href="#phone"/></svg><div><b>Still works on its own</b><span>Studios without Studio AutoPilot use Frameline just the same.</span></div></li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <div class="wrap">
+      <div class="head center">
+        <span class="eyebrow">Pricing</span>
+        <h2>Pay for the photos you keep, not per gallery.</h2>
+        <p>Every plan has unlimited events. Pick by how many photos you keep at once.</p>
+      </div>
+      <div class="trial">
+        <div><h3>Try it free for 14 days</h3><p>Up to 50,000 photos, every feature, no card. Keep your galleries when you pick a plan.</p></div>
+        <a class="btn btn-gold" href="https://frameline-admin.pages.dev/login">Start free trial</a>
+      </div>
+      <div class="plans">
+        <div class="plan"><h3>Starter</h3><div class="price">₹8,490</div><div class="per">a year + GST</div>
+          <ul><li><b>50,000</b> photos</li><li><b>5</b> team members</li><li>Unlimited events</li></ul>
+          <a class="btn btn-line" data-wa="Hi, I'd like the Starter plan for my Frameline studio." href="https://wa.me/919109192065"><svg aria-hidden="true"><use href="#wa"/></svg>WhatsApp us</a></div>
+        <div class="plan pick"><h3>Studio</h3><div class="price">₹15,990</div><div class="per">a year + GST</div>
+          <ul><li><b>1,00,000</b> photos</li><li><b>8</b> team members</li><li>Unlimited events</li></ul>
+          <a class="btn btn-gold" data-wa="Hi, I'd like the Studio plan for my Frameline studio." href="https://wa.me/919109192065"><svg aria-hidden="true"><use href="#wa"/></svg>WhatsApp us</a></div>
+        <div class="plan"><h3>Pro</h3><div class="price">₹38,490</div><div class="per">a year + GST</div>
+          <ul><li><b>2,50,000</b> photos</li><li><b>15</b> team members</li><li>Unlimited events</li></ul>
+          <a class="btn btn-line" data-wa="Hi, I'd like the Pro plan for my Frameline studio." href="https://wa.me/919109192065"><svg aria-hidden="true"><use href="#wa"/></svg>WhatsApp us</a></div>
+        <div class="plan"><h3>Agency</h3><div class="price">₹57,990</div><div class="per">a year + GST</div>
+          <ul><li><b>5,00,000</b> photos</li><li><b>25</b> team members</li><li>Unlimited events</li></ul>
+          <a class="btn btn-line" data-wa="Hi, I'd like the Agency plan for my Frameline studio." href="https://wa.me/919109192065"><svg aria-hidden="true"><use href="#wa"/></svg>WhatsApp us</a></div>
+      </div>
+      <p class="note">Message us on WhatsApp and our team sets your plan up. Need more photos or a custom plan? Just ask.</p>
+    </div>
+  </section>
+
+  <section id="faq" style="padding-top:0">
+    <div class="wrap">
+      <div class="head center"><span class="eyebrow">Questions</span><h2>Things studios ask us.</h2></div>
+      <div class="faq">
+        <details><summary>Do guests need to install an app or make an account?</summary><p>No. The gallery opens in the phone’s browser. Guests type the PIN you shared and they’re in. You can ask them for a name and phone number first if you want to know who visited.</p></details>
+        <details><summary>Can I bring in photos that are already in Google Drive?</summary><p>Yes. Connect Google Drive once, then pick folders or photos in Google’s own window. Each folder becomes an album. Frameline only sees the files you pick. You can also keep the full-size files in your own Drive.</p></details>
+        <details><summary>Will my photos lose quality?</summary><p>Guests browse a sharp 2048 px copy that loads fast on mobile data. Your originals stay as you uploaded them, and you decide whether guests can download them full-size.</p></details>
+        <details><summary>How long does a gallery stay open?</summary><p>A year from the event date (or from when you create it, for an event already past). After that you can renew it for another year in one click.</p></details>
+        <details><summary>Can guests download every photo?</summary><p>You choose, per event: web-size, full-size, whole albums at once, or no downloads. Downloads carry your watermark if you turn it on.</p></details>
+        <details><summary>What happens after the free trial?</summary><p>Message us on WhatsApp and we set up the plan that fits. Your galleries stay open either way.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <div class="final">
+    <div class="wrap">
+      <div class="box">
+        <h2>Deliver your next wedding on Frameline.</h2>
+        <p>Sign in with Google, make a gallery and send it to the couple tonight. Free for 14 days.</p>
+        <div class="ctas">
+          <a class="btn btn-gold" href="https://frameline-admin.pages.dev/login">Start your free trial <svg aria-hidden="true"><use href="#arrow"/></svg></a>
+          <a class="btn btn-ghost" data-wa="Hi, I'd like to know more about Frameline for my studio." href="https://wa.me/919109192065"><svg aria-hidden="true"><use href="#wa"/></svg>WhatsApp us</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <a class="logo" href="#top"><svg aria-hidden="true"><use href="#mark"/></svg>Frameline</a>
+    <nav aria-label="Footer">
+      <a href="https://frameline-admin.pages.dev/login">Sign in</a>
+      <a href="#pricing">Pricing</a>
+      <a href="https://frameline-admin.pages.dev/terms.html">Terms</a>
+      <a href="https://frameline-admin.pages.dev/privacy.html">Privacy</a>
+      <a href="https://wa.me/919109192065">WhatsApp</a>
+    </nav>
+    <span>© <span id="yr">2026</span> Grateful World Ventures (OPC) Private Limited</span>
+  </div>
+</footer>
+
+<script>
+  // WhatsApp buttons open with the request already written.
+  document.querySelectorAll('[data-wa]').forEach(function (a) {
+    a.href = 'https://wa.me/919109192065?text=' + encodeURIComponent(a.getAttribute('data-wa'))
+    a.target = '_blank'; a.rel = 'noopener'
+  })
+  document.getElementById('yr').textContent = new Date().getFullYear()
+</script>
+</body>
+</html>

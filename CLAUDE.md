@@ -19,6 +19,7 @@ pnpm 8 monorepo (turbo). On the owner's Windows PC, put pnpm first: `$env:Path =
 | `apps/api` | Cloudflare Worker (Hono + zod-openapi), D1 (drizzle), R2, KV, Queues, Vectorize, Durable Objects. `/v1/*` |
 | `apps/admin` | Studio app (Vite + React), Cloudflare Pages `frameline-admin.pages.dev` |
 | `apps/gallery` | Guest gallery (Vite + React), `frameline-gallery.pages.dev` |
+| `apps/site` | Public landing page: plain HTML, no build (`index.html`, `img/`, `_headers`), Pages `frameline-site.pages.dev`. Its prices mirror `PLANS` in packages/shared/src/seed.ts and its claims must stay true (no AI face search or selling while those are off): change both together |
 | `apps/processor` | Node service for the VPS: face detection (YuNet) + embeddings (SFace), EXIF, download renditions, watermark burn-in |
 | `apps/mobile` | Expo app, **paused** (CI typechecks it as advisory only) |
 | `packages/shared` | Types, the in-browser **mock API** (sample data, `api.ts`), the HTTP client (`http.ts`), rules, help guides |
